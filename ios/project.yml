@@ -1,0 +1,71 @@
+name: Phrasedeck
+options:
+  bundleIdPrefix: dev.ericdahl
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Phrasedeck:
+    type: application
+    platform: iOS
+    sources: [Phrasedeck]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.ericdahl.phrasedeck
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+    info:
+      path: Phrasedeck/Info.plist
+      properties:
+        CFBundleDisplayName: phrasedeck
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad:
+          [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown,
+           UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        # The helper is plain HTTP inside the tailnet: *.ts.net plus bare
+        # tailnet names and IPs. No Bonjour (deferred, #11).
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            ts.net:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
+        # No encryption beyond what the OS provides (TestFlight export compliance).
+        ITSAppUsesNonExemptEncryption: false
+    # No iCloud capability or entitlement until the sync slice (#10).
+  PhrasedeckTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [PhrasedeckTests]
+    dependencies:
+      - target: Phrasedeck
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        # Hosted in the app so Keychain calls have an app's entitlements.
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Phrasedeck.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Phrasedeck"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+  PhrasedeckUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [PhrasedeckUITests]
+    dependencies:
+      - target: Phrasedeck
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Phrasedeck
+schemes:
+  Phrasedeck:
+    build:
+      targets:
+        Phrasedeck: all
+    test:
+      targets: [PhrasedeckTests, PhrasedeckUITests]

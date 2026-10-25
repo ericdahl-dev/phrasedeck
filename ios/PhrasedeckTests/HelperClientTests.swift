@@ -17,6 +17,62 @@ struct HelperClientTests {
         return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
+    // MARK: routes
+
+    @Test func theLANRouteUsesHTTPSToTheLANAddress() async throws {
+        StubURLProtocol.reset(.status(200))
+        let lan = HelperClient(helper: helper, token: "tok-123",
+                               route: .lan(host: "192.168.1.20", port: 47812, pin: TestCerts.helperPin),
+                               session: StubURLProtocol.session())
+
+        try await lan.type(text: "yes", enter: true)
+
+        let request = try #require(StubURLProtocol.requests.first?.request)
+        #expect(request.url?.absoluteString == "https://192.168.1.20:47812/type")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
+    }
+
+    @Test func aPinMismatchIsItsOwnFailureNotNoReply() {
+        #expect(HelperClient.failure(for: .cancelled, pinMismatched: true) == .pinMismatch)
+        #expect(HelperClient.failure(for: .serverCertificateUntrusted, pinMismatched: true) == .pinMismatch)
+        #expect(HelperClient.failure(for: .cancelled, pinMismatched: false) == .noReply)
+    }
+
+    // MARK: info and pairing fields
+
+    @Test func infoReadsTheFingerprintAndLANPortWithAuth() async throws {
+        StubURLProtocol.reset(.status(200, body: Data(#"{"certSHA256":"\#(TestCerts.helperPin)","lanPort":47812}"#.utf8)))
+
+        let info = try await client().info()
+
+        #expect(info == LANInfo(certSHA256: TestCerts.helperPin, lanPort: 47812))
+        let request = try #require(StubURLProtocol.requests.first?.request)
+        #expect(request.url?.absoluteString == "http://erics-mac:47811/info")
+        #expect(request.httpMethod == "GET")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
+    }
+
+    @Test func infoFromAnOldHelperIsEmpty() async throws {
+        StubURLProtocol.reset(.status(404))
+        #expect(try await client().info() == LANInfo(certSHA256: nil, lanPort: nil))
+    }
+
+    @Test func pairReturnsTheLANFieldsWhenTheHelperSendsThem() async throws {
+        StubURLProtocol.reset(.status(200, body: Data(#"{"token":"t","certSHA256":"\#(TestCerts.helperPin.uppercased())","lanPort":47812}"#.utf8)))
+
+        let pairing = try await client(token: nil).pair(code: "123456", device: "iPhone")
+
+        #expect(pairing == Pairing(token: "t", certSHA256: TestCerts.helperPin, lanPort: 47812))
+    }
+
+    @Test func aBadFingerprintFromTheHelperIsDropped() async throws {
+        StubURLProtocol.reset(.status(200, body: Data(#"{"token":"t","certSHA256":"nope","lanPort":0}"#.utf8)))
+
+        let pairing = try await client(token: nil).pair(code: "123456", device: "iPhone")
+
+        #expect(pairing == Pairing(token: "t", certSHA256: nil, lanPort: nil))
+    }
+
     // MARK: type
 
     @Test func anIPv6HostIsBracketedInTheURL() async throws {
@@ -83,9 +139,9 @@ struct HelperClientTests {
     @Test func pairPostsCodeAndDeviceWithoutAuthAndReturnsTheToken() async throws {
         StubURLProtocol.reset(.status(200, body: Data(#"{"token":"long-lived"}"#.utf8)))
 
-        let token = try await client(token: nil).pair(code: "123456", device: "Eric's iPhone")
+        let pairing = try await client(token: nil).pair(code: "123456", device: "Eric's iPhone")
 
-        #expect(token == "long-lived")
+        #expect(pairing == Pairing(token: "long-lived", certSHA256: nil, lanPort: nil))
         let sent = StubURLProtocol.requests
         #expect(sent.count == 1)
         let request = try #require(sent.first?.request)

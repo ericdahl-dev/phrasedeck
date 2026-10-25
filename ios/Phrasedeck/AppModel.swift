@@ -5,7 +5,8 @@ import Observation
 /// in tests and UI tests.
 protocol HelperAPI: Sendable {
     func health() async throws -> Health
-    func pair(code: String, device: String) async throws -> String
+    func pair(code: String, device: String) async throws -> Pairing
+    func info() async throws -> LANInfo
     func type(text: String, enter: Bool) async throws
 }
 
@@ -82,6 +83,8 @@ final class AppModel {
         case .rateLimited: return Feedback(tone: .red, message: "Too many sends. Wait a moment.")
         case .noPairingWindow: return Feedback(tone: .red, message: "Run phrased pair on \(name) first.")
         case let .server(code): return Feedback(tone: .red, message: "\(name) failed (error \(code))")
+        case .pinMismatch:
+            return Feedback(tone: .red, message: "\(name)'s certificate didn't match, so nothing was sent. Scan its QR code to pair again.")
         }
     }
 
@@ -149,7 +152,7 @@ final class AppModel {
         let code = code.filter(\.isNumber)
         guard code.count == 6 else { return "Enter the 6-digit code from phrased pair." }
         do {
-            let token = try await makeClient(helper, nil).pair(code: code, device: device)
+            let token = try await makeClient(helper, nil).pair(code: code, device: device).token
             try tokens.set(token, for: helper.id)
             return nil
         } catch HelperClient.Failure.noPairingWindow {

@@ -8,7 +8,8 @@ final class FakeHelperAPI: HelperAPI, @unchecked Sendable {
     private var _typed: [(text: String, enter: Bool)] = []
     private var _paired: [(code: String, device: String)] = []
     var typeError: HelperClient.Failure?
-    var pairResult: Result<String, HelperClient.Failure> = .success("new-token")
+    var pairResult: Result<Pairing, HelperClient.Failure> = .success(Pairing(token: "new-token"))
+    var infoResult: Result<LANInfo, HelperClient.Failure> = .success(LANInfo(certSHA256: nil, lanPort: nil))
     var healthResult: Result<Health, HelperClient.Failure> =
         .success(Health(hostname: "lib-2833", os: "darwin", accessibilityOK: true))
 
@@ -20,12 +21,14 @@ final class FakeHelperAPI: HelperAPI, @unchecked Sendable {
         if let typeError { throw typeError }
     }
 
-    func pair(code: String, device: String) async throws -> String {
+    func pair(code: String, device: String) async throws -> Pairing {
         lock.withLock { _paired.append((code, device)) }
         return try pairResult.get()
     }
 
     func health() async throws -> Health { try healthResult.get() }
+
+    func info() async throws -> LANInfo { try infoResult.get() }
 }
 
 @MainActor

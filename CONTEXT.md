@@ -17,7 +17,7 @@ A Helper is Ready when it has everything it needs to type on its Computer (the O
 _Avoid_: healthy, enabled, authorized
 
 **Button**:
-A tile on a Page: a label, a color and a size, holding one Phrase.
+A pressable area on a Page: a label, a color and a Size, holding one Phrase.
 _Avoid_: key, tile, shortcut
 
 **Phrase**:
@@ -37,7 +37,7 @@ The grid's unit cell on one phone or iPad. Pinching the Deck changes how big a S
 _Avoid_: cell, zoom, scale, grid density
 
 **Size** (of a Button):
-How many Squares a Button covers, from 1x1 to 3x3 (for example 2x1). The same everywhere the Deck appears.
+How many Squares a Button covers, from 1x1 to 3x3 (for example 2x1). It's the same everywhere the Deck appears, but a Page narrower than the Size shows the Button only as wide as the Page.
 _Avoid_: span
 
 ## Reaching a Computer
@@ -73,7 +73,7 @@ The 6 digits the Helper shows during a Pairing window.
 _Avoid_: PIN (it clashes with Pin), OTP, password
 
 **Pairing link**:
-What the QR code holds: the Pairing code, where to reach the Computer, and its Pin.
+What the QR code holds: the Pairing code, where to reach the Computer, and its Pin when the Home network route is on.
 _Avoid_: QR (that's only how it's shown), invite link
 
 **Token**:

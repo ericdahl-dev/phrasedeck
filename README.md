@@ -178,15 +178,13 @@ everything.
 Installs on Eric's iPhone and iPad go through internal TestFlight only: no external testers, no
 Beta App Review and no App Store release. Day-to-day development still runs straight from Xcode.
 
-### One-time setup (Eric, in a browser)
+### One-time setup (Eric, in App Store Connect)
 
-1. **Bundle ID.** developer.apple.com > Account > Certificates, Identifiers & Profiles >
-   Identifiers. If `dev.ericdahl.phrasedeck` isn't listed (running from Xcode may already have
-   added it), click +, choose App IDs > App, enter the description `phrasedeck` and the explicit
-   bundle ID `dev.ericdahl.phrasedeck`, then Continue > Register. No capabilities are needed.
-2. **App record.** appstoreconnect.apple.com > Apps > + > New App: platform iOS, name
-   `phrasedeck` (or any free name; it's only shown in TestFlight), primary language English (U.S.),
-   bundle ID `dev.ericdahl.phrasedeck`, SKU `phrasedeck`, user access Full Access > Create.
+1. **Bundle ID** (done): the explicit App ID `dev.ericdahl.phrasedeck` is registered, with iCloud
+   on for the sync slice (#10).
+2. **App record** (done): "phrasedeck by Eric Dahl", Apple ID 6826742858, SKU `phrasedeck`,
+   primary language English (U.S.). The plain name was taken on the App Store; the home screen
+   still shows `phrasedeck` from `CFBundleDisplayName`.
 3. **Internal group.** In the new app, TestFlight > Internal Testing > + : name it `Eric`, leave
    "Enable automatic distribution" on, then add yourself as the only tester.
 4. **API key.** Users and Access > Integrations > App Store Connect API > Team Keys > +: name

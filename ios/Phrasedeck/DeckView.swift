@@ -1,15 +1,14 @@
 import SwiftData
 import SwiftUI
 
-/// One page per swipe, each a 3-column grid of phrase buttons and a "+" tile. Long-press a
-/// button to edit or delete it. The iPad grid is #12.
+/// One page per swipe, each a grid of phrase buttons and a "+" tile. Long-press a button to
+/// edit or delete it.
 struct DeckView: View {
     @Query(sort: \Page.order) private var pages: [Page]
     @Environment(\.modelContext) private var context
     @State private var editing: PhraseEditor.Target?
     @State private var editingPages = false
-
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         Group {
@@ -23,7 +22,7 @@ struct DeckView: View {
                 TabView {
                     ForEach(pages) { page in
                         ScrollView {
-                            LazyVGrid(columns: columns, spacing: 12) {
+                            LazyVGrid(columns: DeckGrid.columns(for: sizeClass), spacing: 12) {
                                 ForEach(page.sortedPhrases) { phrase in
                                     PhraseButton(phrase: phrase,
                                                  edit: { editing = .existing(phrase) },
@@ -66,5 +65,17 @@ struct DeckView: View {
     private func remove(_ phrase: Phrase) {
         withAnimation { Deck.delete(phrase, in: context) }
         try? context.save()
+    }
+}
+
+/// Three columns on the iPhone; on the iPad (and its wide split views) as many columns as fit
+/// at a comfortable button width, in either orientation.
+enum DeckGrid {
+    static let minimumButtonWidth: CGFloat = 150
+
+    static func columns(for sizeClass: UserInterfaceSizeClass?) -> [GridItem] {
+        sizeClass == .regular
+            ? [GridItem(.adaptive(minimum: minimumButtonWidth), spacing: 12)]
+            : Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
     }
 }

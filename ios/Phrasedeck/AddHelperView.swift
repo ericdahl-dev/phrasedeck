@@ -25,9 +25,10 @@ struct AddHelperView: View {
             Form {
                 if let confirming {
                     Section {
-                        Text(confirming.host)
+                        let shown = confirming.host ?? "\(confirming.lan ?? "") on the home network"
+                        Text(shown)
                             .font(.callout.monospaced())
-                            .accessibilityIdentifier(confirming.host)
+                            .accessibilityIdentifier(confirming.host ?? confirming.lan ?? "")
                         Button("Pair with \(confirming.name)") { pair(confirming) }
                             .font(.headline)
                             .disabled(working)

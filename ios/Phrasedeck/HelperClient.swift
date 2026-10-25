@@ -59,6 +59,8 @@ struct HelperClient: Sendable {
         case server(Int)
         /// The LAN certificate wasn't the pinned one: nothing was sent.
         case pinMismatch
+        /// A LAN IP or .local name on the plain-HTTP route: refused, nothing sent.
+        case notTailnet
     }
 
     static let timeout: TimeInterval = 3
@@ -138,6 +140,8 @@ struct HelperClient: Sendable {
         case .tailnet: ("http", helper.host, helper.port)
         case let .lan(host, port, _): ("https", host, port)
         }
+        // The token never goes over plain HTTP to a LAN address or .local name.
+        if route == .tailnet, !PairLink.isTailnetRouteHost(host) { throw Failure.notTailnet }
         var components = URLComponents()
         components.scheme = scheme
         // URLComponents wants IPv6 literals in brackets.

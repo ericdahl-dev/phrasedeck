@@ -32,6 +32,15 @@ struct HelperClientTests {
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
     }
 
+    @Test(arguments: ["192.168.1.20", "fe80::1", "mac.local"])
+    func theTailnetRouteNeverSendsPlainHTTPToALANHost(host: String) async {
+        StubURLProtocol.reset(.status(200))
+        let c = HelperClient(helper: Helper(name: "m", host: host), token: "tok", session: StubURLProtocol.session())
+
+        await #expect(throws: HelperClient.Failure.notTailnet) { try await c.type(text: "x", enter: false) }
+        #expect(StubURLProtocol.requests.isEmpty)
+    }
+
     @Test func aPinMismatchIsItsOwnFailureNotNoReply() {
         #expect(HelperClient.failure(for: .cancelled, pinMismatched: true) == .pinMismatch)
         #expect(HelperClient.failure(for: .serverCertificateUntrusted, pinMismatched: true) == .pinMismatch)

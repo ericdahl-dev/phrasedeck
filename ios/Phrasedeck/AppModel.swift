@@ -67,16 +67,24 @@ final class AppModel {
         guard let helper = selectedHelper else {
             return show(Feedback(tone: .red, message: "Add a computer first."))
         }
+        let route = route(for: helper)
         do {
-            // One attempt per route: the tailnet only when the LAN refused the connection,
-            // so nothing reached the helper; a LAN timeout may have typed.
-            let route = route(for: helper)
-            do {
-                try await client(for: helper, route).type(text: text, enter: enter)
-            } catch HelperClient.Failure.unreachable where route != .tailnet {
-                try await client(for: helper, .tailnet).type(text: text, enter: enter)
-            }
+            try await client(for: helper, route).type(text: text, enter: enter)
             return show(Feedback(tone: .success, message: nil))
+        } catch let failure as HelperClient.Failure where route != .tailnet && helper.hasTailnetHost
+                    && (failure == .unreachable || failure == .pinMismatch) {
+            // Nothing reached the helper (refused, or a wrong certificate before the token was
+            // sent), so the tailnet gets one try. A LAN timeout may have typed: never retried.
+            do {
+                try await client(for: helper, .tailnet).type(text: text, enter: enter)
+                return show(Feedback(tone: .success, message: failure == .pinMismatch
+                    ? "Sent over the tailnet: on the home network, \(helper.name) showed a different certificate. Scan its QR code to pair again."
+                    : nil))
+            } catch let tailnetFailure as HelperClient.Failure {
+                return show(Self.feedback(for: failure == .pinMismatch ? failure : tailnetFailure, on: helper))
+            } catch {
+                return show(Feedback(tone: .red, message: "\(helper.name): \(error.localizedDescription)"))
+            }
         } catch let failure as HelperClient.Failure {
             return show(Self.feedback(for: failure, on: helper))
         } catch {
@@ -97,6 +105,8 @@ final class AppModel {
         case .rateLimited: return Feedback(tone: .red, message: "Too many sends. Wait a moment.")
         case .noPairingWindow: return Feedback(tone: .red, message: "Run phrased pair on \(name) first.")
         case let .server(code): return Feedback(tone: .red, message: "\(name) failed (error \(code))")
+        case .notTailnet:
+            return Feedback(tone: .red, message: "\(name) isn't a tailnet name, so nothing was sent. Pair it again by scanning its QR code.")
         case .pinMismatch:
             return Feedback(tone: .red, message: "\(name)'s certificate didn't match, so nothing was sent. Scan its QR code to pair again.")
         }
@@ -120,6 +130,11 @@ final class AppModel {
         if route != .tailnet, let health = try? await client(for: helper, route).health() {
             statuses[helper.id] = health.accessibilityOK ? .reachable : .notReady
             statusRoutes[helper.id] = .home
+            return
+        }
+        guard helper.hasTailnetHost else {
+            statuses[helper.id] = .unreachable
+            statusRoutes[helper.id] = nil
             return
         }
         do {
@@ -150,6 +165,10 @@ final class AppModel {
     /// The LAN, pinned, when the computer is nearby and has a fingerprint
     /// from a trusted channel; otherwise the tailnet.
     func route(for helper: Helper) -> HelperClient.Route {
+        // Paired with Tailscale off: only its pinned LAN address.
+        if !helper.hasTailnetHost, let pin = helper.certSHA256, let lanHost = helper.lanHost {
+            return .lan(host: lanHost, port: helper.lanPort ?? PairLink.defaultLANPort, pin: pin)
+        }
         guard let pin = helper.certSHA256,
               let address = nearby.first(where: { Helper.sameMachine(helper.host, $0.tailnetName) })?.address
         else { return .tailnet }
@@ -169,42 +188,60 @@ final class AppModel {
 
     // MARK: computers
 
+    /// What a scanned QR code vouches for: the certificate fingerprint, and
+    /// the LAN address and port to pair over.
+    private struct QRTrust {
+        let fingerprint: String
+        let lan: String?
+        let lanPort: Int
+    }
+
     /// Pairs with a new computer by tailnet name and adds it only once
     /// pairing worked. Returns a message to show, or nil on success.
     func addHelper(host: String, port: Int?, code: String) async -> String? {
-        await addHelper(host: host, port: port, code: code, lan: nil)
+        let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else { return "Enter the computer's tailnet name." }
+        // The typed route is plain HTTP with the token, so only tailnet hosts.
+        guard PairLink.isTailnetRouteHost(host) else {
+            return "Use the computer's tailnet name, or scan its QR code. A home network address or .local name isn't safe over plain HTTP."
+        }
+        return await addHelper(host: host, port: port, code: code, qr: nil)
     }
 
     /// Adds or re-pairs the computer a scanned QR code names. With LAN
     /// fields it pairs over pinned TLS to that address first.
     func addHelper(from link: PairLink) async -> String? {
-        let lan = link.lan.flatMap { address in link.fingerprint.map { (address, $0) } }
-        return await addHelper(host: link.host, port: link.port, code: link.code, lan: lan)
+        let qr = link.fingerprint.map { QRTrust(fingerprint: $0, lan: link.lan, lanPort: link.lanPort) }
+        return await addHelper(host: link.host ?? "", port: link.port, code: link.code, qr: qr)
     }
 
-    private func addHelper(host: String, port: Int?, code: String, lan: (address: String, pin: String)?) async -> String? {
-        let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !host.isEmpty else { return "Enter the computer's tailnet name." }
+    private func addHelper(host: String, port: Int?, code: String, qr: QRTrust?) async -> String? {
         let port = port ?? Helper.defaultPort
-        // Scanning a computer that's already here pairs it again instead of adding a copy.
-        if let existing = helpers.first(where: { Helper.sameMachine($0.host, host) && $0.port == port }) {
-            if let error = await pairAndStore(existing, code: code, lan: lan) { return error }
+        // Scanning a computer that's already here pairs it again instead of adding a copy:
+        // the same tailnet machine, or (without a host) the same certificate.
+        let existing = helpers.first { helper in
+            host.isEmpty ? helper.certSHA256 != nil && helper.certSHA256 == qr?.fingerprint
+                : Helper.sameMachine(helper.host, host) && helper.port == port
+        }
+        if let existing {
+            if let error = await pairAndStore(existing, code: code, qr: qr) { return error }
             selectedHelperID = existing.id
             return nil
         }
-        var helper = Helper(name: Helper.displayName(for: host), host: host, port: port)
+        var helper = Helper(name: host.isEmpty ? (qr?.lan ?? "") : Helper.displayName(for: host), host: host, port: port)
+        helper.lanHost = host.isEmpty ? qr?.lan : nil
         let pairing: Pairing
-        switch await pairForToken(helper, code: code, lan: lan) {
+        switch await pairForToken(helper, code: code, qr: qr) {
         case let .success(p): pairing = p
         case let .failure(message): return message
         }
-        helper.certSHA256 = pairing.certSHA256 ?? lan?.pin
-        helper.lanPort = pairing.lanPort ?? (lan == nil ? nil : Self.lanDefaultPort)
+        helper.certSHA256 = pairing.certSHA256 ?? qr?.fingerprint
+        helper.lanPort = pairing.lanPort ?? qr?.lanPort
         do {
             try store.add(helper)
         } catch {
             try? tokens.delete(helper.id)
-            return "Couldn't save \(host): \(error.localizedDescription)"
+            return "Couldn't save \(helper.name): \(error.localizedDescription)"
         }
         helpers = store.helpers
         selectedHelperID = helper.id
@@ -213,7 +250,7 @@ final class AppModel {
 
     /// Pairs an existing computer again, replacing its token.
     func pair(_ helper: Helper, code: String) async -> String? {
-        let error = await pairAndStore(helper, code: code, lan: nil)
+        let error = await pairAndStore(helper, code: code, qr: nil)
         if error == nil, feedback?.pairAgain?.id == helper.id { feedback = nil }
         return error
     }
@@ -227,16 +264,13 @@ final class AppModel {
         if selectedHelperID == helper.id { selectedHelperID = helpers.first?.id }
     }
 
-    /// Port the LAN listener uses until /pair says otherwise.
-    static let lanDefaultPort = 47812
-
     /// Pairs an existing computer and stores its new token and fingerprint.
-    private func pairAndStore(_ helper: Helper, code: String, lan: (address: String, pin: String)?) async -> String? {
-        switch await pairForToken(helper, code: code, lan: lan) {
+    private func pairAndStore(_ helper: Helper, code: String, qr: QRTrust?) async -> String? {
+        switch await pairForToken(helper, code: code, qr: qr) {
         case let .failure(message): return message
         case let .success(pairing):
-            if let fp = pairing.certSHA256 ?? lan?.pin {
-                learn(fp, lanPort: pairing.lanPort ?? (lan == nil ? nil : Self.lanDefaultPort), for: helper.id)
+            if let fp = pairing.certSHA256 ?? qr?.fingerprint {
+                learn(fp, lanPort: pairing.lanPort ?? qr?.lanPort, for: helper.id)
             }
             return nil
         }
@@ -244,23 +278,28 @@ final class AppModel {
 
     private enum PairOutcome { case success(Pairing), failure(String) }
 
-    /// Runs /pair (over pinned TLS to the LAN address first, if given) and
-    /// saves the token. The code is single use, so the tailnet is tried only
-    /// when the LAN connection was refused outright.
-    private func pairForToken(_ helper: Helper, code: String, lan: (address: String, pin: String)?) async -> PairOutcome {
+    /// Runs /pair (over pinned TLS to the QR code's LAN address first, if it
+    /// has one) and saves the token. The code is single use, so the tailnet
+    /// is tried only when the LAN connection was refused outright, and only
+    /// for a computer with a tailnet name. A reply whose fingerprint isn't
+    /// the QR code's is rejected.
+    private func pairForToken(_ helper: Helper, code: String, qr: QRTrust?) async -> PairOutcome {
         let code = code.filter(\.isNumber)
         guard code.count == 6 else { return .failure("Enter the 6-digit code from phrased pair.") }
         do {
             let pairing: Pairing
-            if let lan {
-                let route = HelperClient.Route.lan(host: lan.address, port: Self.lanDefaultPort, pin: lan.pin)
+            if let qr, let lan = qr.lan {
+                let route = HelperClient.Route.lan(host: lan, port: qr.lanPort, pin: qr.fingerprint)
                 do {
                     pairing = try await makeClient(helper, nil, route).pair(code: code, device: device)
-                } catch HelperClient.Failure.unreachable {
+                } catch HelperClient.Failure.unreachable where helper.hasTailnetHost {
                     pairing = try await makeClient(helper, nil, .tailnet).pair(code: code, device: device)
                 }
             } else {
                 pairing = try await makeClient(helper, nil, .tailnet).pair(code: code, device: device)
+            }
+            if let qr, let fp = pairing.certSHA256, fp != qr.fingerprint {
+                return .failure("\(helper.name)'s certificate didn't match the QR code, so it wasn't added. Run phrased pair again and rescan.")
             }
             try tokens.set(pairing.token, for: helper.id)
             return .success(pairing)

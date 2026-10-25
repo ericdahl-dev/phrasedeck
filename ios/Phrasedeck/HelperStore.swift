@@ -13,9 +13,15 @@ struct Helper: Codable, Hashable, Identifiable, Sendable {
     /// /pair, the QR code or an authenticated /info; never from Bonjour.
     var certSHA256: String?
     var lanPort: Int?
+    /// The LAN address from a QR code made with Tailscale off; such a
+    /// computer has an empty `host` and is reached only this way.
+    var lanHost: String?
 
     /// The machine name from a MagicDNS name ("lib-2833" for
     /// lib-2833.tail1fdac.ts.net); other hosts as they are.
+    /// False for a computer paired with Tailscale off (#11).
+    var hasTailnetHost: Bool { !host.isEmpty }
+
     static func displayName(for host: String) -> String {
         host.hasSuffix(".ts.net") ? String(host.prefix { $0 != "." }) : host
     }

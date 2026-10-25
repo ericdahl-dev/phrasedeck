@@ -54,13 +54,17 @@ struct PairLinkTests {
 
     static let pin = String(repeating: "ab", count: 32)
 
-    @Test(arguments: ["192.168.1.20", "10.0.0.5", "172.16.0.1", "172.31.255.254", "169.254.10.1",
-                      "fd12:3456::1", "fc00::1", "fe80::1"])
+    @Test(arguments: ["192.168.1.20", "10.0.0.5", "172.16.0.1", "172.31.255.254", "fd12:3456::1", "fc00::1"])
     func privateLANAddressesWithAFingerprintParse(lan: String) throws {
         let link = try parse("phrasedeck://pair?host=mac.tail1.ts.net&code=123456&v=1&lan=\(lan)&fp=\(Self.pin)").get()
         #expect(link.lan == lan)
         #expect(link.fingerprint == Self.pin)
         #expect(link.host == "mac.tail1.ts.net")
+    }
+
+    @Test func aBracketedIPv6LANAddressIsAccepted() throws {
+        let link = try parse("phrasedeck://pair?host=mac.tail1.ts.net&code=123456&v=1&lan=%5Bfd12::1%5D&fp=\(Self.pin)").get()
+        #expect(link.lan == "fd12::1")
     }
 
     @Test func aColonFingerprintIsNormalized() throws {
@@ -85,6 +89,10 @@ struct PairLinkTests {
         ("lan=172.32.0.1&fp=\(PairLinkTests.pin)", .badLANAddress),
         ("lan=2001:db8::1&fp=\(PairLinkTests.pin)", .badLANAddress),
         ("lan=mac.local&fp=\(PairLinkTests.pin)", .badLANAddress),
+        ("lan=169.254.10.1&fp=\(PairLinkTests.pin)", .badLANAddress),
+        ("lan=fe80::1&fp=\(PairLinkTests.pin)", .badLANAddress),
+        ("lan=192.168.1.20&fp=\(PairLinkTests.pin)&lanPort=0", .badPort),
+        ("lan=192.168.1.20&fp=\(PairLinkTests.pin)&lanPort=70000", .badPort),
         ("lan=192.168.1.20:47812&fp=\(PairLinkTests.pin)", .badLANAddress),
         ("fp=abc", .badFingerprint),
         ("fp=\(String(repeating: "z", count: 64))", .badFingerprint),
@@ -93,6 +101,26 @@ struct PairLinkTests {
         #expect(throws: expected) {
             try PairLink(url: URL(string: "phrasedeck://pair?host=mac.tail1.ts.net&code=123456&v=1&\(extra)")!)
         }
+    }
+
+    /// What #37 prints with Tailscale off: no host or port.
+    @Test func aLinkWithoutAHostPairsByLANAddressAndFingerprint() throws {
+        let link = try parse("phrasedeck://pair?code=123456&fp=\(Self.pin)&lan=192.168.1.30&lanPort=47900&v=1").get()
+        #expect(link.host == nil)
+        #expect(link.lan == "192.168.1.30" && link.lanPort == 47900 && link.fingerprint == Self.pin)
+        #expect(link.name == "192.168.1.30")
+    }
+
+    @Test func lanPortDefaultsTo47812() throws {
+        let link = try parse("phrasedeck://pair?code=123456&fp=\(Self.pin)&lan=192.168.1.30&v=1").get()
+        #expect(link.lanPort == 47812)
+    }
+
+    @Test(arguments: ["phrasedeck://pair?code=123456&fp=\(PairLinkTests.pin)&v=1",
+                      "phrasedeck://pair?code=123456&lan=192.168.1.30&v=1",
+                      "phrasedeck://pair?code=123456&v=1"])
+    func withoutAHostBothLANFieldsAreNeeded(url: String) {
+        #expect(throws: (any Error).self) { try PairLink(url: URL(string: url)!) }
     }
 
     @Test func aBadHostIsRejectedEvenWithLANFields() {

@@ -148,7 +148,7 @@ struct AppModelTests {
         #expect(routes.log == [Self.lanRoute, .tailnet])
     }
 
-    @Test(arguments: [HelperClient.Failure.noReply, .pinMismatch, .unauthorized, .server(500)])
+    @Test(arguments: [HelperClient.Failure.noReply, .unauthorized, .server(500)])
     func otherLANFailuresAreNotRetriedOnTheTailnet(failure: HelperClient.Failure) async throws {
         defer { try? tokens.delete(mac.id) }
         lan.typeError = failure
@@ -160,15 +160,41 @@ struct AppModelTests {
         #expect(lan.typed.count == 1 && api.typed.isEmpty)
     }
 
-    @Test func aPinMismatchIsARedErrorThatSaysNothingWasSent() async throws {
+    /// Nothing reached the helper on a pin mismatch, so the tailnet is safe
+    /// to try once; the note says what happened, so it's never silent.
+    @Test func aPinMismatchSendsOverTheTailnetWithAVisibleNote() async throws {
         defer { try? tokens.delete(mac.id) }
         lan.typeError = .pinMismatch
         let model = try nearbyModel()
 
         let feedback = await model.send(text: "yes", enter: true)
 
+        #expect(feedback.tone == .success)
+        #expect(feedback.message?.contains("certificate") == true)
+        #expect(lan.typed.count == 1 && api.typed.count == 1)
+        #expect(routes.log == [Self.lanRoute, .tailnet])
+    }
+
+    @Test func aPinMismatchWithTheTailnetDownIsARedErrorThatSaysNothingWasSent() async throws {
+        defer { try? tokens.delete(mac.id) }
+        lan.typeError = .pinMismatch
+        api.typeError = .unreachable
+        let model = try nearbyModel()
+
+        let feedback = await model.send(text: "yes", enter: true)
+
         #expect(feedback.tone == .red)
         #expect(feedback.message?.contains("nothing was sent") == true)
+    }
+
+    @Test(arguments: ["192.168.1.20", "10.0.0.5", "fe80::1", "169.254.1.1", "8.8.8.8", "mac.local", "Mac.local."])
+    func aTypedLANAddressIsRefusedSoTheTokenNeverGoesOverPlainHTTP(host: String) async throws {
+        let model = try model(withMac: false)
+
+        let error = await model.addHelper(host: host, port: nil, code: "123456")
+
+        #expect(error?.contains("tailnet name") == true)
+        #expect(api.paired.isEmpty && lan.paired.isEmpty && model.helpers.isEmpty)
     }
 
     // MARK: fingerprint trust (#11)
@@ -269,6 +295,62 @@ struct AppModelTests {
 
         #expect(error != nil)
         #expect(lan.paired.count == 1 && api.paired.isEmpty)
+        #expect(model.helpers.isEmpty)
+    }
+
+    static let hostlessLink = PairLink(host: nil, port: 47811, code: "123456",
+                                       lan: "192.168.1.30", fingerprint: pin, lanPort: 47900)
+
+    @Test func aHostlessLinkPairsOnlyOverTheLANAndAlwaysSendsThere() async throws {
+        lan.pairResult = .success(Pairing(token: "t", certSHA256: Self.pin, lanPort: 47900))
+        let model = try model(withMac: false)
+
+        let error = await model.addHelper(from: Self.hostlessLink)
+
+        #expect(error == nil)
+        let added = try #require(model.helpers.first)
+        defer { try? tokens.delete(added.id) }
+        let route = HelperClient.Route.lan(host: "192.168.1.30", port: 47900, pin: Self.pin)
+        #expect(routes.log == [route])
+        #expect(added.lanHost == "192.168.1.30" && added.certSHA256 == Self.pin)
+        #expect(model.route(for: added) == route)
+
+        _ = await model.send(text: "x", enter: false)
+        #expect(routes.log.last == route)
+    }
+
+    @Test func aHostlessLinkIsNotRetriedOnTheTailnet() async throws {
+        lan.pairResult = .failure(.unreachable)
+        let model = try model(withMac: false)
+
+        let error = await model.addHelper(from: Self.hostlessLink)
+
+        #expect(error != nil)
+        #expect(api.paired.isEmpty && model.helpers.isEmpty)
+    }
+
+    @Test func aHostlessComputerWhoseLANFailsIsNotRetriedOnTheTailnet() async throws {
+        lan.pairResult = .success(Pairing(token: "t", certSHA256: Self.pin, lanPort: 47900))
+        let model = try model(withMac: false)
+        _ = await model.addHelper(from: Self.hostlessLink)
+        let added = try #require(model.helpers.first)
+        defer { try? tokens.delete(added.id) }
+        lan.typeError = .unreachable
+
+        let feedback = await model.send(text: "x", enter: false)
+
+        #expect(feedback.tone == .red)
+        #expect(api.typed.isEmpty)
+    }
+
+    @Test func aQRPairingWhoseResponseFingerprintDiffersIsRejected() async throws {
+        api.pairResult = .success(Pairing(token: "t", certSHA256: String(repeating: "cd", count: 32), lanPort: 47812))
+        lan.pairResult = .failure(.unreachable)
+        let model = try model(withMac: false)
+
+        let error = await model.addHelper(from: Self.lanLink)
+
+        #expect(error?.contains("QR code") == true)
         #expect(model.helpers.isEmpty)
     }
 

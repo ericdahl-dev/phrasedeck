@@ -29,6 +29,13 @@ final class SavedSpot {
         self.updated = .now
     }
 
+    /// Whether this row wins over `other` for the same Button: the newer one, and at the same
+    /// instant the earlier Spot in reading order, so every phone settles alike.
+    func wins(over other: SavedSpot) -> Bool {
+        if updated != other.updated { return updated > other.updated }
+        return (row, column) < (other.row, other.column)
+    }
+
     var spot: Spot { Spot(column: column, row: row) }
 }
 
@@ -50,7 +57,7 @@ extension Deck {
     static func saveSpots(_ spots: [String: Spot], width: LayoutWidth, in context: ModelContext) throws {
         let rows = Dictionary(grouping: saved(width, in: context), by: \.phraseUID)
         for (uid, spot) in spots {
-            let existing = (rows[uid] ?? []).sorted { $0.updated > $1.updated }
+            let existing = (rows[uid] ?? []).sorted { $0.wins(over: $1) }
             for extra in existing.dropFirst() { context.delete(extra) }
             if let row = existing.first {
                 guard row.spot != spot else { continue }
@@ -98,7 +105,7 @@ extension Deck {
 
     /// The newest row per Phrase uid.
     private static func newest(_ rows: [SavedSpot]) -> [String: SavedSpot] {
-        Dictionary(rows.map { ($0.phraseUID, $0) }, uniquingKeysWith: { $0.updated >= $1.updated ? $0 : $1 })
+        Dictionary(rows.map { ($0.phraseUID, $0) }, uniquingKeysWith: { $0.wins(over: $1) ? $0 : $1 })
     }
 
     private static func saved(_ width: LayoutWidth, in context: ModelContext) -> [SavedSpot] {

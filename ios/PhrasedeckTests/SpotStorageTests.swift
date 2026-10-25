@@ -75,6 +75,27 @@ struct SpotStorageTests {
 
     /// Two phones that each saved a Spot for the same Button sync as two rows: the newest wins, and
     /// the next save leaves one.
+    /// Rows saved at the same instant settle the same way on every phone, whatever order the store
+    /// returns them in: the earlier Spot in reading order wins.
+    @Test(arguments: [false, true])
+    func rowsWithTheSameTimeSettleTheSameWayEverywhere(reversed: Bool) throws {
+        let (page, p) = try page("Agents", ["a"])
+        let at = Date(timeIntervalSince1970: 100)
+        var synced = [SavedSpot(phraseUID: p[0].uid, width: .compact, spot: Spot(column: 0, row: 5)),
+                      SavedSpot(phraseUID: p[0].uid, width: .compact, spot: Spot(column: 2, row: 1))]
+        if reversed { synced.reverse() }
+        for row in synced {
+            row.updated = at
+            context.insert(row)
+        }
+        try context.save()
+
+        #expect(Deck.spots(on: page, width: .compact, in: context) == [p[0].uid: Spot(column: 2, row: 1)])
+        try Deck.saveSpots([:], width: .compact, in: context)
+        try Deck.saveSpots([p[0].uid: Spot(column: 2, row: 1)], width: .compact, in: context)
+        #expect(try rows(p[0].uid).map(\.spot) == [Spot(column: 2, row: 1)])
+    }
+
     @Test func ofTwoSyncedRowsTheNewestWinsAndTheNextSaveLeavesOne() throws {
         let (page, p) = try page("Agents", ["a"])
         let old = SavedSpot(phraseUID: p[0].uid, width: .compact, spot: Spot(column: 0, row: 5))

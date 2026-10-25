@@ -145,6 +145,8 @@ curl -s http://<tailnet-name>:47811/type \
   later puts back everything that was on the clipboard before (images and rich text too). If you
   copy something in that half second, your new copy is kept instead.
 - `GET /health` needs no token and returns `hostname`, `os` and `accessibility_ok`.
+- `GET /info` needs the token and returns `hostname`, plus `certSHA256` and `lanPort` when the
+  LAN route is on.
 
 Status codes:
 
@@ -169,9 +171,42 @@ Status codes:
 | `-config` | `~/.config/phrased` | directory holding `tokens.json` and `pairing.json` |
 | `-tailscale` | `tailscale` on PATH, else the Mac app's CLI | used once at startup for this machine's names |
 | `-allow-host` | none | another `Host` to accept; repeat for more |
+| `-lan` | none | a home subnet to also serve over HTTPS, like `192.168.1.0/24`; repeat for more |
+| `-lan-port` | `47812` | HTTPS port for the `-lan` subnets |
 
 If `tailscale status --json` fails, `phrased` exits: without the allowlist it would answer 403 to
-everything.
+everything. With `-lan` set it keeps running and serves only the LAN route.
+
+### Home network without Tailscale (optional)
+
+`-lan 192.168.1.0/24` (or one subnet per line in `~/.config/phrased/lan-subnets`; `#` starts a
+comment) adds a second listener:
+
+- **HTTPS on port 47812,** open only to those subnets and to tailnet peers. Each subnet must be
+  private (inside `10/8`, `172.16/12`, `192.168/16` or `fc00::/7`), so a typo can't expose the
+  helper to the internet.
+- **Its certificate** is self-signed ECDSA, made on first run as `lan-cert.pem` and `lan-key.pem`
+  (both mode 0600) in the config directory and reused after that. The app pins its SHA-256, which
+  `phrased` logs at startup, and gets it only over a trusted channel: `/pair` over the tailnet,
+  `GET /info`, or the QR code. Delete both files to make a new one, and then re-pair every device.
+- **Bonjour** advertises `_phrasedeck._tcp` on the interfaces in those subnets, as
+  `phrased-<host>.local`, with TXT `v=1`, `ts=<tailnet name>` and `port`. TXT carries no token
+  and no fingerprint.
+- **`/pair`** adds `certSHA256` and `lanPort` to its reply, and the QR code from `phrased pair`
+  adds `fp` and `lan` (this machine's LAN address). With Tailscale off, the QR code uses the LAN
+  address as its host.
+- `/pair`, `/type`, tokens, limits and lockout are the same on both listeners.
+
+Limits:
+- The LAN addresses and interfaces are read at startup; restart `phrased` after the network
+  changes.
+- The QR code has no LAN port, so QR pairing over the LAN needs the default `-lan-port`.
+- On the Mac, the firewall must allow the binary (see above); on a managed Mac that means the
+  already-allowed path.
+
+```sh
+curl -sk https://<lan-ip>:47812/health   # -k: the app pins the certificate instead
+```
 
 ## The iOS app on TestFlight
 

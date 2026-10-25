@@ -23,19 +23,46 @@ the computer.
 
 ## Network, pairing and protocol
 
-### Tailnet only
+### Tailnet route
 
 - The helper listens on all addresses on port 47811, but drops any connection whose remote
   address is outside Tailscale (`100.64.0.0/10` and `fd7a:115c:a1e0::/48`) right after accept.
-  That filter replaces picking addresses at startup. There is no LAN binding.
+  That filter replaces picking addresses at startup.
 - Computers are added in the app by scanning the QR code from `phrased pair`, or by tailnet
   name, for example `omarchy-laptop`.
-- **Bonjour is deferred**, both the helper's advertising and discovery in the app (issue #11). It
-  only helps on a LAN, and the helper no longer serves the LAN.
+- Bonjour and a LAN route are opt-in; see "Home network (LAN) route" below (#11).
 - **Host allowlist** against DNS rebinding: a request whose `Host` header (port stripped) isn't the
   machine's tailnet name, its MagicDNS name or one of its tailnet IPs gets 403. The helper reads
   those from `tailscale status --json` at startup, and a repeatable `-allow-host` flag adds names.
 - Optional hardening: a Tailscale ACL that lets only Eric's phones reach port 47811.
+
+### Home network (LAN) route
+
+Decided 2026-10-25 (#11): Tailscale stays the way in at work, and at home phrasedeck also works
+with Tailscale off, on macOS and omarchy, over an encrypted LAN route.
+
+- **Opt-in:** `-lan <cidr>` (repeatable) or `<config>/lan-subnets`. With none, nothing changes.
+  Only private subnets are accepted.
+- **Second listener:** HTTPS (TLS 1.2 or later) on 47812, open to the `-lan` subnets and tailnet
+  peers. It serves `/health`, `/pair`, `/type` and `/info` with the same handler, tokens, limits
+  and lockout as 47811, which is unchanged.
+- **Certificate:** self-signed ECDSA P-256, made once in the config dir (key 0600) and reused.
+  The pin, `certSHA256`, is the lowercase hex SHA-256 of the leaf's DER (64 characters, no
+  colons).
+- **Host allowlist** adds the machine's LAN IPs, `<host>.local` and `phrased-<host>.local`.
+- **Bonjour:** `_phrasedeck._tcp` on the LAN interfaces, from the pure-Go `brutella/dnssd`, as
+  host `phrased-<host>.local`. A separate name means phrased never publishes records for the
+  system's own `<host>.local`, which mDNSResponder or avahi owns. TXT is `v=1`,
+  `ts=<MagicDNS name, lowercase, no trailing dot>` (left out with Tailscale off) and
+  `port=47812`, with no secrets.
+- **Wire fields:** `/pair` 200 is `{"token","certSHA256","lanPort"}`, with the last two only when
+  LAN is on. `GET /info` (Bearer) is `{"certSHA256","lanPort","hostname"}`. The QR code adds
+  `fp=<64 hex>&lan=<IP literal>`, both or neither, and `v` stays 1. With Tailscale off, the QR
+  host is the LAN address.
+- **App:** browses `_phrasedeck._tcp` and calls a paired computer "nearby" when its `ts` matches.
+  It sends over `https://<lan ip>:47812` with the certificate pinned, and fails closed on a
+  mismatch, never falling back silently. The pin comes only from `/pair` over the tailnet, the
+  QR code or `/info`, never from Bonjour.
 
 ### Pairing
 
@@ -47,8 +74,7 @@ the computer.
   `phrasedeck://pair?host=<host>&port=<port>&code=<6 digits>&v=1`. The host is the machine's
   MagicDNS name from `tailscale status --json` (its tailnet IP when MagicDNS is off). The port is
   the one the running helper recorded in `~/.config/phrased/port` at startup (47811 otherwise).
-  Without Tailscale it prints only the text code. Nothing is broadcast, so this keeps the
-  tailnet-only decision; Eric chose it over Bonjour on 2026-10-24.
+  Without Tailscale it prints only the text code, unless the LAN route is on (see above).
 - **In the app**, "Add a computer" leads with **Scan QR code**, and typing the name and code still
   works. The app registers the `phrasedeck` URL scheme, so scanning with the Camera app opens the
   same flow. A link is checked before anything is contacted: the host must be a `*.ts.net` name
@@ -202,5 +228,4 @@ docs/      design and plans
 
 ## Out of scope for v1
 
-Per-app pages, sequences with delays, icons, choosing a session or window from the phone, LAN
-access, and Bonjour discovery (deferred, see #11).
+Per-app pages, sequences with delays, icons, and choosing a session or window from the phone.

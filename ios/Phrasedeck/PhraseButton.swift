@@ -6,11 +6,13 @@ struct PhraseButton: View {
     @Environment(AppModel.self) private var model
     @State private var flash: AppModel.Feedback.Tone?
     @State private var taps = 0
+    @State private var gate = ConfirmGate()
+    @State private var armed = false
 
     var body: some View {
-        Button(action: send) {
+        Button(action: tapped) {
             ZStack(alignment: .topTrailing) {
-                Text(phrase.label)
+                Text(armed ? "tap again" : phrase.label)
                     .font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.6)
@@ -36,13 +38,28 @@ struct PhraseButton: View {
         case .success: .green
         case .amber: .orange
         case .red: .red
-        case nil: Color(named: phrase.colorName)
+        case nil: armed ? Color(named: phrase.colorName).opacity(0.6) : Color(named: phrase.colorName)
         }
     }
 
-    /// One tap, one send: the result flashes, and nothing is retried.
-    private func send() {
+    /// Phrases marked confirm need a second tap within 1.5 seconds (#8).
+    private func tapped() {
         taps += 1
+        guard phrase.confirm else { return send() }
+        if gate.tap() {
+            armed = false
+            send()
+        } else {
+            armed = true
+            Task {
+                try? await Task.sleep(for: .seconds(ConfirmGate.window))
+                if !gate.isArmed() { armed = false }
+            }
+        }
+    }
+
+    /// One send per call: the result flashes, and nothing is retried.
+    private func send() {
         Task {
             let feedback = await model.send(text: phrase.text, enter: phrase.pressEnter)
             withAnimation(.easeOut(duration: 0.15)) { flash = feedback.tone }

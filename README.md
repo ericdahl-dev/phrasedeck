@@ -92,9 +92,8 @@ from the session environment uwsm imports at login, and skips starting without o
 - Typing uses `wtype`. Pasting serves the phrase once with `wl-copy --foreground --paste-once`,
   sends Ctrl+Shift+V (the terminal paste key), waits for `wl-copy` to exit (at most 2 seconds),
   and puts the old clipboard text back. Only text is restored: a copied image is lost.
-- `/health` reports `accessibility_ok: false` when `wtype`, `wl-copy` or `wl-paste` is missing
-  or there's no Wayland display.
-- Each line goes to a single `wtype` call.
+- `/health` reports `accessibility_ok: false` when `wtype` is missing or there's no Wayland
+  display.
 - Stop it with `systemctl --user disable --now phrased`.
 
 ### Pair a device
@@ -157,10 +156,11 @@ Status codes:
 | 401 | bad token, or a wrong pairing code |
 | 403 | `Host` not allowed |
 | 404 | no pairing window open, or pairing locked |
-| 409 | busy typing another phrase for over a second |
+| 409 | busy typing another phrase for over a second; nothing was typed |
 | 413 | body over 64 KB, or text over 10,000 characters |
 | 415 | not `application/json` |
 | 429 | over 10 requests a second on `/type`, or about 1 a second on `/pair` |
+| 500 | typing failed partway; some keys may have been typed |
 | 503 | Accessibility not granted |
 
 ### Flags
@@ -207,6 +207,16 @@ Limits:
   changes.
 - On the Mac, the firewall must allow the binary (see above); on a managed Mac that means the
   already-allowed path.
+- On Linux, a firewall that blocks incoming connections (Omarchy turns `ufw` on) must allow the LAN
+  port from each `-lan` subnet (use yours, not the example's). Bonjour still resolves, but
+  connections time out. The firewalld rule is IPv4 only; for an `fc00::/7` subnet use
+  `family="ipv6"`.
+
+  ```sh
+  sudo ufw allow from 192.168.1.0/24 to any port 47812 proto tcp
+  # firewalld:
+  sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.1.0/24" port port="47812" protocol="tcp" accept' && sudo firewall-cmd --reload
+  ```
 
 ```sh
 curl -sk https://<lan-ip>:47812/health   # -k: the app pins the certificate instead

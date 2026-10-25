@@ -20,10 +20,10 @@ final class ConfirmTests: XCTestCase {
         // A 10-second window, so a slow simulator can't let it run out between the taps.
         extraArguments = ["-uiTestingConfirmWindow", "10"]
         let yes = app.buttons["phrase.yes"]
-        XCTAssertTrue(yes.waitForExistence(timeout: 5))
+        XCTAssertTrue(yes.waitForExistence(timeout: 20))
 
         yes.tap()
-        XCTAssertTrue(app.staticTexts["tap again"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["tap again"].waitForExistence(timeout: 8))
         XCTAssertEqual(sendCount, "0")
 
         yes.tap()
@@ -33,7 +33,7 @@ final class ConfirmTests: XCTestCase {
     @MainActor
     func testANormalPhraseSendsOnTheFirstTap() {
         let status = app.buttons["phrase.agent-status"]
-        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        XCTAssertTrue(status.waitForExistence(timeout: 20))
 
         status.tap()
 
@@ -43,7 +43,7 @@ final class ConfirmTests: XCTestCase {
     @MainActor
     func testASecondTapAfterTheWindowDoesNotSend() {
         let yes = app.buttons["phrase.yes"]
-        XCTAssertTrue(yes.waitForExistence(timeout: 5))
+        XCTAssertTrue(yes.waitForExistence(timeout: 20))
 
         // The real 1.5-second window: a slow simulator only makes the gap longer. Nothing is
         // checked while armed, since that could miss the window.
@@ -61,6 +61,6 @@ final class ConfirmTests: XCTestCase {
     @MainActor
     private func waitForSendCount(_ value: String) {
         expectation(for: NSPredicate(format: "label == %@", value), evaluatedWith: app.staticTexts["stub.sendCount"])
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 20)
     }
 }

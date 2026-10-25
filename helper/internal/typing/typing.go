@@ -10,6 +10,9 @@ import (
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/typer"
 )
 
+// NotReadyHelp says how to make a backend that isn't Ready able to type.
+const NotReadyHelp = "grant Accessibility to phrased (System Settings > Privacy & Security > Accessibility)"
+
 // MaxText caps the text of one phrase, in runes.
 const MaxText = 10000
 
@@ -23,6 +26,9 @@ const (
 	NotReady // the backend can't type, e.g. macOS Accessibility not granted
 	Busy     // another phrase held the keyboard for the whole wait
 	Failed   // the backend failed partway; the error says how
+
+	// NumOutcomes counts the outcomes above; keep it last.
+	NumOutcomes
 )
 
 // Typist serializes phrases onto one keyboard.

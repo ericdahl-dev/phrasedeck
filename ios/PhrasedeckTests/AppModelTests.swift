@@ -47,7 +47,8 @@ final class RouteLog: @unchecked Sendable {
 @Suite(.serialized)
 struct AppModelTests {
     let defaults: UserDefaults
-    let tokens = TokenStore(service: "dev.ericdahl.phrasedeck.tests")
+    /// No Keychain: tokens live in memory for the test's life (#43).
+    let tokens = MemoryTokens()
     /// The tailnet route's helper; `lan` answers on the LAN route.
     let api = FakeHelperAPI()
     let lan = FakeHelperAPI()
@@ -61,14 +62,19 @@ struct AppModelTests {
     }
 
     func model(withMac: Bool = true) throws -> AppModel {
-        let store = HelperStore(defaults: defaults, tokens: tokens)
+        let computers = makeComputers()
         if withMac {
-            try store.add(mac)
-            store.selectedHelperID = mac.id
+            try computers.add(mac)
+            computers.selectedID = mac.id
             try tokens.set("tok", for: mac.id)
         }
+        return AppModel(computers: computers, device: "Eric's iPhone")
+    }
+
+    /// Records each connection's route; the tailnet answers with `api`, the LAN with `lan`.
+    func makeComputers() -> Computers {
         let (api, lan, routes) = (self.api, self.lan, self.routes)
-        return AppModel(store: store, tokens: tokens, device: "Eric's iPhone") { _, _, route in
+        return Computers(defaults: defaults, tokens: tokens) { _, _, route in
             routes.log.append(route)
             return route == .tailnet ? api : lan
         }
@@ -84,13 +90,10 @@ struct AppModelTests {
         var pinned = mac
         pinned.certSHA256 = Self.pin
         pinned.lanPort = 47812
-        try HelperStore(defaults: defaults, tokens: tokens).update(pinned)
-        let fresh = AppModel(store: HelperStore(defaults: defaults, tokens: tokens), tokens: tokens,
-                             device: "Eric's iPhone") { [api, lan, routes] _, _, route in
-            routes.log.append(route)
-            return route == .tailnet ? api : lan
-        }
-        _ = model
+        try model.computers.learn(Self.pin, lanPort: 47812, for: mac.id)
+        // A fresh model reads the stored fingerprint back.
+        let fresh = AppModel(computers: makeComputers(), device: "Eric's iPhone")
+        _ = pinned
         fresh.setNearby([Self.home])
         return fresh
     }
@@ -100,33 +103,28 @@ struct AppModelTests {
     // MARK: route choice (#11)
 
     @Test func withNothingNearbyTheTailnetIsUsed() async throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try model()
         #expect(model.route(for: mac) == .tailnet)
     }
 
     @Test func nearbyWithoutAFingerprintStaysOnTheTailnet() async throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try model()
         model.setNearby([Self.home])
         #expect(model.route(for: mac) == .tailnet)
     }
 
     @Test func nearbyWithAFingerprintUsesTheLANAddressWithThePin() async throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try nearbyModel()
         #expect(model.route(for: try #require(model.selectedHelper)) == Self.lanRoute)
     }
 
     @Test func aDifferentNearbyComputerDoesNotCount() async throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try nearbyModel()
         model.setNearby([NearbyService(tailnetName: "omarchy-black2.tail1fdac.ts.net", address: Self.home.address)])
         #expect(model.route(for: try #require(model.selectedHelper)) == .tailnet)
     }
 
     @Test func aSendGoesOverTheLANOnceWhenNearby() async throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try nearbyModel()
 
         let feedback = await model.send(text: "yes", enter: true)
@@ -137,7 +135,6 @@ struct AppModelTests {
     }
 
     @Test func anUnreachableLANFallsBackToTheTailnetOnce() async throws {
-        defer { try? tokens.delete(mac.id) }
         lan.typeError = .unreachable
         let model = try nearbyModel()
 
@@ -150,7 +147,6 @@ struct AppModelTests {
 
     @Test(arguments: [HelperClient.Failure.noReply, .unauthorized, .server(500)])
     func otherLANFailuresAreNotRetriedOnTheTailnet(failure: HelperClient.Failure) async throws {
-        defer { try? tokens.delete(mac.id) }
         lan.typeError = failure
         let model = try nearbyModel()
 
@@ -163,7 +159,6 @@ struct AppModelTests {
     /// Nothing reached the helper on a pin mismatch, so the tailnet is safe
     /// to try once; the note says what happened, so it's never silent.
     @Test func aPinMismatchSendsOverTheTailnetWithAVisibleNote() async throws {
-        defer { try? tokens.delete(mac.id) }
         lan.typeError = .pinMismatch
         let model = try nearbyModel()
 
@@ -176,7 +171,6 @@ struct AppModelTests {
     }
 
     @Test func aPinMismatchWithTheTailnetDownIsARedErrorThatSaysNothingWasSent() async throws {
-        defer { try? tokens.delete(mac.id) }
         lan.typeError = .pinMismatch
         api.typeError = .unreachable
         let model = try nearbyModel()
@@ -198,7 +192,6 @@ struct AppModelTests {
     }
 
     @Test func unpairedNearbyListsOnlyComputersNotOnThisDevice() throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try nearbyModel()
         let other = NearbyService(tailnetName: "omarchy-black2.tail1fdac.ts.net", address: nil)
         let samePin = NearbyService(tailnetName: nil, address: nil, advertisedFingerprint: Self.pin)
@@ -211,7 +204,6 @@ struct AppModelTests {
     // MARK: fingerprint trust (#11)
 
     @Test func bonjourTXTCannotCarryAFingerprint() async throws {
-        defer { try? tokens.delete(mac.id) }
         let txt = ["v": "1", "ts": "LIB-2833.tail1fdac.ts.net.", "port": "47812",
                    "fp": Self.pin, "certSHA256": Self.pin, "lan": "192.168.1.20"]
         let service = try #require(NearbyService(txt: txt, address: Self.home.address))
@@ -228,7 +220,6 @@ struct AppModelTests {
     }
 
     @Test func aMatchingTXTFingerprintMakesAComputerNearby() async throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try nearbyModel()
         let byPin = NearbyService(tailnetName: nil, address: LANAddress(host: "192.168.1.44", port: 47812),
                                   advertisedFingerprint: Self.pin)
@@ -240,7 +231,6 @@ struct AppModelTests {
     }
 
     @Test func aDifferentTXTFingerprintDoesNotMakeItNearby() async throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try nearbyModel()
         model.setNearby([NearbyService(tailnetName: nil, address: Self.home.address,
                                        advertisedFingerprint: String(repeating: "cd", count: 32))])
@@ -253,7 +243,6 @@ struct AppModelTests {
         let model = try model(withMac: false)
         _ = await model.addHelper(from: Self.hostlessLink)
         let added = try #require(model.helpers.first)
-        defer { try? tokens.delete(added.id) }
 
         model.setNearby([NearbyService(tailnetName: nil, address: LANAddress(host: "192.168.1.77", port: 47900),
                                        advertisedFingerprint: Self.pin)])
@@ -273,7 +262,6 @@ struct AppModelTests {
     }
 
     @Test func theTailnetStatusCheckLearnsTheFingerprintFromInfo() async throws {
-        defer { try? tokens.delete(mac.id) }
         api.infoResult = .success(LANInfo(certSHA256: Self.pin, lanPort: 47812))
         let model = try model()
 
@@ -287,7 +275,6 @@ struct AppModelTests {
     }
 
     @Test func infoIsNeverAskedOverTheLAN() async throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try nearbyModel()
 
         await model.refreshStatus(of: try #require(model.selectedHelper))
@@ -298,7 +285,6 @@ struct AppModelTests {
     }
 
     @Test func theStatusCheckFallsBackToTheTailnetWhenTheLANFails() async throws {
-        defer { try? tokens.delete(mac.id) }
         lan.healthResult = .failure(.pinMismatch)
         let model = try nearbyModel()
         let helper = try #require(model.selectedHelper)
@@ -321,7 +307,6 @@ struct AppModelTests {
 
         #expect(error == nil)
         let added = try #require(model.helpers.first)
-        defer { try? tokens.delete(added.id) }
         #expect(routes.log == [.lan(host: "192.168.1.30", port: 47812, pin: Self.pin)])
         #expect(lan.paired.count == 1 && api.paired.isEmpty)
         #expect(added.certSHA256 == Self.pin)
@@ -337,7 +322,6 @@ struct AppModelTests {
 
         #expect(error == nil)
         let added = try #require(model.helpers.first)
-        defer { try? tokens.delete(added.id) }
         #expect(lan.paired.count == 1 && api.paired.count == 1)
         #expect(added.certSHA256 == Self.pin)
     }
@@ -364,7 +348,6 @@ struct AppModelTests {
 
         #expect(error == nil)
         let added = try #require(model.helpers.first)
-        defer { try? tokens.delete(added.id) }
         let route = HelperClient.Route.lan(host: "192.168.1.30", port: 47900, pin: Self.pin)
         #expect(routes.log == [route])
         #expect(added.lanHost == "192.168.1.30" && added.certSHA256 == Self.pin)
@@ -389,7 +372,6 @@ struct AppModelTests {
         let model = try model(withMac: false)
         _ = await model.addHelper(from: Self.hostlessLink)
         let added = try #require(model.helpers.first)
-        defer { try? tokens.delete(added.id) }
         lan.typeError = .unreachable
 
         let feedback = await model.send(text: "x", enter: false)
@@ -417,13 +399,11 @@ struct AppModelTests {
 
         #expect(error == nil)
         let added = try #require(model.helpers.first)
-        defer { try? tokens.delete(added.id) }
         #expect(added.certSHA256 == Self.pin)
         #expect(routes.log == [.tailnet])
     }
 
     @Test func aNewFingerprintDropsTheOldPinsSession() async throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try nearbyModel()
         let old = HelperClient(helper: mac, token: nil, route: Self.lanRoute).session
         let newPin = String(repeating: "cd", count: 32)
@@ -439,7 +419,6 @@ struct AppModelTests {
     // MARK: sending
 
     @Test func aTapSendsOnceAndFlashesGreen() async throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try model()
 
         let feedback = await model.send(text: "yes", enter: true)
@@ -460,7 +439,6 @@ struct AppModelTests {
     ])
     func failuresMapToTheirFeedbackWithoutRetrying(failure: HelperClient.Failure, tone: AppModel.Feedback.Tone,
                                                    message: String) async throws {
-        defer { try? tokens.delete(mac.id) }
         api.typeError = failure
         let model = try model()
 
@@ -473,7 +451,6 @@ struct AppModelTests {
     }
 
     @Test func unauthorizedOffersPairAgainForThatComputer() async throws {
-        defer { try? tokens.delete(mac.id) }
         api.typeError = .unauthorized
         let model = try model()
 
@@ -495,7 +472,6 @@ struct AppModelTests {
     // MARK: status dot
 
     @Test func statusFollowsHealth() async throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try model()
 
         await model.refreshStatus(of: mac)
@@ -519,7 +495,6 @@ struct AppModelTests {
 
         #expect(error == nil)
         let added = try #require(model.helpers.first)
-        defer { try? tokens.delete(added.id) }
         #expect(added.host == "omarchy-laptop")
         #expect(added.name == "omarchy-laptop")
         #expect(added.port == Helper.defaultPort)
@@ -536,14 +511,12 @@ struct AppModelTests {
 
         #expect(error == nil)
         let added = try #require(model.helpers.first)
-        defer { try? tokens.delete(added.id) }
         #expect(added.name == "lib-2833")
         #expect(added.host == "lib-2833.tail1fdac.ts.net")
         #expect(added.port == 47900)
     }
 
     @Test func addingAComputerThatIsAlreadyThereRepairsIt() async throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try model()
 
         let error = await model.addHelper(host: mac.host, port: mac.port, code: "123456")
@@ -555,7 +528,6 @@ struct AppModelTests {
     }
 
     @Test func scanningTheMagicDNSNameOfAComputerAddedByShortNameRepairsIt() async throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try model()
 
         let error = await model.addHelper(host: "lib-2833.tail1fdac.ts.net", port: mac.port, code: "123456")
@@ -575,6 +547,25 @@ struct AppModelTests {
         #expect(model.helpers.isEmpty)
     }
 
+    /// Pairing never types, so a lost reply must not say "may have typed" (P0 2026-10-25).
+    @Test func noReplyWhilePairingSaysToTryAgainNotMayHaveTyped() async throws {
+        api.pairResult = .failure(.noReply)
+        let model = try model(withMac: false)
+
+        let error = await model.addHelper(host: "omarchy-laptop.tail1fdac.ts.net", port: nil, code: "123456")
+
+        #expect(error == "omarchy-laptop didn't answer. Run phrased pair again and retry.")
+    }
+
+    @Test func aBlockedConnectionWhilePairingSaysNothingWasSent() async throws {
+        api.pairResult = .failure(.notSent(-1022))
+        let model = try model(withMac: false)
+
+        let error = await model.addHelper(host: "omarchy-laptop.tail1fdac.ts.net", port: nil, code: "123456")
+
+        #expect(error == "omarchy-laptop: the connection was blocked before anything was sent (error -1022).")
+    }
+
     @Test func aWrongCodeSaysSo() async throws {
         api.pairResult = .failure(.unauthorized)
         let model = try model(withMac: false)
@@ -586,7 +577,6 @@ struct AppModelTests {
     }
 
     @Test func pairAgainReplacesTheToken() async throws {
-        defer { try? tokens.delete(mac.id) }
         let model = try model()
 
         let error = await model.pair(mac, code: "654321")
@@ -599,10 +589,34 @@ struct AppModelTests {
     @Test func deletingAComputerClearsItsTokenAndSelection() async throws {
         let model = try model()
 
-        model.delete(mac)
+        #expect(model.delete(mac) == nil)
 
         #expect(model.helpers.isEmpty)
         #expect(model.selectedHelperID == nil)
         #expect(try tokens.get(mac.id) == nil)
+        #expect(makeComputers().all.isEmpty)
+    }
+
+    /// A Keychain failure is shown, and nothing is removed (#43).
+    @Test func aFailedDeleteIsReportedAndKeepsTheComputer() async throws {
+        let model = try model()
+        tokens.failDelete = CocoaError(.fileWriteNoPermission)
+
+        let message = try #require(model.delete(mac))
+
+        #expect(message.contains("lib-2833"))
+        #expect(model.helpers == [mac])
+        #expect(model.selectedHelperID == mac.id)
+        #expect(try tokens.get(mac.id) == "tok")
+    }
+
+    @Test func deletingTheSelectedComputerSelectsTheNextOne() async throws {
+        let model = try model()
+        let laptop = Helper(name: "omarchy", host: "omarchy-laptop.tail1fdac.ts.net")
+        try model.computers.add(laptop)
+
+        #expect(model.delete(mac) == nil)
+
+        #expect(model.selectedHelperID == laptop.id)
     }
 }

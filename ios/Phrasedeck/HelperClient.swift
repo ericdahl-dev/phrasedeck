@@ -62,6 +62,8 @@ struct HelperClient: Sendable {
         case pinMismatch
         /// A LAN IP or .local name on the plain-HTTP route: refused, nothing sent.
         case notTailnet
+        /// The OS refused the request before sending it (ATS, a bad URL): nothing was typed.
+        case notSent(Int)
     }
 
     static let timeout: TimeInterval = 3
@@ -106,11 +108,13 @@ struct HelperClient: Sendable {
 
     /// Plain HTTP goes only to a tailnet address. With Tailscale off, a bare name can resolve
     /// through the router's DNS to a LAN machine, so a name's addresses must all be tailnet
-    /// ones, and the request goes to the checked address (IPv4 first) so a second lookup
-    /// can't swap it. The helper accepts its tailnet IPs as Host.
+    /// ones. The request still goes to the name: ATS refuses plain HTTP to a bare 100.x
+    /// address (-1022), while *.ts.net and bare names are allowed by Info.plist.
+    // shortcut: the OS resolves the name again for the request, so a lookup that changes in
+    // the milliseconds between can still swap it; upgrade if the LAN route ever goes HTTPS-only.
     private func checkedTailnetURL(_ url: URL?) async throws -> URL? {
-        guard var components = url.map({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) ?? nil,
-              let host = components.host?.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        guard let host = url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false)?.host })?
+                .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         else { throw Failure.unreachable }
         // An IP literal was already checked by request().
         if IPv4Address(host) != nil && host.allSatisfy({ $0.isNumber || $0 == "." }) || IPv6Address(host) != nil {
@@ -119,9 +123,7 @@ struct HelperClient: Sendable {
         let addresses = await resolve(host)
         guard !addresses.isEmpty else { throw Failure.unreachable }
         guard addresses.allSatisfy({ PairLink.tailnetHost($0) != nil }) else { throw Failure.notTailnet }
-        let address = addresses.first { !$0.contains(":") } ?? addresses[0]
-        components.host = address.contains(":") ? "[\(address)]" : address
-        return components.url
+        return url
     }
 
     /// getaddrinfo, off the main thread. No answer is an empty list.
@@ -238,8 +240,10 @@ struct HelperClient: Sendable {
         // A refused pin surfaces as a cancel; it must read as a red error, never "may have typed".
         if pinMismatched { return .pinMismatch }
         switch code {
-        case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+        case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet:
             return .unreachable
+        case .appTransportSecurityRequiresSecureConnection, .badURL, .unsupportedURL:
+            return .notSent(code.rawValue)
         default:
             // Timeouts, a dropped connection and anything unrecognized: the
             // request may have reached the helper, so don't claim it didn't.

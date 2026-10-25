@@ -1,0 +1,63 @@
+{
+  "about": "The pairing contract between phrased (Go) and the app (Swift). Both test suites read this file: change a field here and on both sides together. offers: what `phrased pair` builds and the QR the app parses (an absent port or lanPort means the default, 47811 or 47812). invalidQR: links the app must refuse, with its error. replies: the /pair body for a helper with LAN off or on (token aside). lanAddresses: which addresses count as private home addresses on both sides.",
+  "offers": [
+    {
+      "name": "tailnet only",
+      "host": "lib-2833.tail0000.ts.net", "port": 47811, "code": "123456",
+      "qr": "phrasedeck://pair?code=123456&host=lib-2833.tail0000.ts.net&port=47811&v=1"
+    },
+    {
+      "name": "tailnet IP and a custom port",
+      "host": "100.100.1.1", "port": 48811, "code": "000042",
+      "qr": "phrasedeck://pair?code=000042&host=100.100.1.1&port=48811&v=1"
+    },
+    {
+      "name": "tailnet and LAN",
+      "host": "lib-2833.tail0000.ts.net", "port": 47811, "code": "123456",
+      "fp": "33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6",
+      "lan": "192.168.1.29", "lanPort": 47812,
+      "qr": "phrasedeck://pair?code=123456&fp=33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6&host=lib-2833.tail0000.ts.net&lan=192.168.1.29&lanPort=47812&port=47811&v=1"
+    },
+    {
+      "name": "LAN only (Tailscale off), custom LAN port",
+      "code": "987654",
+      "fp": "33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6",
+      "lan": "10.0.0.5", "lanPort": 48812,
+      "qr": "phrasedeck://pair?code=987654&fp=33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6&lan=10.0.0.5&lanPort=48812&v=1"
+    },
+    {
+      "name": "LAN only over IPv6 ULA",
+      "code": "987654",
+      "fp": "33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6",
+      "lan": "fd00::29", "lanPort": 47812,
+      "qr": "phrasedeck://pair?code=987654&fp=33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6&lan=fd00%3A%3A29&lanPort=47812&v=1"
+    }
+  ],
+  "invalidQR": [
+    { "qr": "https://pair?code=123456&host=a.b.ts.net&v=1", "error": "notAPairingLink" },
+    { "qr": "phrasedeck://pair?code=123456&host=a.b.ts.net&v=2", "error": "unsupportedVersion" },
+    { "qr": "phrasedeck://pair?code=123456&host=omarchy-laptop&v=1", "error": "notATailnetHost" },
+    { "qr": "phrasedeck://pair?code=123456&host=192.168.1.29&v=1", "error": "notATailnetHost" },
+    { "qr": "phrasedeck://pair?code=12345&host=a.b.ts.net&v=1", "error": "badCode" },
+    { "qr": "phrasedeck://pair?code=123456&host=a.b.ts.net&port=0&v=1", "error": "badPort" },
+    { "qr": "phrasedeck://pair?code=123456&fp=abc&lan=192.168.1.29&v=1", "error": "badFingerprint" },
+    { "qr": "phrasedeck://pair?code=123456&fp=33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6&lan=8.8.8.8&v=1", "error": "badLANAddress" },
+    { "qr": "phrasedeck://pair?code=123456&host=a.b.ts.net&lan=192.168.1.29&v=1", "error": "lanWithoutFingerprint" },
+    { "qr": "phrasedeck://pair?code=123456&fp=33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6&lan=fe80%3A%3A1&v=1", "error": "badLANAddress" },
+    { "qr": "phrasedeck://pair?code=123456&host=lib.example.com&v=1", "error": "notATailnetHost" },
+    { "qr": "phrasedeck://pair?code=123456&fp=33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6&lan=192.168.1.29&lanPort=0&v=1", "error": "badPort" },
+    { "qr": "phrasedeck://pair?code=123456&fp=33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6&v=1", "error": "notATailnetHost" }
+  ],
+  "replies": [
+    { "name": "LAN off", "body": {} },
+    {
+      "name": "LAN on",
+      "certSHA256": "33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6", "lanPort": 47812,
+      "body": { "certSHA256": "33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6", "lanPort": 47812 }
+    }
+  ],
+  "lanAddresses": {
+    "private": ["10.0.0.5", "172.16.0.1", "172.31.255.254", "192.168.1.29", "fd00::29", "fc00::1"],
+    "notPrivate": ["8.8.8.8", "172.32.0.1", "100.100.1.1", "169.254.1.1", "fe80::1", "2001:db8::1", "127.0.0.1"]
+  }
+}

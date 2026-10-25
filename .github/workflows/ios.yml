@@ -28,4 +28,12 @@ jobs:
           test -n "$udid" && test "$udid" != null
           echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
       - name: Unit and UI tests
-        run: xcodebuild test -scheme Phrasedeck -destination "id=$SIM_UDID" -quiet
+        run: xcodebuild test -scheme Phrasedeck -destination "id=$SIM_UDID" -quiet -resultBundlePath "$RUNNER_TEMP/tests.xcresult"
+      # -quiet hides why a test failed; the result bundle has the assertion and screenshots.
+      - name: Keep the test results when something failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results
+          path: ${{ runner.temp }}/tests.xcresult
+          retention-days: 14

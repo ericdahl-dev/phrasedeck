@@ -1,4 +1,3 @@
-import CoreData
 import SwiftData
 import SwiftUI
 
@@ -9,6 +8,7 @@ struct DeckView: View {
     @Environment(\.modelContext) private var context
     @State private var editing: PhraseEditor.Target?
     @State private var editingPages = false
+    @State private var saveError: String?
     @Environment(\.horizontalSizeClass) private var sizeClass
     @AppStorage(DeckSize.compactKey) private var compactColumns = 0
     @AppStorage(DeckSize.regularKey) private var regularColumns = 0
@@ -58,9 +58,7 @@ struct DeckView: View {
         }
         .sheet(item: $editing) { PhraseEditor(target: $0) }
         .sheet(isPresented: $editingPages) { PageEditor() }
-        // The other device's starter deck can arrive after this one seeded its own.
-        .onReceive(NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)
-            .receive(on: RunLoop.main)) { _ in try? Seed.mergeDuplicates(context) }
+        .saveFailureAlert($saveError)
     }
 
     private var storedColumns: Int {
@@ -152,8 +150,9 @@ struct DeckView: View {
     }
 
     private func remove(_ phrase: Phrase) {
-        withAnimation { Deck.delete(phrase, in: context) }
-        try? context.save()
+        do { try withAnimation { try Deck.delete(phrase, in: context) } } catch {
+            saveError = error.localizedDescription
+        }
     }
 }
 

@@ -122,7 +122,7 @@ func HostAllowed(host string, allow []string) bool {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	host = strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
 	if host == "" {
 		return false
 	}

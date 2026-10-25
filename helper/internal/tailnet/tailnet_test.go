@@ -117,6 +117,7 @@ func TestHostAllowed(t *testing.T) {
 		"omarchy-laptop.tail1234.ts.net.": true,
 		"100.101.102.103:47811":           true,
 		"[fd7a:115c:a1e0::abcd]:47811":    true,
+		"[fd7a:115c:a1e0::abcd]":          true,
 		"evil.example":                    false,
 		"localhost":                       false,
 		"":                                false,

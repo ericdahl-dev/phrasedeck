@@ -92,9 +92,40 @@ from the session environment uwsm imports at login, and skips starting without o
 - Typing uses `wtype`. Pasting serves the phrase once with `wl-copy --foreground --paste-once`,
   sends Ctrl+Shift+V (the terminal paste key), waits for `wl-copy` to exit (at most 2 seconds),
   and puts the old clipboard text back. Only text is restored: a copied image is lost.
-- `/health` reports `accessibility_ok: false` when `wtype` is missing or there's no Wayland
-  display.
+- `/health` reports `accessibility_ok: false` (the Helper isn't Ready) when a tool is missing or
+  there's no display, and the error says which.
 - Stop it with `systemctl --user disable --now phrased`.
+
+### Install on Ubuntu, GNOME or KDE
+
+At startup the Helper picks its keyboard tool from the session (`XDG_SESSION_TYPE`,
+`XDG_CURRENT_DESKTOP`):
+
+| Session | Types with | Clipboard |
+|---|---|---|
+| Hyprland, Sway and other wlroots compositors | `wtype` | `wl-clipboard` |
+| GNOME or KDE on Wayland | `ydotool` | `wl-clipboard` |
+| Any desktop on X11 | `xdotool` | `xclip` |
+
+GNOME and KDE don't offer the virtual-keyboard protocol `wtype` needs, so there the Helper types
+through `ydotool`, which goes through the kernel's `/dev/uinput`. It sends US keycodes, so a line
+with anything beyond ASCII ("naïve café ✓") is pasted instead of typed. On Ubuntu with GNOME
+(Wayland):
+
+```sh
+sudo apt install ydotool wl-clipboard
+sudo usermod -aG input "$USER"   # the package's udev rule gives the input group /dev/uinput
+# log out and back in so the group applies, then:
+systemctl --user enable --now ydotool   # ydotoold, the daemon ydotool talks to
+cd helper
+make install-linux
+```
+
+- The Helper isn't Ready until `ydotoold` is running: it checks for its socket at
+  `$XDG_RUNTIME_DIR/.ydotool_socket` (or `$YDOTOOL_SOCKET`).
+- On an X11 session, install `xdotool xclip` instead; no daemon or group is needed.
+- Pasting works as on omarchy: it serves the phrase once, sends Ctrl+Shift+V (the terminal
+  paste key), and puts the old clipboard text back.
 
 ### Pair a device
 
@@ -161,7 +192,7 @@ Status codes:
 | 415 | not `application/json` |
 | 429 | over 10 requests a second on `/type`, or about 1 a second on `/pair` |
 | 500 | typing failed partway; some keys may have been typed |
-| 503 | can't type yet: Accessibility not granted (macOS), or `wtype`/`wl-clipboard` missing or no `WAYLAND_DISPLAY` (Linux); the error says which |
+| 503 | can't type yet: Accessibility not granted (macOS), or a typing tool missing, no display, or `ydotoold` not running (Linux); the error says which |
 
 ### Flags
 

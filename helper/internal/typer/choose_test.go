@@ -8,7 +8,7 @@ import (
 )
 
 // session builds the backend New would pick for these session variables, on a fake runner.
-func session(f *fakeRunner, env map[string]string) *Wayland {
+func session(f *fakeRunner, env map[string]string) *Desktop {
 	w := pick(func(k string) string { return env[k] })
 	w.run, w.settle = f, 0
 	w.lookPath = func(name string) (string, error) { return "/usr/bin/" + name, nil }
@@ -16,7 +16,7 @@ func session(f *fakeRunner, env map[string]string) *Wayland {
 	return w
 }
 
-var gnome = map[string]string{"XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "ubuntu:GNOME", "WAYLAND_DISPLAY": "wayland-0"}
+var gnome = map[string]string{"XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "ubuntu:GNOME", "WAYLAND_DISPLAY": "wayland-0", "XDG_RUNTIME_DIR": "/run/user/1000"}
 
 // wtype needs the virtual-keyboard protocol, which GNOME's Mutter lacks (#69), so GNOME
 // types through ydotool's uinput keyboard: Enter is keycode 28 down, then up.
@@ -86,7 +86,8 @@ func TestGNOMEProblemNamesYdotoolAndItsDaemon(t *testing.T) {
 	}
 
 	w = session(&fakeRunner{}, gnome)
-	w.exists = func(path string) bool { return path != "/tmp/.ydotool_socket" }
+	// ydotoold 1.0 (Ubuntu's package) listens at $XDG_RUNTIME_DIR/.ydotool_socket.
+	w.exists = func(path string) bool { return path != "/run/user/1000/.ydotool_socket" }
 	if p := w.Problem(); !strings.Contains(p, "ydotoold isn't running") {
 		t.Errorf("without the daemon's socket: problem %q", p)
 	}

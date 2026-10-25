@@ -89,9 +89,9 @@ var x11Clip = clipset{
 	display:   "DISPLAY",
 }
 
-// Wayland types with a keyboard tool and pastes with wl-clipboard: wtype on wlroots and
-// Hyprland, ydotool on GNOME and KDE.
-type Wayland struct {
+// Desktop types with a keyboard tool and pastes with a clipboard tool: wtype on wlroots and
+// Hyprland, ydotool on GNOME and KDE Wayland, xdotool on X11.
+type Desktop struct {
 	keys     keyset
 	clip     clipset
 	run      runner
@@ -104,7 +104,7 @@ type Wayland struct {
 
 // pick chooses the tools for this session: xdotool on X11, ydotool on GNOME or KDE Wayland
 // (no virtual-keyboard protocol there), wtype on the rest (wlroots, Hyprland).
-func pick(getenv func(string) string) *Wayland {
+func pick(getenv func(string) string) *Desktop {
 	keys, clip := wtypeKeys, waylandClip
 	desktop := strings.ToLower(getenv("XDG_CURRENT_DESKTOP"))
 	switch {
@@ -113,14 +113,14 @@ func pick(getenv func(string) string) *Wayland {
 	case strings.Contains(desktop, "gnome") || strings.Contains(desktop, "kde"):
 		keys = ydotoolKeys
 	}
-	return &Wayland{keys: keys, clip: clip, run: execRunner{}, lookPath: exec.LookPath, getenv: getenv,
+	return &Desktop{keys: keys, clip: clip, run: execRunner{}, lookPath: exec.LookPath, getenv: getenv,
 		exists: func(path string) bool { _, err := os.Stat(path); return err == nil }, settle: 50 * time.Millisecond}
 }
 
 // key runs one of the keyset's commands.
-func (w *Wayland) key(cmd []string) error { return w.run.run(cmd[0], cmd[1:], "") }
+func (w *Desktop) key(cmd []string) error { return w.run.run(cmd[0], cmd[1:], "") }
 
-func (w *Wayland) Type(text string) error {
+func (w *Desktop) Type(text string) error {
 	if w.keys.asciiOnly && !isASCII(text) {
 		return w.Paste(text)
 	}
@@ -136,14 +136,14 @@ func isASCII(s string) bool {
 	return true
 }
 
-func (w *Wayland) Enter() error { return w.key(w.keys.enter) }
+func (w *Desktop) Enter() error { return w.key(w.keys.enter) }
 
-func (w *Wayland) ShiftEnter() error { return w.key(w.keys.shiftEnter) }
+func (w *Desktop) ShiftEnter() error { return w.key(w.keys.shiftEnter) }
 
 // Paste serves text for one paste, sends Ctrl+Shift+V (the terminal paste key), waits for
 // the clipboard tool to exit, and puts the old clipboard back.
 // shortcut: only a text clipboard is saved and restored; an image copied before is lost.
-func (w *Wayland) Paste(text string) error {
+func (w *Desktop) Paste(text string) error {
 	old, err := w.run.output(w.clip.read[0], w.clip.read[1:])
 	hadOld := err == nil
 	wait, err := w.run.start(w.clip.serveOnce[0], w.clip.serveOnce[1:], text)
@@ -163,7 +163,7 @@ func (w *Wayland) Paste(text string) error {
 
 // Problem names a tool Type or Paste needs that isn't installed, a missing display, or
 // ydotool's daemon not running.
-func (w *Wayland) Problem() string {
+func (w *Desktop) Problem() string {
 	for _, tool := range append([][2]string{{w.keys.tool, w.keys.pkg}}, w.clip.tools...) {
 		if _, err := w.lookPath(tool[0]); err != nil {
 			return fmt.Sprintf("%s isn't installed (package %s)", tool[0], tool[1])
@@ -175,7 +175,7 @@ func (w *Wayland) Problem() string {
 	if w.keys.tool == "ydotool" {
 		socket := w.getenv("YDOTOOL_SOCKET")
 		if socket == "" {
-			socket = "/tmp/.ydotool_socket"
+			socket = w.getenv("XDG_RUNTIME_DIR") + "/.ydotool_socket" // ydotoold 1.0's default
 		}
 		if !w.exists(socket) {
 			return fmt.Sprintf("ydotoold isn't running (no socket at %s); start it as the README's GNOME and KDE setup shows", socket)

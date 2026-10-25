@@ -51,8 +51,8 @@ func (f *fakeRunner) start(name string, args []string, stdin string) (func(time.
 	}, nil
 }
 
-func newTestWayland(f *fakeRunner) *Wayland {
-	return &Wayland{
+func newTestWayland(f *fakeRunner) *Desktop {
+	return &Desktop{
 		keys:     wtypeKeys,
 		clip:     waylandClip,
 		run:      f,

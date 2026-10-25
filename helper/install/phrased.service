@@ -1,10 +1,12 @@
 [Unit]
 Description=phrased: types phrases from phrasedeck into the focused window
-# Start and stop with the graphical session. WAYLAND_DISPLAY comes from the user manager's
-# environment, which uwsm imports at login; without it there is nothing to type into.
+# Start and stop with the graphical session. WAYLAND_DISPLAY (or DISPLAY on X11) comes from the
+# user manager's environment, which uwsm or GNOME imports at login; without either there is
+# nothing to type into. "|" makes the two conditions either-or.
 PartOf=graphical-session.target
 After=graphical-session.target
-ConditionEnvironment=WAYLAND_DISPLAY
+ConditionEnvironment=|WAYLAND_DISPLAY
+ConditionEnvironment=|DISPLAY
 
 [Service]
 ExecStart=%h/.local/bin/phrased

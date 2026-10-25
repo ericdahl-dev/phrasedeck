@@ -47,6 +47,27 @@ macOS only lets `phrased` type after you allow it once:
    `helper/phrased` (or the terminal app you run it from, if macOS lists that instead).
 3. `curl http://<tailnet-name>:47811/health` from a tailnet device shows `"accessibility_ok": true`.
 
+### Install on omarchy (Hyprland)
+
+```sh
+sudo pacman -S wtype wl-clipboard
+cd helper
+make install-linux
+```
+
+This builds `phrased`, installs it to `~/.local/bin/phrased`, and runs it as the systemd user
+service `phrased`, started with the graphical session and restarted if it fails. Run it again to
+update. The unit (`helper/install/phrased.service`) doesn't hardcode `WAYLAND_DISPLAY`: it takes it
+from the session environment uwsm imports at login, and skips starting without one.
+
+- Status and log: `systemctl --user status phrased` and `journalctl --user -u phrased`.
+- Typing uses `wtype`. Pasting serves the phrase once with `wl-copy --foreground --paste-once`,
+  sends Ctrl+Shift+V (the terminal paste key), waits for `wl-copy` to exit (at most 2 seconds),
+  and puts the old clipboard text back. Only text is restored: a copied image is lost.
+- `/health` reports `accessibility_ok: false` when `wtype` is missing or there's no Wayland
+  display.
+- Stop it with `systemctl --user disable --now phrased`.
+
 ### Pair a device
 
 Each phone or tablet gets its own token. On the computer running `phrased`:

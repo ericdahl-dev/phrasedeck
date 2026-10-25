@@ -35,8 +35,14 @@ final class SavedSpot {
 extension Deck {
     /// The Spots of the page's Buttons at `width`, by Phrase uid. A Button with no entry has no Spot.
     static func spots(on page: Page, width: LayoutWidth, in context: ModelContext) -> [String: Spot] {
+        spots(on: page, width: width, from: saved(width, in: context))
+    }
+
+    /// The same from rows already fetched, such as a view's @Query.
+    static func spots(on page: Page, width: LayoutWidth, from rows: [SavedSpot]) -> [String: Spot] {
         let uids = Set(page.sortedPhrases.map(\.uid))
-        return newest(width, in: context).filter { uids.contains($0.key) }.mapValues(\.spot)
+        return newest(rows.filter { $0.layoutWidth == width.rawValue }).filter { uids.contains($0.key) }
+            .mapValues(\.spot)
     }
 
     /// Saves Spots at `width`, by Phrase uid. Only Spots that changed are written, and duplicate
@@ -56,6 +62,32 @@ extension Deck {
         try context.save()
     }
 
+    /// Where the page's Buttons are shown, by Phrase uid: from their Spots at `width`, or packed
+    /// from order when the page has none there.
+    static func layout(of page: Page, width: LayoutWidth, columns: Int,
+                       in context: ModelContext) -> [Packing.Placement<String>] {
+        Arrangement.resolve(items(of: page, spots: spots(on: page, width: width, in: context)), columns: columns)
+    }
+
+    /// The page's Buttons in order, with their Spots, for `Arrangement.resolve`.
+    static func items(of page: Page, spots: [String: Spot]) -> [Arrangement.Item<String>] {
+        page.sortedPhrases.map {
+            Arrangement.Item(id: $0.uid, columns: $0.sizeColumns, rows: $0.sizeRows, spot: spots[$0.uid])
+        }
+    }
+
+    /// Drops the Button on `target` (an accessibility move or a drag) and saves the page's Spots at
+    /// `width`. Returns how many other Buttons it shifted.
+    @discardableResult
+    static func move(_ phrase: Phrase, to target: Spot, on page: Page, width: LayoutWidth, columns: Int,
+                     in context: ModelContext) throws -> Int {
+        let pickup = layout(of: page, width: width, columns: columns, in: context)
+        let after = Arrangement.move(phrase.uid, to: target, from: pickup, columns: columns)
+        let shifted = pickup.filter { $0.id != phrase.uid && after[$0.id] != Spot(column: $0.x, row: $0.y) }.count
+        try saveSpots(after, width: width, in: context)
+        return shifted
+    }
+
     /// Deletes the Buttons' Spots on every Layout width. The caller saves.
     static func deleteSpots(of phrases: [Phrase], in context: ModelContext) {
         let uids = Set(phrases.map(\.uid))
@@ -64,10 +96,9 @@ extension Deck {
         }
     }
 
-    /// The newest row per Phrase uid at `width`.
-    private static func newest(_ width: LayoutWidth, in context: ModelContext) -> [String: SavedSpot] {
-        Dictionary(saved(width, in: context).map { ($0.phraseUID, $0) },
-                   uniquingKeysWith: { $0.updated >= $1.updated ? $0 : $1 })
+    /// The newest row per Phrase uid.
+    private static func newest(_ rows: [SavedSpot]) -> [String: SavedSpot] {
+        Dictionary(rows.map { ($0.phraseUID, $0) }, uniquingKeysWith: { $0.updated >= $1.updated ? $0 : $1 })
     }
 
     private static func saved(_ width: LayoutWidth, in context: ModelContext) -> [SavedSpot] {

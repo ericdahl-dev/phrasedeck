@@ -6,8 +6,24 @@ struct PhraseButton: View {
     var pinchGuard: PinchGuard?
     var edit: () -> Void = {}
     var delete: () -> Void = {}
+    /// Shown in the long-press menu when set (#81).
+    var editDeck: (() -> Void)?
+    /// Set in Arrange mode: taps don't type, and the move actions replace the menu.
+    var arrange: ArrangeRole?
+
+    /// What a Button needs in Arrange mode (#81, spec section 11).
+    struct ArrangeRole {
+        /// Where it's shown, for VoiceOver's "Row r, column c".
+        let spot: Spot
+        let nudges: [Arrangement.Nudge]
+        /// The other Pages, by name, for Move to Page.
+        let otherPages: [String]
+        let nudge: (Arrangement.Nudge) -> Void
+        let moveToPage: (String) -> Void
+    }
 
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var flash: AppModel.Feedback.Tone?
     @State private var taps = 0
     @State private var gate = ConfirmGate()
@@ -35,10 +51,32 @@ struct PhraseButton: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button("Edit", systemImage: "pencil", action: edit)
-            Button("Delete", systemImage: "trash", role: .destructive, action: delete)
+            if arrange == nil {
+                Button("Edit", systemImage: "pencil", action: edit)
+                if let editDeck { Button("Edit Deck", systemImage: "square.grid.3x3", action: editDeck) }
+                Button("Delete", systemImage: "trash", role: .destructive, action: delete)
+            }
+        }
+        .modifier(Jiggle(active: arrange != nil && !reduceMotion))
+        .overlay {
+            // Reduce Motion: a dashed outline instead of the jiggle.
+            if arrange != nil && reduceMotion {
+                RoundedRectangle(cornerRadius: 16).strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                    .foregroundStyle(.secondary)
+            }
         }
         .accessibilityIdentifier(phrase.seedKey ?? "phrase.\(phrase.label)")
+        .accessibilityValue(arrange.map { "Row \($0.spot.row + 1), column \($0.spot.column + 1)" } ?? "")
+        .accessibilityActions {
+            if let arrange {
+                ForEach(arrange.nudges, id: \.self) { nudge in
+                    Button(nudge.actionName) { arrange.nudge(nudge) }
+                }
+                ForEach(arrange.otherPages, id: \.self) { page in
+                    Button("Move to \(page)") { arrange.moveToPage(page) }
+                }
+            }
+        }
         .sensoryFeedback(.impact(weight: .light), trigger: taps)
     }
 
@@ -53,7 +91,8 @@ struct PhraseButton: View {
 
     /// Phrases marked confirm need a second tap within 1.5 seconds (#8).
     private func tapped() {
-        if pinchGuard?.blocksTaps == true { return }
+        // Taps never type in Arrange mode (spec section 3).
+        if pinchGuard?.blocksTaps == true || arrange != nil { return }
         taps += 1
         guard phrase.confirm else { return send() }
         if gate.tap() {
@@ -88,6 +127,35 @@ extension Color {
         case "red": self = .red
         case "gray": self = .gray
         default: self = .blue
+        }
+    }
+}
+
+extension Arrangement.Nudge {
+    var actionName: String {
+        switch self {
+        case .left: "Move left"
+        case .right: "Move right"
+        case .up: "Move up"
+        case .down: "Move down"
+        }
+    }
+}
+
+/// The Arrange mode jiggle: about 1.5° each way, about 0.13 s a swing, each Button starting at its
+/// own point so they don't move in step (spec section 10).
+private struct Jiggle: ViewModifier {
+    let active: Bool
+    @State private var phase = Double.random(in: 0..<1)
+
+    func body(content: Content) -> some View {
+        if active {
+            TimelineView(.animation) { timeline in
+                let t = timeline.date.timeIntervalSinceReferenceDate / 0.26 + phase
+                content.rotationEffect(.degrees(1.5 * sin(t * 2 * .pi)))
+            }
+        } else {
+            content
         }
     }
 }

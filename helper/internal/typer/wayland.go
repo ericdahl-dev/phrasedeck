@@ -68,10 +68,15 @@ func (w *Wayland) Paste(text string) error {
 	return chordErr
 }
 
-// Ready reports whether wtype is installed and a Wayland display is set.
+// Ready reports whether a Wayland display is set and every tool Type and Paste use is
+// installed.
 func (w *Wayland) Ready() bool {
-	_, err := w.lookPath("wtype")
-	return err == nil && w.getenv("WAYLAND_DISPLAY") != ""
+	for _, tool := range []string{"wtype", "wl-copy", "wl-paste"} {
+		if _, err := w.lookPath(tool); err != nil {
+			return false
+		}
+	}
+	return w.getenv("WAYLAND_DISPLAY") != ""
 }
 
 type execRunner struct{}

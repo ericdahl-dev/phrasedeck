@@ -74,8 +74,4 @@ func TestBackendFailuresComeBackWithTheirError(t *testing.T) {
 	if got != Failed || !errors.Is(err, typer.ErrFake) {
 		t.Fatalf("outcome %v, %v", got, err)
 	}
-	got, _ = New(&typer.Fake{PasteErr: typer.ErrPasteUnsupported}, time.Second).Type("hi", false, plan.ModePaste)
-	if got != PasteUnsupported {
-		t.Fatalf("outcome %v, want PasteUnsupported", got)
-	}
 }

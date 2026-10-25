@@ -5,12 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/ericdahl-dev/phrasedeck/helper/internal/plan"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/typer"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/typing"
 )
@@ -19,24 +16,17 @@ import (
 // nothing was typed and a tap may be repeated; only 500 means some keys may have been typed.
 func TestEachTypingOutcomeHasItsDocumentedStatus(t *testing.T) {
 	want := map[typing.Outcome]int{
-		typing.Typed:            http.StatusOK,
-		typing.BadMode:          http.StatusBadRequest,
-		typing.TooLong:          http.StatusRequestEntityTooLarge,
-		typing.NotReady:         http.StatusServiceUnavailable,
-		typing.Busy:             http.StatusConflict,
-		typing.PasteUnsupported: http.StatusNotImplemented,
-		typing.Failed:           http.StatusInternalServerError,
+		typing.Typed:    http.StatusOK,
+		typing.BadMode:  http.StatusBadRequest,
+		typing.TooLong:  http.StatusRequestEntityTooLarge,
+		typing.NotReady: http.StatusServiceUnavailable,
+		typing.Busy:     http.StatusConflict,
+		typing.Failed:   http.StatusInternalServerError,
 	}
 	for outcome, status := range want {
 		if got, _ := typeAnswer(outcome, errors.New("x")); got != status {
 			t.Errorf("outcome %v: %d, want %d", outcome, got, status)
 		}
-	}
-}
-
-func TestThePasteMessageUsesThePasteThreshold(t *testing.T) {
-	if _, msg := typeAnswer(typing.PasteUnsupported, nil); !strings.Contains(msg, strconv.Itoa(plan.PasteThreshold)) {
-		t.Fatalf("message %q doesn't name plan.PasteThreshold", msg)
 	}
 }
 

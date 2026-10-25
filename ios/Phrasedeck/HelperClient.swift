@@ -48,13 +48,17 @@ struct HelperClient: Sendable {
     }
 
     enum Failure: Error, Equatable, Sendable {
-        /// Timed out, lost mid-request, or 409: the phrase may have been typed.
+        /// Timed out or lost mid-request: the phrase may have been typed.
         case noReply
+        /// 409: another phrase held the keyboard; nothing was typed (#44).
+        case busy
+        /// 500: typing failed partway, so some of it may have been typed.
+        case failedPartway
         /// Refused, or the host name didn't resolve: nothing was typed.
         case unreachable
         case unauthorized
-        /// `/pair` with no pairing window open: run `phrased pair` first.
-        case noPairingWindow
+        /// 404: on `/pair`, no pairing window is open; on `/info`, an old helper.
+        case notFound
         case notReady
         case rateLimited
         case server(Int)
@@ -176,8 +180,7 @@ struct HelperClient: Sendable {
 
     func pair(code: String, device: String) async throws -> Pairing {
         struct Reply: Decodable { let token: String }
-        let data = try await send(request("POST", "/pair", body: ["code": code, "device": device]),
-                                  notFound: .noPairingWindow)
+        let data = try await send(request("POST", "/pair", body: ["code": code, "device": device]))
         let token = try JSONDecoder().decode(Reply.self, from: data).token
         let lan = try? JSONDecoder().decode(LANFields.self, from: data)
         return Pairing(token: token, certSHA256: lan?.fingerprint, lanPort: lan?.port)
@@ -189,7 +192,7 @@ struct HelperClient: Sendable {
         let data: Data
         do {
             data = try await send(request("GET", "/info", authorized: true))
-        } catch Failure.server(404) {
+        } catch Failure.notFound {
             return LANInfo()
         }
         let lan = try JSONDecoder().decode(LANFields.self, from: data)
@@ -230,7 +233,7 @@ struct HelperClient: Sendable {
         return request
     }
 
-    private func send(_ request: URLRequest, notFound: Failure = .server(404)) async throws -> Data {
+    private func send(_ request: URLRequest) async throws -> Data {
         let data: Data
         let status: Int
         let pinning: PinningDelegate? = if case let .lan(_, _, pin) = route { PinningDelegate(pin: pin) } else { nil }
@@ -250,9 +253,10 @@ struct HelperClient: Sendable {
         switch status {
         case 200..<300: return data
         case 401: throw Failure.unauthorized
-        case 404: throw notFound
-        case 409: throw Failure.noReply
+        case 404: throw Failure.notFound
+        case 409: throw Failure.busy
         case 429: throw Failure.rateLimited
+        case 500: throw Failure.failedPartway
         case 503: throw Failure.notReady
         default: throw Failure.server(status)
         }

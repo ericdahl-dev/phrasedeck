@@ -179,12 +179,13 @@ struct HelperClientTests {
     }
 
     @Test(arguments: [
-        (409, HelperClient.Failure.noReply),
+        // Agreed with the helper (#44): 409 = busy, nothing typed; 500 = failed partway.
+        (409, HelperClient.Failure.busy),
         (401, .unauthorized),
         (503, .notReady),
         (429, .rateLimited),
-        (404, .server(404)),
-        (500, .server(500)),
+        (404, .notFound),
+        (500, .failedPartway),
         (415, .server(415)),
     ])
     func typeMapsStatusCodes(status: Int, expected: HelperClient.Failure) async {
@@ -234,7 +235,7 @@ struct HelperClientTests {
 
     @Test func pairMapsNoWindowAndWrongCode() async {
         StubURLProtocol.reset(.status(404))
-        await #expect(throws: HelperClient.Failure.noPairingWindow) {
+        await #expect(throws: HelperClient.Failure.notFound) {
             try await client(token: nil).pair(code: "1", device: "d")
         }
 

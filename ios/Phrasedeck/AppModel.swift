@@ -73,38 +73,18 @@ final class AppModel {
                     ? "Sent over the tailnet: on the home network, \(helper.name) showed a different certificate. Scan its QR code to pair again."
                     : nil))
             } catch let tailnetFailure as HelperClient.Failure {
-                return show(Self.feedback(for: failure == .pinMismatch ? failure : tailnetFailure, on: helper))
+                return show(Outcome.send(failure == .pinMismatch ? failure : tailnetFailure, on: helper))
             } catch {
                 return show(Feedback(tone: .red, message: "\(helper.name): \(error.localizedDescription)"))
             }
         } catch let failure as HelperClient.Failure {
-            return show(Self.feedback(for: failure, on: helper))
+            return show(Outcome.send(failure, on: helper))
         } catch {
             return show(Feedback(tone: .red, message: "\(helper.name): \(error.localizedDescription)"))
         }
     }
 
     func dismissFeedback() { feedback = nil }
-
-    static func feedback(for failure: HelperClient.Failure, on helper: Helper) -> Feedback {
-        let name = helper.name
-        switch failure {
-        case .noReply: return Feedback(tone: .amber, message: "no reply, it may have typed")
-        case .unreachable: return Feedback(tone: .red, message: "\(name) unreachable")
-        case .unauthorized:
-            return Feedback(tone: .red, message: "\(name) refused this device. Pair again.", pairAgain: helper)
-        case .notReady: return Feedback(tone: .red, message: "\(name) can't type yet: grant Accessibility to phrased")
-        case .rateLimited: return Feedback(tone: .red, message: "Too many sends. Wait a moment.")
-        case .noPairingWindow: return Feedback(tone: .red, message: "Run phrased pair on \(name) first.")
-        case let .server(code): return Feedback(tone: .red, message: "\(name) failed (error \(code))")
-        case .notTailnet:
-            return Feedback(tone: .red, message: "\(name) isn't a tailnet name, so nothing was sent. Pair it again by scanning its QR code.")
-        case let .notSent(code):
-            return Feedback(tone: .red, message: "\(name): the connection was blocked before anything was sent (error \(code)).")
-        case .pinMismatch:
-            return Feedback(tone: .red, message: "\(name)'s certificate didn't match, so nothing was sent. Scan its QR code to pair again.")
-        }
-    }
 
     private func show(_ feedback: Feedback) -> Feedback {
         self.feedback = feedback
@@ -250,7 +230,7 @@ final class AppModel {
                 do {
                     try computers.learn(fp, lanPort: pairing.lanPort ?? qr?.lanPort, for: helper.id)
                 } catch {
-                    return "Paired, but couldn't save \(helper.name)'s certificate: \(error.localizedDescription)"
+                    return Outcome.pinSaveFailed(on: helper, error)
                 }
             }
             return nil
@@ -266,7 +246,7 @@ final class AppModel {
     /// the QR code's is rejected.
     private func pairForToken(_ helper: Helper, code: String, qr: QRTrust?) async -> PairOutcome {
         let code = code.filter(\.isNumber)
-        guard code.count == 6 else { return .failure("Enter the 6-digit code from phrased pair.") }
+        guard code.count == 6 else { return .failure(Outcome.badCode) }
         do {
             let pairing: Pairing
             if let qr, let lan = qr.lan {
@@ -280,21 +260,12 @@ final class AppModel {
                 pairing = try await computers.pairingConnection(to: helper, via: .tailnet).pair(code: code, device: device)
             }
             if let qr, let fp = pairing.certSHA256, fp != qr.fingerprint {
-                return .failure("\(helper.name)'s certificate didn't match the QR code, so it wasn't added. Run phrased pair again and rescan.")
+                return .failure(Outcome.qrMismatch(on: helper))
             }
             try computers.setToken(pairing.token, for: helper)
             return .success(pairing)
-        } catch HelperClient.Failure.noPairingWindow {
-            return .failure("Run phrased pair on \(helper.name) first.")
-        } catch HelperClient.Failure.unauthorized {
-            return .failure("That code didn't match. Check it, or run phrased pair again.")
-        } catch HelperClient.Failure.noReply {
-            // Pairing never types: a lost reply means the code may be used up, nothing more.
-            return .failure("\(helper.name) didn't answer. Run phrased pair again and retry.")
-        } catch HelperClient.Failure.rateLimited {
-            return .failure("Too many pairing attempts. Run phrased pair on \(helper.name) again.")
         } catch let failure as HelperClient.Failure {
-            return .failure(Self.feedback(for: failure, on: helper).message ?? "Couldn't pair with \(helper.name).")
+            return .failure(Outcome.pair(failure, on: helper))
         } catch {
             return .failure("Couldn't pair with \(helper.name): \(error.localizedDescription)")
         }

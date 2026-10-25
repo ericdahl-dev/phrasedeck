@@ -1,17 +1,11 @@
 // Package typer sends keystrokes to the focused window.
 package typer
 
-import (
-	"errors"
-
-	"github.com/ericdahl-dev/phrasedeck/helper/internal/plan"
-)
-
-// ErrPasteUnsupported is returned by a backend that can't paste yet. The server maps it to 501.
-var ErrPasteUnsupported = errors.New("paste not supported by this backend yet")
+import "github.com/ericdahl-dev/phrasedeck/helper/internal/plan"
 
 // Backend is one OS's way of typing.
 type Backend interface {
+	// Type types one line, splitting it however this OS's keyboard API needs.
 	Type(text string) error
 	Paste(text string) error
 	ShiftEnter() error

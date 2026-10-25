@@ -15,6 +15,7 @@ import (
 
 	"github.com/brutella/dnssd"
 
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/confdir"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/lan"
 )
 
@@ -46,11 +47,11 @@ func TestPairURLWithoutATailnetHostHasOnlyTheLANRoute(t *testing.T) {
 func lanConfig(t *testing.T) (dir, fp string) {
 	t.Helper()
 	dir = t.TempDir()
-	_, fp, err := lan.LoadOrCreateCert(dir)
+	_, fp, err := confdir.New(dir).Cert()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, lanAddrFile), []byte("192.168.1.20:47900\n"), 0o600); err != nil {
+	if err := confdir.New(dir).RecordLAN("192.168.1.20", 47900); err != nil {
 		t.Fatal(err)
 	}
 	return dir, fp
@@ -95,7 +96,8 @@ func TestPairQRWithTailscaleOffUsesTheLANAddress(t *testing.T) {
 
 func TestSubnetsComeFromTheFileAndFlags(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, subnetsFile), []byte("# home\n192.168.1.0/24\n\n10.0.0.0/8 # lab\n"), 0o600)
+	// lan-subnets is the documented, hand-edited list.
+	os.WriteFile(filepath.Join(dir, "lan-subnets"), []byte("# home\n192.168.1.0/24\n\n10.0.0.0/8 # lab\n"), 0o600)
 	o, err := parseFlags([]string{"-config", dir, "-lan", "172.16.0.0/12"}, "/h")
 	if err != nil {
 		t.Fatal(err)

@@ -1,39 +1,20 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"net"
 	"net/netip"
-	"os"
-	"path/filepath"
 	"strings"
 
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/confdir"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/lan"
-)
-
-const (
-	// subnetsFile in the config dir lists -lan subnets, one per line; # starts a comment.
-	subnetsFile = "lan-subnets"
-	// lanAddrFile is where the running helper records its LAN address for `phrased pair`.
-	lanAddrFile = "lan-addr"
 )
 
 // subnets returns the -lan subnets: the config file's, then the flags'.
 func subnets(o options) ([]netip.Prefix, error) {
-	var values []string
-	if f, err := os.Open(filepath.Join(o.config, subnetsFile)); err == nil {
-		sc := bufio.NewScanner(f)
-		for sc.Scan() {
-			line, _, _ := strings.Cut(sc.Text(), "#")
-			if line = strings.TrimSpace(line); line != "" {
-				values = append(values, line)
-			}
-		}
-		f.Close()
-		if err := sc.Err(); err != nil {
-			return nil, fmt.Errorf("%s: %w", subnetsFile, err)
-		}
+	values, err := confdir.New(o.config).Subnets()
+	if err != nil {
+		return nil, err
 	}
 	return lan.ParsePrefixes(append(values, o.lan...))
 }

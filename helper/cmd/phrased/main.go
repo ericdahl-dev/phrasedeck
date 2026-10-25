@@ -194,9 +194,15 @@ func run(o options) error {
 	defer stop()
 	errc := make(chan error, 2)
 	go func() { errc <- servers[0].Serve(ln) }()
+	bonjourDone := make(chan struct{})
 	if lanLn != nil {
 		go func() { errc <- servers[1].ServeTLS(lanLn, "", "") }()
-		go advertise(ctx, bonjourConfig(hostname, tsName, o.lanPort, lanAddrs))
+		go func() {
+			advertise(ctx, bonjourConfig(hostname, tsName, o.lanPort, lanAddrs))
+			close(bonjourDone)
+		}()
+	} else {
+		close(bonjourDone)
 	}
 	select {
 	case err := <-errc:
@@ -207,6 +213,11 @@ func run(o options) error {
 		defer cancel()
 		for _, srv := range servers {
 			srv.Shutdown(shut)
+		}
+		// Let Bonjour send its goodbye, so browsers drop the service now rather than at TTL.
+		select {
+		case <-bonjourDone:
+		case <-shut.Done():
 		}
 		return nil
 	}

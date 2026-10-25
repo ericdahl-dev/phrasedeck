@@ -23,6 +23,7 @@ firewall:
 	@echo "Run these to let other tailnet devices reach phrased:"
 	@echo "  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add $(FIREWALL_BIN)"
 	@echo "  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp $(FIREWALL_BIN)"
+	@echo "On a managed Mac these are refused; see \"On a managed Mac\" in the README."
 
 # Renders the LaunchAgent with this account's home folder.
 plist:

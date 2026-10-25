@@ -137,6 +137,17 @@ struct DeckEditTests {
         #expect(!context.hasChanges)
     }
 
+    /// The Pages sheet renames a row as it disappears, which can be just after a swipe deleted it.
+    @Test func renamingADeletedPageDoesNothing() throws {
+        let page = try Deck.addPage(named: "Agents", in: context)
+        try Deck.delete(page, in: context)
+
+        try Deck.rename(page, to: "Agent")
+
+        #expect(!context.hasChanges)
+        #expect(try pages().isEmpty)
+    }
+
     @Test func aBlankDraftCannotBeSaved() {
         #expect(!PhraseDraft(label: " ", text: "x").isValid)
         #expect(!PhraseDraft(label: "x", text: "").isValid)

@@ -49,11 +49,13 @@ enum Deck {
         let count = (try? context.fetchCount(FetchDescriptor<Page>())) ?? 0
         let page = Page(name: name.trimmingCharacters(in: .whitespaces), order: count)
         context.insert(page)
-        try context.save()
+        try saveInserted(page, in: context)
         return page
     }
 
     static func rename(_ page: Page, to name: String) throws {
+        // The Pages sheet renames a row as it disappears, which can be just after it was deleted.
+        guard !page.isDeleted, page.modelContext != nil else { return }
         let name = name.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty, name != page.name else { return }
         page.name = name
@@ -84,7 +86,7 @@ enum Deck {
                             colorName: draft.colorName, order: page.sortedPhrases.count, page: page,
                             spanColumns: draft.spanColumns, spanRows: draft.spanRows)
         context.insert(phrase)
-        try context.save()
+        try saveInserted(phrase, in: context)
         return phrase
     }
 
@@ -110,6 +112,17 @@ enum Deck {
         if let page = phrase.page { renumber(page, without: phrase) }
         context.delete(phrase)
         try context.save()
+    }
+
+    /// Saves a new row, or takes it back out if the save fails, so retrying doesn't add a second one.
+    /// shortcut: not unit-tested, since SwiftData can't be made to fail a save on demand.
+    private static func saveInserted(_ model: some PersistentModel, in context: ModelContext) throws {
+        do {
+            try context.save()
+        } catch {
+            context.delete(model)
+            throw error
+        }
     }
 
     private static func renumber(_ page: Page, without phrase: Phrase) {

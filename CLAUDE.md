@@ -10,6 +10,8 @@ work here. Read these first:
 
 - **Test first** (`/tdd`) for code: write the test, watch it fail, then make it pass. Put the red
   run in the PR. Docs-only changes are exempt.
+- **Terse replies** (`/caveman`) in chat and agent-to-agent messages. If a session lost it (after a
+  compaction, say), invoke it again. PRs, issues, commits, docs and UI copy stay in full sentences.
 - **One issue, one PR** that closes it (`Closes #N`). Small PRs that build on each other are fine.
 - **Review, then merge.** Another agent reviews. Only after their pass, turn on
   `gh pr merge <N> --auto --squash --delete-branch`.

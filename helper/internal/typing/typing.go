@@ -28,6 +28,9 @@ const (
 	Busy     // another phrase held the keyboard for the whole wait
 	PasteUnsupported
 	Failed // the backend failed partway; the error says how
+
+	// NumOutcomes counts the outcomes above; keep it last.
+	NumOutcomes
 )
 
 // Typist serializes phrases onto one keyboard.

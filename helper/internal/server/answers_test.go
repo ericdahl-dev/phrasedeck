@@ -69,3 +69,13 @@ func TestBusyAndFailedAnswersAreAnErrorObject(t *testing.T) {
 		}
 	}
 }
+
+// An outcome added to typing without a row here would answer status 0, which panics in
+// WriteHeader.
+func TestEveryTypingOutcomeHasAnAnswer(t *testing.T) {
+	for o := typing.Outcome(0); o < typing.NumOutcomes; o++ {
+		if status, _ := typeAnswer(o, errors.New("x")); status == 0 {
+			t.Errorf("outcome %v has no answer", o)
+		}
+	}
+}

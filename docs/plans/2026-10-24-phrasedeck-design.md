@@ -1,6 +1,6 @@
 # phrasedeck design
 
-Date: 2026-10-24
+Date: 2026-10-24 (revised the same day after review)
 Status: approved design, not yet built
 
 ## Goal
@@ -9,7 +9,8 @@ A Stream Deck-style iOS app for Eric's own use. Each button types an often-used 
 focused window on his Mac or on omarchy-laptop. The main target is a Claude Code terminal, for
 prompts like "what is the status of the agents? ask them if needed".
 
-Not a product: there's no App Store, no TestFlight and no other users.
+Not a product: there's no App Store release and no other users. Builds reach Eric's iPhone and
+iPad through internal TestFlight only.
 
 ## Pieces
 
@@ -20,47 +21,95 @@ Not a product: there's no App Store, no TestFlight and no other users.
 The text always goes to whatever window has focus on the chosen computer. The phone only picks
 the computer.
 
-## Discovery, pairing and protocol
+## Network, pairing and protocol
 
-- The helper advertises `_phrased._tcp` with Bonjour on the LAN. Over Tailscale, you add the helper
-  once by its tailnet name, for example `omarchy-laptop`.
-- **Pairing:** the first connection makes the helper show a 6-digit code. On the Mac it's a
-  notification; on Linux it's in the terminal or the journal. You enter the code on the phone, which
-  gets a long-lived token and stores it in the Keychain. The helper keeps only token hashes, in
-  `~/.config/phrased/tokens.json` (mode 0600).
-- **Transport:** plain HTTP with a bearer token. It binds only to the tailnet IP (100.x) and the LAN
-  IP, never to 0.0.0.0.
-  - `POST /type` with `{text, enter: bool, mode: "auto"|"type"|"paste"}` returns 200 after the
-    text has been typed.
-  - `GET /health` returns `{hostname, os, accessibility_ok}`.
-- Rate limit: 10 requests per second, so a stuck button can't flood the keyboard.
+### Tailnet only
+
+- The helper listens on all addresses on port 47811, but drops any connection whose remote
+  address is outside Tailscale (`100.64.0.0/10` and `fd7a:115c:a1e0::/48`) right after accept.
+  That filter replaces picking addresses at startup. There is no LAN binding.
+- Computers are added in the app by tailnet name, for example `omarchy-laptop`.
+- **Bonjour is deferred**, both the helper's advertising and discovery in the app (issue #11). It
+  only helps on a LAN, and the helper no longer serves the LAN.
+- **Host allowlist** against DNS rebinding: a request whose `Host` header (port stripped) isn't the
+  machine's tailnet name, its MagicDNS name or one of its tailnet IPs gets 403. The helper reads
+  those from `tailscale status --json` at startup, and a repeatable `-allow-host` flag adds names.
+- Optional hardening: a Tailscale ACL that lets only Eric's phones reach port 47811.
+
+### Pairing
+
+- Pairing starts on the computer, with the local command **`phrased pair`**. It opens a 2-minute
+  pairing window and prints a 6-digit code in the terminal; on the Mac it also shows a
+  notification. The command writes the window (the code's hash and its expiry) to
+  `~/.config/phrased/pairing.json` (mode 0600), and the running helper picks it up.
+- `POST /pair` with `{code, device}` returns `{token}` while a window is open, 401 for a wrong
+  code, and **404 when no window is open**. A code is single-use: success closes the window.
+- **Lockout:** after about 10 failed attempts in total, `/pair` stays locked (404) until
+  `phrased pair` runs again. `/pair` has its own rate limiter, separate from `/type`.
+- The phone stores the long-lived token in its Keychain. The helper keeps only token hashes, in
+  `~/.config/phrased/tokens.json` (mode 0600), and reloads that file when it changes.
+- **Devices and revoke:** `phrased devices` lists paired devices, and `phrased revoke <name>`
+  removes one. Both edit the token file, and the running helper sees the change on its next
+  request.
+
+### HTTP API
+
+Plain HTTP with a bearer token, inside the tailnet.
+
+- `POST /type` with `{text, enter: bool, mode: "auto"|"type"|"paste"}` returns 200 after the text
+  has been typed. The app always sends `mode: "auto"`; `type` and `paste` are for curl and tests.
+- `GET /health` returns `{hostname, os, accessibility_ok}` with no auth.
+- `POST /pair` as above.
+
+### Server limits
+
+- `/type` is rate-limited to 10 requests per second, applied after auth, so a stuck button can't
+  flood the keyboard.
+- Typing is serialized by a lock. A request waits at most 1 second for it, then gets **409**.
+- `ReadHeaderTimeout` is set, request bodies are capped at 64 KB, and `POST` bodies must be
+  `application/json` (415 otherwise).
 
 ## iOS app
 
 ### Data
 
 ```
-Phrase { id, label, text, pressEnter: Bool, confirm: Bool, color, page }
-Page   { id, name, order }
-Helper { id, name, host, port }      // token lives in the Keychain, keyed by Helper.id
+Phrase { id, label, text, pressEnter: Bool, confirm: Bool, color, page, order, seedKey? }
+Page   { id, name, order, seedKey? }
+Helper { id, name, host, port }   // local to each device; token in the Keychain, keyed by Helper.id
 ```
 
-Phrases and pages are stored in SwiftData and synced through iCloud (CloudKit) between the iPhone
-and iPad. Tokens never sync, so each device pairs on its own.
+- Phrases and pages are stored in SwiftData. They start local only (`cloudKitDatabase: .none`,
+  and no iCloud entitlement). The iCloud sync slice (#10) adds the CloudKit container and the
+  entitlement, and then they sync between the iPhone and iPad.
+- **Computers stay local to each device.** `Helper` records live in UserDefaults (a local-only
+  SwiftData store would also do), never in the synced store. The stable `Helper.id` is the
+  Keychain key. The selected computer is stored per device too.
+- Tokens never sync, so each device pairs on its own.
 
 ### Screens
 
-- **Main screen:** a computer picker at the top with a status dot. Green means reachable, red means
-  unreachable, and amber means the Mac lacks Accessibility permission. Below it is a grid of
+- **Main screen:** a computer picker at the top with a status dot. Green means reachable, red
+  means unreachable, and amber means the Mac lacks Accessibility permission. Below it is a grid of
   buttons, one page per swipe: 3×4 on an iPhone, more on an iPad. Each button shows its label in
   large type, with a ⏎ badge if it presses Enter.
 - **Tap** sends the phrase. Phrases marked `confirm` need a double-tap.
-- **Long-press** edits a button: label, text, Enter, confirm, color and page, or delete it.
-  A "+" tile adds a phrase.
-- **Feedback:** a haptic tick on a tap, a green flash when the helper returns 200, and a red flash
-  plus a banner on failure ("omarchy-laptop unreachable", "Accessibility off on Mac").
+- **Long-press** (a `.contextMenu`) edits a button: label, text, Enter, confirm, color and page, or
+  delete it. A "+" tile adds a phrase.
+- **Computers list:** swipe to delete a computer, which also clears its Keychain item. After a
+  401, the banner offers **Pair again**.
+- **Feedback:** a haptic tick on a tap and a green flash when the helper returns 200. Failures show
+  a flash plus a banner, in two kinds:
+  - **Amber, "no reply, it may have typed":** the send timed out, or the helper answered 409.
+  - **Red, "unreachable":** the connection was refused, or the host name couldn't be resolved.
+  - Other errors (unauthorized, not ready, rate-limited) are red with their own text.
 - **No automatic retry.** A retry could type the phrase twice.
 - A send times out after 3 seconds.
+
+### Networking
+
+- App Transport Security allows plain HTTP to `*.ts.net` (an exception domain that includes
+  subdomains) and to bare tailnet names and IPs (`NSAllowsLocalNetworking` where it applies).
 
 ### Starter phrases
 
@@ -72,40 +121,61 @@ and iPad. Tokens never sync, so each device pairs on its own.
 | Yes | yes | yes | yes |
 | Merge it | Merge it | yes | yes |
 
+Each seeded row carries a fixed `seedKey`. Seeding inserts only the keys that are missing, and
+once sync is on, rows that share a `seedKey` are merged, so two devices don't double the deck.
+
 ## `phrased` helper (Go)
 
-- `server`: `net/http`, the interface binding above, a constant-time token check and the rate limit.
-- `typer` interface: `Type(text)`, `Paste(text)`, `Enter()`.
-  - **macOS:** CGEvent with `CGEventKeyboardSetUnicodeString` in 20-character chunks, through cgo.
-    Paste saves the clipboard, sets it, sends Cmd+V, then restores the clipboard. It needs
-    Accessibility permission, and reports that in `/health` rather than failing silently.
+- `server`: `net/http` behind the tailnet filter, the Host allowlist, a constant-time token check,
+  the limits above, and the 1-second typing lock.
+- `plan`: turns `(text, enter, mode)` into steps.
+  - **`auto` mode:** paste any text that contains a newline, and anything over 300 characters;
+    type the rest. Claude Code collapses long pastes into "[Pasted text]", so short single-line
+    phrases are typed.
+  - **`type` mode:** newlines are typed as Shift+Enter, so a multi-line phrase doesn't send early.
+    This happens only in explicit `type` mode, because Shift+Enter fails in older Alacritty, tmux
+    and gnome-terminal.
+  - **`paste` mode** always pastes, newlines included.
+  - The final Enter comes only from the `enter` flag. CRLF is normalized to LF.
+  - Typed text is chunked by rune (20 per chunk); a backend may re-chunk.
+- `typer` interface: `Type(text)`, `Paste(text)`, `ShiftEnter()`, `Enter()`, `Ready()`.
+  - **macOS:** CGEvent with `CGEventKeyboardSetUnicodeString`, through cgo. The backend re-chunks
+    into 20 or fewer UTF-16 units and never splits a surrogate pair. Paste saves every pasteboard
+    item and type, sets the text, sends Cmd+V, and restores after 500 ms or more, but only if the
+    pasteboard `changeCount` hasn't moved since the paste. Ready uses `CGPreflightPostEventAccess`,
+    and `/health` reports it rather than failing silently.
   - **Linux (Hyprland/Wayland):** `wtype -- <text>`, passed as an exec argument and never through a
-    shell. Paste uses `wl-copy` plus Ctrl+Shift+V.
-  - **`auto` mode:** type up to about 300 characters and paste anything longer. Claude Code collapses
-    long pastes into "[Pasted text]", so short phrases are typed.
-- **Newlines** inside a phrase are typed as Shift+Enter, so a multi-line phrase doesn't send early.
-  The final Enter comes only from the `enter` flag.
-- `pair`: generates the code and stores the hashes.
-- `mdns`: Bonjour advertising.
+    shell. Paste runs `wl-copy --foreground --paste-once`, sends Ctrl+Shift+V, and waits for
+    `wl-copy` to exit before restoring the old clipboard, instead of sleeping a fixed time. The
+    helper never captures stdout or stderr from processes that fork, such as a background `wl-copy`.
+- `pair`, `devices` and `revoke` subcommands, as above.
 
 ## Testing
 
-- **Go:** unit tests with a fake typer cover auth, the rate limit, the type-versus-paste rule,
-  newline handling and pairing. The Linux integration test runs `wtype` in a headless Wayland
-  session (`sway`) in CI.
-- **iOS:** unit tests for the model and for the HTTP client against a fake server, plus a UI test
-  for tap and double-tap confirm.
+- **Go:** unit tests with a fake typer cover auth, the rate limit, the 1-second lock and 409, the
+  hardening limits, the tailnet filter, the Host allowlist, the type-versus-paste rules, newline
+  handling, pairing, lockout, revoke and token reload. Linux backend tests inject the command
+  runner and check exact argument lists.
+- **Linux typing is checked by hand.** There's no headless Wayland test in CI.
+- **iOS:** unit tests for the model and seeding, the Keychain store (run in a test host app), and
+  the HTTP client against a stub, plus a UI test target for tap and double-tap confirm.
 - **Manual checklist** on both machines, including Unicode ("naïve café ✓") and a multi-line
   phrase.
 
 ## Install (personal use only)
 
-- **iOS:** build and run from Xcode straight onto Eric's iPhone and iPad with his developer account.
-  There's no App Store Connect record and no TestFlight. Reinstall when the provisioning profile
-  expires after a year.
-- **macOS:** build locally and run from `~/Library/LaunchAgents/dev.ericdahl.phrased.plist`.
-  It doesn't need notarizing, but it does need Accessibility permission once.
-- **omarchy:** `go install`, `pacman -S wtype wl-clipboard`, plus a systemd user unit.
+- **iOS:** internal TestFlight only, for Eric's own iPhone and iPad. There are no external testers
+  and no App Store release. It needs an App Store Connect app record for
+  `dev.ericdahl.phrasedeck`, which Eric creates, and then an archive and upload. The app uses no
+  encryption beyond what the OS provides, so `ITSAppUsesNonExemptEncryption` is `NO`. During
+  development the app still runs straight from Xcode on his devices.
+- **macOS:** build locally with `make`, which signs `phrased` with a stable identity (Eric's Apple
+  Development certificate), so the Accessibility grant survives rebuilds. It runs from
+  `~/Library/LaunchAgents/dev.ericdahl.phrased.plist`. It doesn't need notarizing, but it does need
+  Accessibility permission once.
+- **omarchy:** `pacman -S wtype wl-clipboard`, install the binary, plus a systemd user unit tied to
+  the graphical session. The unit doesn't hardcode `WAYLAND_DISPLAY`; it takes it from the
+  uwsm/graphical-session environment, with a `ConditionEnvironment=WAYLAND_DISPLAY` guard.
 
 ## Repo layout
 
@@ -117,4 +187,5 @@ docs/      design and plans
 
 ## Out of scope for v1
 
-Per-app pages, sequences with delays, icons, and choosing a session or window from the phone.
+Per-app pages, sequences with delays, icons, choosing a session or window from the phone, LAN
+access, and Bonjour discovery (deferred, see #11).

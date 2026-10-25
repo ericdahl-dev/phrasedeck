@@ -11,6 +11,9 @@ import (
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/typer"
 )
 
+// NotReadyHelp says how to make a backend that isn't Ready able to type.
+const NotReadyHelp = "grant Accessibility to phrased (System Settings > Privacy & Security > Accessibility)"
+
 // MaxText caps the text of one phrase, in runes.
 const MaxText = 10000
 

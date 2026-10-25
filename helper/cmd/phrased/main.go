@@ -30,6 +30,7 @@ import (
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/server"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/tailnet"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/typer"
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/typing"
 )
 
 // macTailscale is where the Mac app keeps its CLI when `tailscale` isn't on PATH.
@@ -188,7 +189,7 @@ func run(o options) error {
 		}
 	}
 	if !backend.Ready() {
-		log.Printf("can't type yet: grant Accessibility to this binary (System Settings > Privacy & Security > Accessibility)")
+		log.Printf("can't type yet: %s", typing.NotReadyHelp)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

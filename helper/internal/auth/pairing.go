@@ -59,7 +59,7 @@ func OpenWindow(path string, now time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return code, writePrivate(path, data)
+	return code, WritePrivate(path, data)
 }
 
 // Pairer exchanges a code from an open window for a device token. It runs in the helper and

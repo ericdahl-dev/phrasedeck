@@ -2,11 +2,7 @@ import SwiftData
 import SwiftUI
 
 struct ContentView: View {
-    #if DEBUG
     var stubProbe: StubHelper.Probe?
-    #else
-    var stubProbe: Never?
-    #endif
 
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase

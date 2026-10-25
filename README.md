@@ -109,8 +109,9 @@ At startup the Helper picks its keyboard tool from the session (`XDG_SESSION_TYP
 
 GNOME and KDE don't offer the virtual-keyboard protocol `wtype` needs, so there the Helper types
 through `ydotool`, which goes through the kernel's `/dev/uinput`. It sends US keycodes, so a line
-with anything beyond ASCII ("naïve café ✓") is pasted instead of typed. On Ubuntu with GNOME
-(Wayland):
+with anything beyond ASCII ("naïve café ✓") is pasted instead of typed. GNOME typing needs
+Ubuntu 26.04 or later (ydotool 1.0.x); 24.04 and 25.10 ship ydotool 0.1.8, which doesn't work. On
+Ubuntu with GNOME (Wayland):
 
 ```sh
 sudo apt install ydotool wl-clipboard

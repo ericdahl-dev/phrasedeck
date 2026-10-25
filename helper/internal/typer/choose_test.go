@@ -45,7 +45,7 @@ func TestHyprlandStillTypesWithWtype(t *testing.T) {
 // ydotool sends US keycodes, so it types ASCII only. Anything else goes through the
 // clipboard, the way a long or multi-line phrase does.
 func TestYdotoolTypesASCIIAndPastesTheRest(t *testing.T) {
-	f := &fakeRunner{}
+	f := &fakeRunner{clipboard: "old"}
 	w := session(f, gnome)
 	if err := w.Type("hello"); err != nil {
 		t.Fatal(err)
@@ -62,6 +62,7 @@ func TestYdotoolTypesASCIIAndPastesTheRest(t *testing.T) {
 		"start wl-copy --foreground --paste-once <naïve café ✓",
 		"ydotool key 29:1 42:1 47:1 47:0 42:0 29:0",
 		"wait 2s",
+		"wl-copy <old",
 	}
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("non-ASCII: calls %q, want %q", f.calls, want)
@@ -126,5 +127,26 @@ func TestX11TypesWithXdotoolAndPastesWithXclip(t *testing.T) {
 	w.getenv = func(string) string { return "" }
 	if p := w.Problem(); !strings.Contains(p, "DISPLAY") || strings.Contains(p, "WAYLAND") {
 		t.Errorf("no display: problem %q should name DISPLAY", p)
+	}
+}
+
+// The user manager may not have XDG_SESSION_TYPE; DISPLAY without WAYLAND_DISPLAY is X11.
+func TestDISPLAYAloneMeansX11(t *testing.T) {
+	f := &fakeRunner{}
+	if err := session(f, map[string]string{"XDG_CURRENT_DESKTOP": "GNOME", "DISPLAY": ":0"}).Enter(); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"xdotool key --clearmodifiers Return"}; !reflect.DeepEqual(f.calls, want) {
+		t.Fatalf("calls %q, want %q", f.calls, want)
+	}
+}
+
+// Without XDG_RUNTIME_DIR, ydotool falls back to /tmp/.ydotool_socket; so does the check.
+func TestYdotoolSocketWithoutARuntimeDirIsInTmp(t *testing.T) {
+	env := map[string]string{"XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "GNOME", "WAYLAND_DISPLAY": "wayland-0"}
+	w := session(&fakeRunner{}, env)
+	w.exists = func(path string) bool { return path != "/tmp/.ydotool_socket" }
+	if p := w.Problem(); !strings.Contains(p, "/tmp/.ydotool_socket") {
+		t.Errorf("problem %q should name /tmp/.ydotool_socket", p)
 	}
 }

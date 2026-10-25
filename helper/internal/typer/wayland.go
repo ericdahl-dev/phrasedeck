@@ -108,7 +108,9 @@ func pick(getenv func(string) string) *Desktop {
 	keys, clip := wtypeKeys, waylandClip
 	desktop := strings.ToLower(getenv("XDG_CURRENT_DESKTOP"))
 	switch {
-	case getenv("XDG_SESSION_TYPE") == "x11":
+	// The user manager may lack XDG_SESSION_TYPE; DISPLAY without WAYLAND_DISPLAY is X11 too.
+	case getenv("XDG_SESSION_TYPE") == "x11" ||
+		getenv("XDG_SESSION_TYPE") == "" && getenv("WAYLAND_DISPLAY") == "" && getenv("DISPLAY") != "":
 		keys, clip = xdotoolKeys, x11Clip
 	case strings.Contains(desktop, "gnome") || strings.Contains(desktop, "kde"):
 		keys = ydotoolKeys
@@ -175,7 +177,10 @@ func (w *Desktop) Problem() string {
 	if w.keys.tool == "ydotool" {
 		socket := w.getenv("YDOTOOL_SOCKET")
 		if socket == "" {
-			socket = w.getenv("XDG_RUNTIME_DIR") + "/.ydotool_socket" // ydotoold 1.0's default
+			socket = "/tmp/.ydotool_socket" // ydotool 1.0's defaults: here without a runtime dir
+			if dir := w.getenv("XDG_RUNTIME_DIR"); dir != "" {
+				socket = dir + "/.ydotool_socket"
+			}
 		}
 		if !w.exists(socket) {
 			return fmt.Sprintf("ydotoold isn't running (no socket at %s); start it as the README's GNOME and KDE setup shows", socket)

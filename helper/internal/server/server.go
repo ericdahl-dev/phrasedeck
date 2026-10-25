@@ -1,4 +1,4 @@
-// Package server is phrased's HTTP API: GET /health and POST /type.
+// Package server is phrased's HTTP API: GET /health, POST /type and POST /pair.
 package server
 
 import (
@@ -24,10 +24,13 @@ const (
 	MaxBody = 64 << 10
 	// MaxText caps the text of one phrase, in runes.
 	MaxText = 10000
+	// MaxDevice caps a device name, in runes.
+	MaxDevice = 64
 )
 
 type Config struct {
 	Store      *auth.Store
+	Pairer     *auth.Pairer
 	Typer      typer.Backend
 	Hostname   string
 	OS         string
@@ -37,9 +40,10 @@ type Config struct {
 }
 
 type server struct {
-	cfg   Config
-	limit *rate.Limiter
-	lock  chan struct{}
+	cfg       Config
+	limit     *rate.Limiter
+	pairLimit *rate.Limiter
+	lock      chan struct{}
 }
 
 // New returns the helper's handler.
@@ -47,10 +51,16 @@ func New(cfg Config) http.Handler {
 	if cfg.LockWait == 0 {
 		cfg.LockWait = time.Second
 	}
-	s := &server{cfg: cfg, limit: rate.NewLimiter(10, 10), lock: make(chan struct{}, 1)}
+	s := &server{
+		cfg:       cfg,
+		limit:     rate.NewLimiter(10, 10),
+		pairLimit: rate.NewLimiter(1, 3),
+		lock:      make(chan struct{}, 1),
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.health)
 	mux.HandleFunc("/type", s.typeText)
+	mux.HandleFunc("/pair", s.pair)
 	return s.hostGuard(mux)
 }
 
@@ -85,19 +95,9 @@ type typeRequest struct {
 }
 
 func (s *server) typeText(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		fail(w, http.StatusMethodNotAllowed, "use POST")
+	if !postJSON(w, r) {
 		return
 	}
-	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
-		fail(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
-		return
-	}
-	if r.ContentLength > MaxBody {
-		fail(w, http.StatusRequestEntityTooLarge, "body over 64 KB")
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, MaxBody)
 	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || !s.cfg.Store.Check(tok) {
 		fail(w, http.StatusUnauthorized, "missing or invalid token")
@@ -109,13 +109,7 @@ func (s *server) typeText(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req typeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var tooBig *http.MaxBytesError
-		if errors.As(err, &tooBig) {
-			fail(w, http.StatusRequestEntityTooLarge, "body over 64 KB")
-			return
-		}
-		fail(w, http.StatusBadRequest, "bad JSON: "+err.Error())
+	if !decode(w, r, &req) {
 		return
 	}
 	switch req.Mode {
@@ -155,6 +149,77 @@ func (s *server) typeText(w http.ResponseWriter, r *http.Request) {
 		log.Printf("type: %v", err)
 		fail(w, http.StatusInternalServerError, "typing failed: "+err.Error())
 	}
+}
+
+type pairRequest struct {
+	Code   string `json:"code"`
+	Device string `json:"device"`
+}
+
+func (s *server) pair(w http.ResponseWriter, r *http.Request) {
+	if !postJSON(w, r) {
+		return
+	}
+	if !s.pairLimit.Allow() {
+		fail(w, http.StatusTooManyRequests, "too many pairing attempts")
+		return
+	}
+	var req pairRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	device := strings.TrimSpace(req.Device)
+	if device == "" || utf8.RuneCountInString(device) > MaxDevice {
+		fail(w, http.StatusBadRequest, "device must be 1 to 64 characters")
+		return
+	}
+	token, err := s.cfg.Pairer.Pair(req.Code, device)
+	switch {
+	case err == nil:
+		log.Printf("paired %q", device)
+		reply(w, http.StatusOK, map[string]string{"token": token})
+	case errors.Is(err, auth.ErrNoWindow):
+		fail(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, auth.ErrWrongCode):
+		fail(w, http.StatusUnauthorized, err.Error())
+	default:
+		log.Printf("pair: %v", err)
+		fail(w, http.StatusInternalServerError, "pairing failed: "+err.Error())
+	}
+}
+
+// postJSON answers 405, 415 or 413 unless r is a POST with a JSON body of at most MaxBody, and
+// caps the body for the reads that follow.
+func postJSON(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		fail(w, http.StatusMethodNotAllowed, "use POST")
+		return false
+	}
+	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
+		fail(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
+		return false
+	}
+	if r.ContentLength > MaxBody {
+		fail(w, http.StatusRequestEntityTooLarge, "body over 64 KB")
+		return false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, MaxBody)
+	return true
+}
+
+// decode reads the JSON body into v, answering 413 or 400 on failure.
+func decode(w http.ResponseWriter, r *http.Request, v any) bool {
+	err := json.NewDecoder(r.Body).Decode(v)
+	var tooBig *http.MaxBytesError
+	switch {
+	case err == nil:
+		return true
+	case errors.As(err, &tooBig):
+		fail(w, http.StatusRequestEntityTooLarge, "body over 64 KB")
+	default:
+		fail(w, http.StatusBadRequest, "bad JSON: "+err.Error())
+	}
+	return false
 }
 
 func reply(w http.ResponseWriter, code int, v any) {

@@ -1,4 +1,4 @@
-// Package server is phrased's HTTP API: GET /health, POST /type and POST /pair.
+// Package server is phrased's HTTP API: GET /health, GET /info, POST /type and POST /pair.
 package server
 
 import (
@@ -37,6 +37,9 @@ type Config struct {
 	AllowHosts []string
 	// LockWait is how long a request waits for the typing lock before 409. Default 1 second.
 	LockWait time.Duration
+	// CertSHA256 and LANPort describe the LAN listener; both are empty when LAN is off.
+	CertSHA256 string
+	LANPort    int
 }
 
 type server struct {
@@ -46,8 +49,17 @@ type server struct {
 	lock      chan struct{}
 }
 
-// New returns the helper's handler.
-func New(cfg Config) http.Handler {
+// New returns the helper's handler for one listener, accepting cfg.AllowHosts.
+func New(cfg Config) http.Handler { return NewHelper(cfg).Handler(cfg.AllowHosts) }
+
+// Helper holds the state every listener shares: tokens, rate limits, pairing lockout and the
+// typing lock. Each listener gets its own Handler, with its own Host allowlist.
+type Helper struct {
+	s           *server
+	mux, lanMux http.Handler
+}
+
+func NewHelper(cfg Config) *Helper {
 	if cfg.LockWait == 0 {
 		cfg.LockWait = time.Second
 	}
@@ -57,18 +69,28 @@ func New(cfg Config) http.Handler {
 		pairLimit: rate.NewLimiter(1, 3),
 		lock:      make(chan struct{}, 1),
 	}
+	lanMux := http.NewServeMux()
+	lanMux.HandleFunc("/health", s.health)
+	lanMux.HandleFunc("/type", s.typeText)
+	lanMux.HandleFunc("/pair", s.pair)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", s.health)
-	mux.HandleFunc("/type", s.typeText)
-	mux.HandleFunc("/pair", s.pair)
-	return s.hostGuard(mux)
+	mux.Handle("/", lanMux)
+	// Only over the tailnet: /info hands out the pin, which a LAN peer could otherwise
+	// fetch over a connection it can't yet verify.
+	mux.HandleFunc("/info", s.info)
+	return &Helper{s: s, mux: mux, lanMux: lanMux}
 }
 
-// hostGuard answers 403 to any Host that isn't this machine's tailnet name or IP, so a web
-// page can't reach the helper through DNS rebinding.
-func (s *server) hostGuard(next http.Handler) http.Handler {
+// Handler answers 403 to any Host not in allow (this listener's names and IPs for this
+// machine), so a web page can't reach the helper through DNS rebinding.
+func (h *Helper) Handler(allow []string) http.Handler { return guard(allow, h.mux) }
+
+// LANHandler is Handler for the LAN listener, which serves everything but /info.
+func (h *Helper) LANHandler(allow []string) http.Handler { return guard(allow, h.lanMux) }
+
+func guard(allow []string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !tailnet.HostAllowed(r.Host, s.cfg.AllowHosts) {
+		if !tailnet.HostAllowed(r.Host, allow) {
 			fail(w, http.StatusForbidden, "host not allowed: "+r.Host)
 			return
 		}
@@ -88,6 +110,39 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// authorized answers 401 unless r carries a paired device's bearer token.
+func (s *server) authorized(w http.ResponseWriter, r *http.Request) bool {
+	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || !s.cfg.Store.Check(tok) {
+		fail(w, http.StatusUnauthorized, "missing or invalid token")
+		return false
+	}
+	return true
+}
+
+// info tells a paired device the LAN listener's port and certificate fingerprint, so a
+// computer paired over the tailnet can pin it without pairing again.
+func (s *server) info(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		fail(w, http.StatusMethodNotAllowed, "use GET")
+		return
+	}
+	if !s.authorized(w, r) {
+		return
+	}
+	out := map[string]any{"hostname": s.cfg.Hostname}
+	s.addLAN(out)
+	reply(w, http.StatusOK, out)
+}
+
+// addLAN adds the LAN listener's fingerprint and port to a reply when LAN is on.
+func (s *server) addLAN(out map[string]any) {
+	if s.cfg.CertSHA256 != "" {
+		out["certSHA256"] = s.cfg.CertSHA256
+		out["lanPort"] = s.cfg.LANPort
+	}
+}
+
 type typeRequest struct {
 	Text  string    `json:"text"`
 	Enter bool      `json:"enter"`
@@ -98,9 +153,7 @@ func (s *server) typeText(w http.ResponseWriter, r *http.Request) {
 	if !postJSON(w, r) {
 		return
 	}
-	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || !s.cfg.Store.Check(tok) {
-		fail(w, http.StatusUnauthorized, "missing or invalid token")
+	if !s.authorized(w, r) {
 		return
 	}
 	if !s.limit.Allow() {
@@ -177,7 +230,9 @@ func (s *server) pair(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 		log.Printf("paired %q", device)
-		reply(w, http.StatusOK, map[string]string{"token": token})
+		out := map[string]any{"token": token}
+		s.addLAN(out)
+		reply(w, http.StatusOK, out)
 	case errors.Is(err, auth.ErrNoWindow):
 		fail(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, auth.ErrWrongCode):

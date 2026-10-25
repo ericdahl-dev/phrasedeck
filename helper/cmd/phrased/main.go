@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -30,6 +31,8 @@ import (
 
 // macTailscale is where the Mac app keeps its CLI when `tailscale` isn't on PATH.
 const macTailscale = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+
+const defaultPort = 47811
 
 type list []string
 
@@ -46,7 +49,7 @@ type options struct {
 func parseFlags(args []string, home string) (options, error) {
 	var o options
 	fs := flag.NewFlagSet("phrased", flag.ContinueOnError)
-	fs.IntVar(&o.port, "port", 47811, "port to listen on")
+	fs.IntVar(&o.port, "port", defaultPort, "port to listen on")
 	fs.StringVar(&o.config, "config", filepath.Join(home, ".config", "phrased"), "config directory (holds tokens.json)")
 	fs.StringVar(&o.tailscale, "tailscale", defaultTailscale(), "path to the tailscale CLI")
 	fs.Var(&o.allowHosts, "allow-host", "extra Host name to accept (repeatable)")
@@ -110,6 +113,10 @@ func run(o options) error {
 	ln, err := tailnet.Listen(addr)
 	if err != nil {
 		return err
+	}
+	// So `phrased pair` puts the port in use into its QR code.
+	if err := os.WriteFile(filepath.Join(o.config, "port"), []byte(strconv.Itoa(o.port)+"\n"), 0o600); err != nil {
+		log.Printf("can't record the port for phrased pair: %v", err)
 	}
 	srv := &http.Server{
 		Handler: server.New(server.Config{

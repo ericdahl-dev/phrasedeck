@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,7 +26,8 @@ func TestPairCommandOpensWindow(t *testing.T) {
 	dir := t.TempDir()
 	var notified string
 	notify = func(code string) { notified = code }
-	t.Cleanup(func() { notify = macNotify })
+	tailscaleStatus = func(string) ([]byte, error) { return nil, errors.New("not running") }
+	t.Cleanup(func() { notify = macNotify; tailscaleStatus = runTailscaleStatus })
 
 	out, err := runCmd(t, "pair", "-config", dir)
 	if err != nil {
@@ -80,5 +82,53 @@ func TestServerFlagsAreNotACommand(t *testing.T) {
 	handled, _ := command([]string{"-port", "1"}, "/h", os.Stdout)
 	if handled {
 		t.Fatal("flags treated as a command")
+	}
+}
+
+func TestPairURLEscapesItsFields(t *testing.T) {
+	got := pairURL("lib-2833.tail1234.ts.net", 47811, "012345")
+	want := "phrasedeck://pair?code=012345&host=lib-2833.tail1234.ts.net&port=47811&v=1"
+	if got != want {
+		t.Fatalf("pairURL = %q, want %q", got, want)
+	}
+	if got := pairURL("a&b=c", 1, "1"); !strings.Contains(got, "host=a%26b%3Dc") {
+		t.Fatalf("host not escaped: %q", got)
+	}
+}
+
+func TestPairCommandPrintsAQRCodeForTheTailnetName(t *testing.T) {
+	dir := t.TempDir()
+	notify = func(string) {}
+	tailscaleStatus = func(string) ([]byte, error) {
+		return []byte(`{"Self":{"HostName":"mac","DNSName":"mac.tail1234.ts.net.","TailscaleIPs":["100.69.235.48"]}}`), nil
+	}
+	t.Cleanup(func() { notify = macNotify; tailscaleStatus = runTailscaleStatus })
+	os.WriteFile(filepath.Join(dir, "port"), []byte("47900\n"), 0o600)
+
+	out, err := runCmd(t, "pair", "-config", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := regexp.MustCompile(`\b\d{6}\b`).FindString(out)
+	if !strings.Contains(out, pairURL("mac.tail1234.ts.net", 47900, code)) {
+		t.Fatalf("no pair URL with the running port in %q", out)
+	}
+	if !strings.Contains(out, "█") || strings.Index(out, "█") < strings.Index(out, code) {
+		t.Fatalf("no QR code under the text code in %q", out)
+	}
+}
+
+func TestPairCommandStillPrintsTheCodeWithoutTailscale(t *testing.T) {
+	dir := t.TempDir()
+	notify = func(string) {}
+	tailscaleStatus = func(string) ([]byte, error) { return nil, errors.New("not running") }
+	t.Cleanup(func() { notify = macNotify; tailscaleStatus = runTailscaleStatus })
+
+	out, err := runCmd(t, "pair", "-config", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if regexp.MustCompile(`\b\d{6}\b`).FindString(out) == "" || !strings.Contains(out, "No QR code") {
+		t.Fatalf("want the code and a no-QR note, got %q", out)
 	}
 }

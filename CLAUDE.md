@@ -24,10 +24,10 @@ work here. Read these first:
 
 - End AI-assisted commits with `Assisted-by: Claude Code:<model>`. Never add `Co-Authored-By:`,
   `Claude-Session:` or claude.ai links.
-- Use American spelling everywhere. CI runs the org's `american-spelling` check; run it locally
-  with:
+- Use American spelling everywhere. CI runs the org's `american-spelling` check
+  (`ericdahl-dev/spelling-dialect@v1`, `dialect: american`); the same check locally:
   ```sh
-  uvx --from git+https://github.com/ericdahl-dev/spelling-dialect spelling-dialect .
+  uvx --from git+https://github.com/ericdahl-dev/spelling-dialect@v1 spelling-dialect --dialect american .
   ```
   If a line has to keep another spelling (an API name), add `// spelling: ok (why)` to it.
 

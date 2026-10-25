@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- make install-mac fills in __HOME__. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.ericdahl.phrased</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>__HOME__/.local/bin/phrased</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<!-- launchd's PATH lacks Homebrew, where the tailscale CLI may live. -->
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<!-- If Tailscale isn't up yet at login, phrased exits; wait a bit before each retry. -->
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>StandardOutPath</key>
+	<string>__HOME__/Library/Logs/phrased.log</string>
+	<key>StandardErrorPath</key>
+	<string>__HOME__/Library/Logs/phrased.log</string>
+</dict>
+</plist>

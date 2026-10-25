@@ -40,3 +40,5 @@ jobs:
       - run: go vet ./...
       - name: Mac backend tests (private pasteboard; no key events)
         run: go test ./internal/typer/
+      - name: LaunchAgent plist lints
+        run: make plist AGENT="$RUNNER_TEMP/dev.ericdahl.phrased.plist"

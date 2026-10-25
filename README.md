@@ -24,6 +24,25 @@ make test
 The stable signature keeps the Accessibility grant when you rebuild. Use another identity with
 `make build SIGN_IDENTITY="..."` (list yours with `security find-identity -v -p codesigning`).
 
+### Install on the Mac (runs at login)
+
+```sh
+cd helper
+make install-mac
+```
+
+This builds and signs `phrased`, installs it to `~/.local/bin/phrased`, and loads the LaunchAgent
+`~/Library/LaunchAgents/dev.ericdahl.phrased.plist`, which starts it at login and restarts it if
+it stops. The log is `~/Library/Logs/phrased.log`. Run it again after pulling changes: it swaps in
+the new binary and reloads the agent.
+
+- **The first install** puts `phrased` in a new place, so grant Accessibility to
+  `~/.local/bin/phrased` once and run the firewall commands that `make install-mac` prints. The
+  stable signature keeps both through later installs.
+- It reads `~/.config/phrased`, the same as running `./phrased` by hand.
+- **Stop it** with `launchctl bootout gui/$(id -u)/dev.ericdahl.phrased`; remove the plist too to
+  keep it from starting at the next login.
+
 ### Let it through the macOS firewall
 
 If the macOS firewall is on, it may drop incoming connections to `phrased` without asking,

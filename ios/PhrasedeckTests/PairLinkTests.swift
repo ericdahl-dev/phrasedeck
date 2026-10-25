@@ -50,6 +50,57 @@ struct PairLinkTests {
         #expect(throws: expected) { try PairLink(url: URL(string: url)!) }
     }
 
+    // MARK: LAN fields (#11)
+
+    static let pin = String(repeating: "ab", count: 32)
+
+    @Test(arguments: ["192.168.1.20", "10.0.0.5", "172.16.0.1", "172.31.255.254", "169.254.10.1",
+                      "fd12:3456::1", "fc00::1", "fe80::1"])
+    func privateLANAddressesWithAFingerprintParse(lan: String) throws {
+        let link = try parse("phrasedeck://pair?host=mac.tail1.ts.net&code=123456&v=1&lan=\(lan)&fp=\(Self.pin)").get()
+        #expect(link.lan == lan)
+        #expect(link.fingerprint == Self.pin)
+        #expect(link.host == "mac.tail1.ts.net")
+    }
+
+    @Test func aColonFingerprintIsNormalized() throws {
+        let colons = stride(from: 0, to: 64, by: 2).map { i in
+            let s = Self.pin.uppercased(); let a = s.index(s.startIndex, offsetBy: i)
+            return String(s[a..<s.index(a, offsetBy: 2)])
+        }.joined(separator: ":")
+        let link = try parse("phrasedeck://pair?host=mac.tail1.ts.net&code=123456&v=1&fp=\(colons)").get()
+        #expect(link.fingerprint == Self.pin)
+        #expect(link.lan == nil)
+    }
+
+    @Test func withoutLANFieldsNothingChanges() throws {
+        let link = try parse("phrasedeck://pair?host=mac.tail1.ts.net&code=123456&v=1").get()
+        #expect(link.lan == nil && link.fingerprint == nil)
+    }
+
+    @Test(arguments: [
+        ("lan=192.168.1.20", PairLink.Invalid.lanWithoutFingerprint),
+        ("lan=8.8.8.8&fp=\(PairLinkTests.pin)", .badLANAddress),
+        ("lan=100.69.235.48&fp=\(PairLinkTests.pin)", .badLANAddress),
+        ("lan=172.32.0.1&fp=\(PairLinkTests.pin)", .badLANAddress),
+        ("lan=2001:db8::1&fp=\(PairLinkTests.pin)", .badLANAddress),
+        ("lan=mac.local&fp=\(PairLinkTests.pin)", .badLANAddress),
+        ("lan=192.168.1.20:47812&fp=\(PairLinkTests.pin)", .badLANAddress),
+        ("fp=abc", .badFingerprint),
+        ("fp=\(String(repeating: "z", count: 64))", .badFingerprint),
+    ])
+    func badLANFieldsAreRejected(extra: String, expected: PairLink.Invalid) {
+        #expect(throws: expected) {
+            try PairLink(url: URL(string: "phrasedeck://pair?host=mac.tail1.ts.net&code=123456&v=1&\(extra)")!)
+        }
+    }
+
+    @Test func aBadHostIsRejectedEvenWithLANFields() {
+        #expect(throws: PairLink.Invalid.notATailnetHost) {
+            try PairLink(url: URL(string: "phrasedeck://pair?host=evil.example.com&code=123456&v=1&lan=192.168.1.20&fp=\(Self.pin)")!)
+        }
+    }
+
     @Test func everyRejectionHasAMessage() {
         for invalid in PairLink.Invalid.allCases {
             #expect(!invalid.message.isEmpty)

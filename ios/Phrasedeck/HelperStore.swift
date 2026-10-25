@@ -9,6 +9,10 @@ struct Helper: Codable, Hashable, Identifiable, Sendable {
     var name: String
     var host: String
     var port: Int = Helper.defaultPort
+    /// The LAN certificate's fingerprint and port (#11), taken only from
+    /// /pair, the QR code or an authenticated /info; never from Bonjour.
+    var certSHA256: String?
+    var lanPort: Int?
 
     /// The machine name from a MagicDNS name ("lib-2833" for
     /// lib-2833.tail1fdac.ts.net); other hosts as they are.
@@ -59,6 +63,11 @@ final class HelperStore {
 
     func add(_ helper: Helper) throws {
         try save(helpers + [helper])
+    }
+
+    /// Replaces the stored computer with the same id.
+    func update(_ helper: Helper) throws {
+        try save(helpers.map { $0.id == helper.id ? helper : $0 })
     }
 
     /// Removes the computer and clears its Keychain token.

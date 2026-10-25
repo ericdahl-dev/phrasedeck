@@ -24,6 +24,20 @@ make test
 The stable signature keeps the Accessibility grant when you rebuild. Use another identity with
 `make build SIGN_IDENTITY="..."` (list yours with `security find-identity -v -p codesigning`).
 
+### Let it through the macOS firewall
+
+If the macOS firewall is on, it may drop incoming connections to `phrased` without asking,
+especially in stealth mode. `phrased` logs a warning at startup when the firewall doesn't allow it.
+`make firewall` prints the two commands to fix that; run them yourself:
+
+```sh
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$PWD/phrased"
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$PWD/phrased"
+```
+
+Or add `helper/phrased` in System Settings > Network > Firewall > Options and set it to
+"Allow incoming connections".
+
 ### Grant Accessibility
 
 macOS only lets `phrased` type after you allow it once:

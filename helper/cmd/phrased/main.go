@@ -115,6 +115,11 @@ func run(o options) error {
 	}
 	log.Printf("listening on %s (tailnet peers only)", addr)
 	log.Printf("allowed hosts: %s", strings.Join(allow, ", "))
+	if runtime.GOOS == "darwin" {
+		if warn := checkFirewall(); warn != "" {
+			log.Printf("warning: %s", warn)
+		}
+	}
 	if !backend.Ready() {
 		log.Printf("can't type yet: grant Accessibility to this binary (System Settings > Privacy & Security > Accessibility)")
 	}

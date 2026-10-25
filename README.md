@@ -57,6 +57,15 @@ sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$PWD/phrased"
 Or add `helper/phrased` in System Settings > Network > Firewall > Options and set it to
 "Allow incoming connections".
 
+**On a managed Mac** (a work Mac with an MDM profile), neither works: the + button is grayed out,
+and `socketfilterfw` answers "cannot be modified from command line on managed Mac computers".
+`phrased` then logs that the firewall is managed and lists any `phrased` path the firewall already
+allows. Either:
+
+- run `phrased` from that allowed path, for example by installing there:
+  `make install-mac BIN_DIR=<the allowed folder>`; or
+- ask IT to allow incoming connections for the path you want.
+
 ### Grant Accessibility
 
 macOS only lets `phrased` type after you allow it once:

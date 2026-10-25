@@ -14,7 +14,10 @@ struct ComputersView: View {
                     HStack {
                         StatusDot(status: model.status(of: helper))
                         VStack(alignment: .leading) {
-                            Text(helper.name)
+                            HStack {
+                                Text(helper.name)
+                                RouteLabel(route: model.statusRoute(of: helper))
+                            }
                             if helper.port != Helper.defaultPort {
                                 Text("port \(helper.port)").font(.caption).foregroundStyle(.secondary)
                             }

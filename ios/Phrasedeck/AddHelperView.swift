@@ -71,6 +71,25 @@ struct AddHelperView: View {
     }
 
     @ViewBuilder private var manualEntry: some View {
+                if pairAgain == nil, !model.unpairedNearby.isEmpty {
+                    // Seen on the home network, but Bonjour can't be trusted to pair: scan only.
+                    Section {
+                        ForEach(model.unpairedNearby, id: \.self) { service in
+                            Button {
+                                error = nil
+                                scanning = true
+                            } label: {
+                                VStack(alignment: .leading) {
+                                    Text(Helper.displayName(for: service.tailnetName)).font(.headline)
+                                    Text("Scan its QR code to pair").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            .disabled(!QRScannerView.isAvailable)
+                        }
+                    } header: {
+                        Text("On this network")
+                    }
+                }
                 if pairAgain == nil {
                     Section {
                         Button("Scan QR code", systemImage: "qrcode.viewfinder") { error = nil; scanning = true }

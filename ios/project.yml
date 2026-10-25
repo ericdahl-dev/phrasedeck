@@ -32,8 +32,8 @@ targets:
         UISupportedInterfaceOrientations~ipad:
           [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown,
            UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
-        # The helper is plain HTTP inside the tailnet: *.ts.net plus bare
-        # tailnet names and IPs. No Bonjour (deferred, #11).
+        # The tailnet route is plain HTTP: *.ts.net plus bare tailnet names
+        # and IPs. The LAN route (#11) is HTTPS with a pinned certificate.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
           NSExceptionDomains:
@@ -44,6 +44,9 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: dev.ericdahl.phrasedeck.pair
             CFBundleURLSchemes: [phrasedeck]
+        # Finds phrased on the home network so sends can skip Tailscale there (#11).
+        NSBonjourServices: [_phrasedeck._tcp]
+        NSLocalNetworkUsageDescription: phrasedeck looks for your computers on the home network so it can reach them without Tailscale.
         NSCameraUsageDescription: phrasedeck uses the camera only to scan the QR code that phrased pair shows, to add a computer.
         # No encryption beyond what the OS provides (TestFlight export compliance).
         ITSAppUsesNonExemptEncryption: false

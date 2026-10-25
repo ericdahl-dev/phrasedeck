@@ -197,6 +197,16 @@ struct AppModelTests {
         #expect(api.paired.isEmpty && lan.paired.isEmpty && model.helpers.isEmpty)
     }
 
+    @Test func unpairedNearbyListsOnlyComputersNotOnThisDevice() throws {
+        defer { try? tokens.delete(mac.id) }
+        let model = try model()
+        let other = NearbyService(tailnetName: "omarchy-black2.tail1fdac.ts.net", address: nil)
+
+        model.setNearby([Self.home, other])
+
+        #expect(model.unpairedNearby == [other])
+    }
+
     // MARK: fingerprint trust (#11)
 
     @Test func bonjourTXTCannotCarryAFingerprint() throws {

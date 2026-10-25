@@ -21,6 +21,7 @@ struct HelperPicker: View {
                 if let helper = model.selectedHelper {
                     StatusDot(status: model.status(of: helper))
                     Text(helper.name).font(.headline)
+                    RouteLabel(route: model.statusRoute(of: helper))
                 } else {
                     Text("Add a computer").font(.headline)
                 }
@@ -28,6 +29,23 @@ struct HelperPicker: View {
             }
         }
         .accessibilityIdentifier("helperPicker")
+    }
+}
+
+/// "home" or "tailnet": the way the last status check reached the computer (#11).
+struct RouteLabel: View {
+    let route: AppModel.RouteKind?
+
+    var body: some View {
+        if let route {
+            Text(route == .home ? "home" : "tailnet")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(.quaternary, in: .capsule)
+                .accessibilityLabel(route == .home ? "over the home network" : "over the tailnet")
+        }
     }
 }
 

@@ -15,6 +15,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -22,6 +23,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -111,20 +113,9 @@ func run(o options) error {
 	if err != nil {
 		return err
 	}
-	status, err := tailscaleStatus(o.tailscale)
-	var names []string
-	var tsName string
-	if err == nil {
-		if names, err = tailnet.ParseSelf(status); err == nil {
-			tsName, _ = tailnet.PairHost(status)
-		}
-	}
+	names, tsName, waitTailnet, err := tailnetAtStartup(o.tailscale, prefixes)
 	if err != nil {
-		if len(prefixes) == 0 {
-			// Without the allowlist every request would get 403, so don't start.
-			return fmt.Errorf("reading this machine's tailnet names (use -tailscale to point at the CLI): %w", err)
-		}
-		log.Printf("Tailscale isn't available (%v); serving the LAN route only until it is", err)
+		return err
 	}
 	allow := append(names, o.allowHosts...)
 	hostname, _ := os.Hostname()
@@ -177,7 +168,16 @@ func run(o options) error {
 	if err := os.WriteFile(filepath.Join(o.config, "port"), []byte(strconv.Itoa(o.port)+"\n"), 0o600); err != nil {
 		log.Printf("can't record the port for phrased pair: %v", err)
 	}
-	servers := []*http.Server{newHTTPServer(helper.Handler(allow))}
+	// The tailnet allowlist is swapped in when Tailscale comes up after the helper started.
+	var tailHandler atomic.Pointer[http.Handler]
+	setTailnet := func(allow []string) {
+		h := helper.Handler(allow)
+		tailHandler.Store(&h)
+	}
+	setTailnet(allow)
+	servers := []*http.Server{newHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		(*tailHandler.Load()).ServeHTTP(w, r)
+	}))}
 	log.Printf("listening on %s (tailnet peers only)", addr)
 	if lanLn != nil {
 		lanSrv := newHTTPServer(helper.LANHandler(lanAllow))
@@ -202,6 +202,13 @@ func run(o options) error {
 	defer stop()
 	errc := make(chan error, 2)
 	go func() { errc <- servers[0].Serve(ln) }()
+	if waitTailnet {
+		go waitForTailnet(ctx, o.tailscale, 30*time.Second, func(names []string) {
+			allow := append(names, o.allowHosts...)
+			setTailnet(allow)
+			log.Printf("Tailscale is up; allowed hosts: %s", strings.Join(allow, ", "))
+		})
+	}
 	bonjourDone := make(chan struct{})
 	if lanLn != nil {
 		go func() { errc <- servers[1].ServeTLS(lanLn, "", "") }()
@@ -228,6 +235,53 @@ func run(o options) error {
 		case <-shut.Done():
 		}
 		return nil
+	}
+}
+
+// tailnetSelf reads this machine's tailnet names (for the Host allowlist) and its pairing host.
+func tailnetSelf(tailscale string) (names []string, tsName string, err error) {
+	status, err := tailscaleStatus(tailscale)
+	if err != nil {
+		return nil, "", err
+	}
+	if names, err = tailnet.ParseSelf(status); err != nil {
+		return nil, "", err
+	}
+	tsName, _ = tailnet.PairHost(status)
+	return names, tsName, nil
+}
+
+// tailnetAtStartup reads the tailnet names. Without Tailscale the helper still starts when it
+// has a LAN route, and wait says to keep trying; without one it refuses, since every request
+// would get 403.
+func tailnetAtStartup(tailscale string, prefixes []netip.Prefix) (names []string, tsName string, wait bool, err error) {
+	names, tsName, err = tailnetSelf(tailscale)
+	if err == nil {
+		return names, tsName, false, nil
+	}
+	if len(prefixes) == 0 {
+		return nil, "", false, fmt.Errorf("reading this machine's tailnet names (use -tailscale to point at the CLI): %w", err)
+	}
+	log.Printf("Tailscale isn't available (%v); serving the LAN route only until it is", err)
+	return nil, "", true, nil
+}
+
+// waitForTailnet retries every interval until Tailscale answers, then hands found the names.
+// shortcut: Bonjour's ts TXT stays empty until a restart, so the app can't yet tell this
+// machine is nearby; re-register Bonjour here if that matters.
+func waitForTailnet(ctx context.Context, tailscale string, every time.Duration, found func(names []string)) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if names, _, err := tailnetSelf(tailscale); err == nil {
+				found(names)
+				return
+			}
+		}
 	}
 }
 

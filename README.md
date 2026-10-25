@@ -175,7 +175,8 @@ Status codes:
 | `-lan-port` | `47812` | HTTPS port for the `-lan` subnets |
 
 If `tailscale status --json` fails, `phrased` exits: without the allowlist it would answer 403 to
-everything. With `-lan` set it keeps running and serves only the LAN route.
+everything. With `-lan` set it keeps running, serves only the LAN route, and checks again every 30 seconds;
+once Tailscale is up the tailnet route works too, without a restart.
 
 ### Home network without Tailscale (optional)
 

@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/lan"
 )
@@ -144,5 +148,42 @@ func TestBonjourAdvertisesOnlyLANInterfacesAndNoSecrets(t *testing.T) {
 	}
 	if off := bonjourConfig("mac", "", 47812, addrs); off.Text["ts"] != "" || len(off.Text) != 2 {
 		t.Fatalf("with Tailscale off, TXT %v should leave out ts", off.Text)
+	}
+}
+
+func TestWithoutTailscaleOnlyTheLANRouteLetsTheHelperStart(t *testing.T) {
+	tailscaleStatus = func(string) ([]byte, error) { return nil, errors.New("not running") }
+	t.Cleanup(func() { tailscaleStatus = runTailscaleStatus })
+	lanOn := []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24")}
+
+	if _, _, wait, err := tailnetAtStartup("tailscale", lanOn); err != nil || !wait {
+		t.Fatalf("with -lan: err %v, wait %v; want a start that waits for Tailscale", err, wait)
+	}
+	if _, _, _, err := tailnetAtStartup("tailscale", nil); err == nil {
+		t.Fatal("without -lan the helper must still refuse to start")
+	}
+}
+
+func TestTheTailnetIsPickedUpWhenTailscaleComesUp(t *testing.T) {
+	calls := 0
+	tailscaleStatus = func(string) ([]byte, error) {
+		if calls++; calls < 3 {
+			return nil, errors.New("not running")
+		}
+		return []byte(`{"Self":{"HostName":"mac","DNSName":"mac.tail1234.ts.net.","TailscaleIPs":["100.69.235.48"]}}`), nil
+	}
+	t.Cleanup(func() { tailscaleStatus = runTailscaleStatus })
+
+	got := make(chan []string, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go waitForTailnet(ctx, "tailscale", time.Millisecond, func(names []string) { got <- names })
+	select {
+	case names := <-got:
+		if !slices.Contains(names, "mac.tail1234.ts.net") {
+			t.Fatalf("names %v", names)
+		}
+	case <-ctx.Done():
+		t.Fatal("never picked up the tailnet")
 	}
 }

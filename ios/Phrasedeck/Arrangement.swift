@@ -45,6 +45,13 @@ enum Arrangement {
     static func move<ID: Hashable>(_ id: ID, to target: Spot, from pickup: [Packing.Placement<ID>],
                                    columns: Int) -> [ID: Spot] {
         let columns = max(1, columns)
+        // A pickup from a wider Page (before a pinch) is narrowed and pulled in to fit this one;
+        // otherwise a Button wider than the Page never finds a free Spot.
+        let pickup = pickup.map { p in
+            let w = min(max(1, p.columns), columns)
+            return Packing.Placement(id: p.id, x: min(max(0, p.x), columns - w), y: max(0, p.y), columns: w,
+                                     rows: max(1, p.rows))
+        }
         var spots = Dictionary(uniqueKeysWithValues: pickup.map { ($0.id, Spot(column: $0.x, row: $0.y)) })
         guard let moved = pickup.first(where: { $0.id == id }) else { return spots }
         let w = min(moved.columns, columns)

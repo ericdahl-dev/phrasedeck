@@ -1,11 +1,12 @@
 # Signing with a stable identity keeps the macOS Accessibility grant across rebuilds.
 SIGN_IDENTITY ?= Apple Development: Eric Dahl (D6LCAABBEQ)
 
-.PHONY: build test firewall install-mac plist
+.PHONY: build test firewall install-mac plist install-linux
 
 BIN_DIR ?= $(HOME)/.local/bin
 AGENT ?= $(HOME)/Library/LaunchAgents/dev.ericdahl.phrased.plist
 FIREWALL_BIN ?= $(CURDIR)/phrased
+UNIT_DIR ?= $(HOME)/.config/systemd/user
 
 build:
 	go build -o phrased ./cmd/phrased
@@ -40,3 +41,16 @@ install-mac: build plist
 	@echo "phrased is running from $(BIN_DIR)/phrased; log: $(HOME)/Library/Logs/phrased.log"
 	@echo "The first install there needs Accessibility for $(BIN_DIR)/phrased (see the README)."
 	@$(MAKE) --no-print-directory firewall FIREWALL_BIN=$(BIN_DIR)/phrased
+
+# Installs phrased to $(BIN_DIR) and runs it as a systemd user service tied to the graphical
+# session. Needs wtype and wl-clipboard (pacman -S wtype wl-clipboard). The rename swaps in the
+# new binary even while the old one is running.
+install-linux: build
+	@mkdir -p $(BIN_DIR) $(UNIT_DIR)
+	install -m 755 phrased $(BIN_DIR)/phrased.new
+	mv -f $(BIN_DIR)/phrased.new $(BIN_DIR)/phrased
+	install -m 644 install/phrased.service $(UNIT_DIR)/phrased.service
+	systemctl --user daemon-reload
+	systemctl --user enable phrased
+	systemctl --user restart phrased
+	@echo "phrased is running; see: systemctl --user status phrased; journalctl --user -u phrased"

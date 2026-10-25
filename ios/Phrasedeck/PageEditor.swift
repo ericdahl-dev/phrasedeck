@@ -8,6 +8,8 @@ struct PageEditor: View {
     @Query(sort: \Page.order) private var pages: [Page]
     @State private var newName = ""
     @State private var deleting: Page?
+    @AppStorage(DeckSize.compactKey) private var compactColumns = 0
+    @AppStorage(DeckSize.regularKey) private var regularColumns = 0
 
     var body: some View {
         NavigationStack {
@@ -29,6 +31,16 @@ struct PageEditor: View {
                         Button("Add", action: add)
                             .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
+                }
+                Section {
+                    Button("Reset button size") {
+                        compactColumns = 0
+                        regularColumns = 0
+                    }
+                    .disabled(compactColumns == 0 && regularColumns == 0)
+                    .accessibilityIdentifier("pages.resetButtonSize")
+                } footer: {
+                    Text("Pinch the deck to make buttons bigger or smaller.")
                 }
             }
             .navigationTitle("Pages")

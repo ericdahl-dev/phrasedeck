@@ -45,5 +45,7 @@ struct PhrasedeckApp: App {
                 .environment(model)
         }
         .modelContainer(container)
+        // UI tests keep the button size in their throwaway defaults.
+        .defaultAppStorage(stub?.defaults ?? .standard)
     }
 }

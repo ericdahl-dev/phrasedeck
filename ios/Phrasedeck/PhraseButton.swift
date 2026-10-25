@@ -2,6 +2,8 @@ import SwiftUI
 
 struct PhraseButton: View {
     let phrase: Phrase
+    var metrics = DeckSize.metrics(columnWidth: 112)
+    var pinchGuard: PinchGuard?
     var edit: () -> Void = {}
     var delete: () -> Void = {}
 
@@ -15,14 +17,15 @@ struct PhraseButton: View {
         Button(action: tapped) {
             ZStack(alignment: .topTrailing) {
                 Text(armed ? "tap again" : phrase.label)
-                    .font(.title3.weight(.semibold))
+                    .font(.system(size: metrics.font, weight: .semibold))
                     .multilineTextAlignment(.center)
-                    .minimumScaleFactor(0.6)
-                    .frame(maxWidth: .infinity, minHeight: 96)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.5)
+                    .frame(maxWidth: .infinity, minHeight: metrics.height - 16)
                     .padding(8)
                 if phrase.pressEnter {
                     Text("⏎")
-                        .font(.caption.weight(.bold))
+                        .font(.system(size: metrics.font * 0.6, weight: .bold))
                         .padding(6)
                         .accessibilityLabel("presses Enter")
                 }
@@ -50,6 +53,7 @@ struct PhraseButton: View {
 
     /// Phrases marked confirm need a second tap within 1.5 seconds (#8).
     private func tapped() {
+        if pinchGuard?.blocksTaps == true { return }
         taps += 1
         guard phrase.confirm else { return send() }
         if gate.tap() {

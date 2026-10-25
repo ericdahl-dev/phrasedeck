@@ -42,8 +42,11 @@ func TestPairReplyMatchesTheContract(t *testing.T) {
 			t.Fatal(err)
 		}
 		var got map[string]any
-		json.NewDecoder(resp.Body).Decode(&got)
+		err = json.NewDecoder(resp.Body).Decode(&got)
 		resp.Body.Close()
+		if resp.StatusCode != 200 || err != nil {
+			t.Fatalf("%s: status %d, decode %v", r.Name, resp.StatusCode, err)
+		}
 		if tok, _ := got["token"].(string); tok == "" {
 			t.Fatalf("%s: no token in %v", r.Name, got)
 		}

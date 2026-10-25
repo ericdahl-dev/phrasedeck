@@ -43,6 +43,9 @@
     { "qr": "phrasedeck://pair?code=123456&fp=abc&lan=192.168.1.29&v=1", "error": "badFingerprint" },
     { "qr": "phrasedeck://pair?code=123456&fp=33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6&lan=8.8.8.8&v=1", "error": "badLANAddress" },
     { "qr": "phrasedeck://pair?code=123456&host=a.b.ts.net&lan=192.168.1.29&v=1", "error": "lanWithoutFingerprint" },
+    { "qr": "phrasedeck://pair?code=123456&fp=33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6&lan=fe80%3A%3A1&v=1", "error": "badLANAddress" },
+    { "qr": "phrasedeck://pair?code=123456&host=lib.example.com&v=1", "error": "notATailnetHost" },
+    { "qr": "phrasedeck://pair?code=123456&fp=33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6&lan=192.168.1.29&lanPort=0&v=1", "error": "badPort" },
     { "qr": "phrasedeck://pair?code=123456&fp=33006282ca15fbb0d69c2c16d25602242dbf13c3b8950f943d18dc4570e1e7d6&v=1", "error": "notATailnetHost" }
   ],
   "replies": [

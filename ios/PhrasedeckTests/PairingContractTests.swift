@@ -39,6 +39,8 @@ struct PairingContract: Decodable {
     let replies: [Reply]
     let lanAddresses: LANAddresses
 
+    /// Read from the source tree through #filePath, which works where the tests run: the
+    /// simulator, locally and in CI. It wouldn't on a physical device, which can't see the Mac's files.
     static let shared: PairingContract = {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().appending(path: "../../contract/pairing.json")

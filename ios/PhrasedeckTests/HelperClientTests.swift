@@ -42,9 +42,9 @@ struct HelperClientTests {
     }
 
     @Test func aPinMismatchIsItsOwnFailureNotNoReply() {
-        #expect(HelperClient.failure(for: .cancelled, pinMismatched: true) == .pinMismatch)
+        #expect(HelperClient.failure(for: .cancelled, pinMismatched: true) == .pinMismatch) // spelling: ok (URLError.Code API)
         #expect(HelperClient.failure(for: .serverCertificateUntrusted, pinMismatched: true) == .pinMismatch)
-        #expect(HelperClient.failure(for: .cancelled, pinMismatched: false) == .noReply)
+        #expect(HelperClient.failure(for: .cancelled, pinMismatched: false) == .noReply) // spelling: ok (URLError.Code API)
     }
 
     // MARK: info and pairing fields

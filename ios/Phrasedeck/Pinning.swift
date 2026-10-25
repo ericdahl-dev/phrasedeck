@@ -18,7 +18,7 @@ enum Fingerprint {
 
 /// Pins one request to the helper's self-signed LAN certificate: the
 /// leaf's SHA-256 must equal the stored fingerprint, or the connection is
-/// cancelled before anything (the token included) is sent. The pin, not the
+/// canceled before anything (the token included) is sent. The pin, not the
 /// host name or a CA, is what identifies the helper, so the address can
 /// come from Bonjour.
 final class PinningDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {

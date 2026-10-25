@@ -8,7 +8,6 @@ import (
 	"log"
 	"net"
 	"net/netip"
-	"os/exec"
 	"strings"
 	"sync"
 )
@@ -140,15 +139,6 @@ func PairHost(statusJSON []byte) (string, error) {
 		return st.Self.TailscaleIPs[0], nil
 	}
 	return "", errors.New("tailscale status has no name or address for this machine")
-}
-
-// SelfNames runs `tailscale status --json` and returns ParseSelf's names.
-func SelfNames(tailscalePath string) ([]string, error) {
-	out, err := exec.Command(tailscalePath, "status", "--json").Output()
-	if err != nil {
-		return nil, fmt.Errorf("%s status --json: %w", tailscalePath, err)
-	}
-	return ParseSelf(out)
 }
 
 // HostAllowed reports whether a request's Host header, with any port removed, is one of allow.

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/auth"
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/lan"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/tailnet"
 	"rsc.io/qr"
 )
@@ -26,10 +27,25 @@ func runTailscaleStatus(path string) ([]byte, error) {
 	return exec.Command(path, "status", "--json").Output()
 }
 
-// pairURL is the QR payload the app scans: phrasedeck://pair?host=&port=&code=&v=1.
-func pairURL(host string, port int, code string) string {
+// pairURL is the QR payload the app scans: phrasedeck://pair?host=&port=&code=&v=1, plus
+// fp (the LAN certificate's fingerprint) and lan (this machine's LAN address) when LAN is
+// on. The two only come together: an address without its pin is of no use to the app.
+func pairURL(host string, port int, code, fp, lanIP string) string {
 	q := url.Values{"host": {host}, "port": {strconv.Itoa(port)}, "code": {code}, "v": {"1"}}
+	if fp != "" && lanIP != "" {
+		q.Set("fp", fp)
+		q.Set("lan", lanIP)
+	}
 	return "phrasedeck://pair?" + q.Encode()
+}
+
+// lanAddr is the LAN address the running helper wrote to <config>/lan-addr, or "".
+func lanAddr(config string) string {
+	b, err := os.ReadFile(filepath.Join(config, lanAddrFile))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 // runningPort is the port the helper wrote to <config>/port when it started, or the default.
@@ -127,11 +143,19 @@ func command(args []string, home string, out io.Writer) (bool, error) {
 		if err == nil {
 			host, hostErr = tailnet.PairHost(status)
 		}
+		lanIP, fp := lanAddr(*config), ""
+		if lanIP != "" {
+			fp, _ = lan.Fingerprint(*config)
+		}
+		if hostErr != nil && lanIP != "" && fp != "" {
+			// Tailscale is off: the app pairs over the pinned LAN route instead.
+			host, hostErr = lanIP, nil
+		}
 		if hostErr != nil {
 			fmt.Fprintf(out, "No QR code: can't read this machine's tailnet name (%v). Type the name and code in the app.\n", hostErr)
 			return true, nil
 		}
-		link := pairURL(host, runningPort(*config), code)
+		link := pairURL(host, runningPort(*config), code, fp, lanIP)
 		fmt.Fprintln(out, "\nOr scan this in phrasedeck (Add a computer > Scan QR code):")
 		if err := writeQR(out, link); err != nil {
 			return true, err

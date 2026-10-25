@@ -89,6 +89,7 @@ struct PhraseEditor: View {
             }
         }
         .onAppear(perform: load)
+        .saveFailureAlert($saveError)
     }
 
     private var isNew: Bool {

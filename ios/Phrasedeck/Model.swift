@@ -154,6 +154,7 @@ enum Seed {
 /// (PhrasedeckApp), not in a view, so it runs whichever screen is showing.
 @MainActor
 final class SyncMerge {
+    // Never removed: the app keeps one SyncMerge for its whole life.
     private var observer: NSObjectProtocol?
 
     init(container: ModelContainer) {
@@ -168,6 +169,4 @@ final class SyncMerge {
             }
         }
     }
-
-    deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
 }

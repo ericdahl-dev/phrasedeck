@@ -8,6 +8,7 @@ struct PageEditor: View {
     @Query(sort: \Page.order) private var pages: [Page]
     @State private var newName = ""
     @State private var deleting: Page?
+    @State private var saveError: String?
     @AppStorage(DeckSize.compactKey) private var compactColumns = 0
     @AppStorage(DeckSize.regularKey) private var regularColumns = 0
 
@@ -16,12 +17,12 @@ struct PageEditor: View {
             List {
                 Section {
                     ForEach(pages) { page in
-                        PageRow(page: page)
+                        PageRow(page: page) { name in attempt { try Deck.rename(page, to: name) } }
                             .swipeActions {
                                 Button("Delete", role: .destructive) { deleting = page }
                             }
                     }
-                    .onMove { Deck.movePages(pages, from: $0, to: $1) }
+                    .onMove { from, to in attempt { try Deck.movePages(pages, from: from, to: to) } }
                 }
                 Section {
                     HStack {
@@ -48,19 +49,20 @@ struct PageEditor: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { EditButton() }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        try? context.save()
-                        dismiss()
-                    }
+                    Button("Done") { dismiss() }
                 }
             }
             .confirmationDialog(deleteTitle, isPresented: isDeleting, titleVisibility: .visible) {
                 Button("Delete page and its buttons", role: .destructive) {
-                    if let deleting { Deck.delete(deleting, in: context) }
-                    try? context.save()
+                    if let deleting { attempt { try Deck.delete(deleting, in: context) } }
                 }
             }
+            .saveFailureAlert($saveError)
         }
+    }
+
+    private func attempt(_ edit: () throws -> Void) {
+        do { try edit() } catch { saveError = error.localizedDescription }
     }
 
     private var isDeleting: Binding<Bool> {
@@ -74,21 +76,24 @@ struct PageEditor: View {
 
     private func add() {
         guard !newName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        Deck.addPage(named: newName, in: context)
-        try? context.save()
-        newName = ""
+        attempt {
+            try Deck.addPage(named: newName, in: context)
+            newName = ""
+        }
     }
 }
 
-/// One page's name, renamed in place.
+/// One page's name, renamed in place: saved on Return or when the row goes away (Done),
+/// not on every keystroke.
 private struct PageRow: View {
     let page: Page
+    let rename: (String) -> Void
     @State private var name = ""
 
     var body: some View {
         TextField("Name", text: $name)
             .onAppear { name = page.name }
-            .onSubmit { Deck.rename(page, to: name); name = page.name }
-            .onChange(of: name) { Deck.rename(page, to: name) }
+            .onSubmit { rename(name); name = page.name }
+            .onDisappear { rename(name) }
     }
 }

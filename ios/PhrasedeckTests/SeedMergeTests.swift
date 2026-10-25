@@ -77,8 +77,7 @@ struct SeedMergeTests {
     @Test func ericsOwnPhrasesOnADuplicatePageMoveToTheKeptPage() throws {
         let a = try Self.seededStore(), b = try Self.seededStore()
         let bPage = try #require(try b.mainContext.fetch(FetchDescriptor<Page>()).first)
-        Deck.addPhrase(PhraseDraft(label: "Mine", text: "mine"), to: bPage, in: b.mainContext)
-        try b.mainContext.save()
+        try Deck.addPhrase(PhraseDraft(label: "Mine", text: "mine"), to: bPage, in: b.mainContext)
         try Self.importRows(from: b.mainContext, into: a.mainContext)
 
         try Seed.mergeDuplicates(a.mainContext)

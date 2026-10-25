@@ -4,8 +4,9 @@ on:
   push:
     branches: [main]
     paths: ["ios/**", ".github/workflows/ios.yml"]
+  # No path filter on PRs: "test" is a required check, and a required check that
+  # never starts would block helper-only PRs forever.
   pull_request:
-    paths: ["ios/**", ".github/workflows/ios.yml"]
 
 jobs:
   test:

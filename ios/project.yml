@@ -19,8 +19,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.ericdahl.phrasedeck
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
-        # iCloud sync (#10) stays off until the container iCloud.dev.ericdahl.phrasedeck
-        # exists. To turn it on, set this to Phrasedeck/Phrasedeck.entitlements.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # iCloud sync (#10) is off while this is empty. To turn it on, set it to
+        # Phrasedeck/Phrasedeck.entitlements.
         CODE_SIGN_ENTITLEMENTS: ""
     info:
       path: Phrasedeck/Info.plist

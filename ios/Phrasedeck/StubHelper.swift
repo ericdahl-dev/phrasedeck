@@ -1,8 +1,7 @@
-#if DEBUG
 import Foundation
 import Observation
 
-/// For UI tests (launch argument -uiTestingStubHelper): an in-process
+/// For UI tests (launch argument -uiTestingStubHelper, DEBUG builds only): an in-process
 /// helper that answers every call and counts sends, with a throwaway
 /// computers list. No network and no Keychain items that outlive the run.
 @MainActor
@@ -45,4 +44,3 @@ final class StubHelper {
         return AppModel(store: store, tokens: tokens, device: "UI test") { _, _ in api }
     }
 }
-#endif

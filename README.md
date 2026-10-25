@@ -172,3 +172,51 @@ Status codes:
 
 If `tailscale status --json` fails, `phrased` exits: without the allowlist it would answer 403 to
 everything.
+
+## The iOS app on TestFlight
+
+Installs on Eric's iPhone and iPad go through internal TestFlight only: no external testers, no
+Beta App Review and no App Store release. Day-to-day development still runs straight from Xcode.
+
+### One-time setup (Eric, in App Store Connect)
+
+1. **Bundle ID** (done): the explicit App ID `dev.ericdahl.phrasedeck` is registered, with iCloud
+   on for the sync slice (#10).
+2. **App record** (done): "phrasedeck by Eric Dahl", Apple ID 6826742858, SKU `phrasedeck`,
+   primary language English (U.S.). The plain name was taken on the App Store; the home screen
+   still shows `phrasedeck` from `CFBundleDisplayName`.
+3. **Internal group.** In the new app, TestFlight > Internal Testing > + : name it `Eric`, leave
+   "Enable automatic distribution" on, then add yourself as the only tester.
+4. **API key.** Users and Access > Integrations > App Store Connect API > Team Keys > +: name
+   `phrasedeck upload`, access Admin (automatic signing creates the App Store profile, which an App
+   Manager key can't do). Download the `.p8` (Apple only offers it once) and note the Key ID and the
+   Issuer ID shown above the list. Keep the `.p8` outside the repo, for example in
+   `~/.appstoreconnect/private_keys/`.
+5. **TestFlight app.** Install TestFlight from the App Store on the iPhone and the iPad, signed in
+   with the same Apple ID.
+
+The Apple Distribution certificate for team `5HR8E5CWR7` must be in the login keychain (check with
+`security find-identity -v -p codesigning`).
+
+### Upload a build
+
+```sh
+ASC_KEY_ID=… ASC_ISSUER_ID=… ASC_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_….p8 \
+  ios/scripts/testflight.sh
+```
+
+`ios/scripts/testflight.sh` runs `xcodegen`, archives a Release build and uploads it with
+`ios/ExportOptions.plist` (App Store Connect, automatic signing). The key is read from the
+environment each run and is never committed.
+
+- **Build number:** the UTC date and time to the minute (for example `202610251430`), so it always
+  grows. Set `BUILD_NUMBER` to override it. The version is `MARKETING_VERSION` in `ios/project.yml`.
+- **Export compliance** is answered in the app (`ITSAppUsesNonExemptEncryption` is `NO`), so the
+  build doesn't stop to ask.
+- `--no-upload` signs and writes `ios/build/export/Phrasedeck.ipa` without uploading.
+- The build shows in TestFlight after Apple processes it, usually 5 to 15 minutes. Install it from
+  the TestFlight app on each device.
+- `bundle version must be higher` means a build with that number exists; wait a minute and run it
+  again.
+
+The app icon's source is `design/icon.svg`; the asset catalog holds the 1024 x 1024 PNG made from it.

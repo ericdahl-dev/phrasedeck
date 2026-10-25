@@ -1,0 +1,50 @@
+/// What a failed send or pairing means to the user, worded once (#44). Status codes become
+/// `HelperClient.Failure` in HelperClient; this turns those into what the banner or the
+/// pairing sheet shows. Their meaning matches the helper's table in the design doc: 409 and
+/// 429 typed nothing, 500 and a lost reply may have typed.
+enum Outcome {
+    typealias Feedback = AppModel.Feedback
+
+    static func send(_ failure: HelperClient.Failure, on helper: Helper) -> Feedback {
+        let name = helper.name
+        switch failure {
+        case .noReply: return Feedback(tone: .amber, message: "no reply, it may have typed")
+        case .busy: return Feedback(tone: .red, message: "\(name) is busy, nothing was typed. Tap again.")
+        case .failedPartway: return Feedback(tone: .amber, message: "\(name) failed partway, it may have typed")
+        case .unreachable: return Feedback(tone: .red, message: "\(name) unreachable")
+        case .unauthorized:
+            return Feedback(tone: .red, message: "\(name) refused this device. Pair again.", pairAgain: helper)
+        case .notReady: return Feedback(tone: .red, message: "\(name) can't type yet: grant Accessibility to phrased")
+        case .rateLimited: return Feedback(tone: .red, message: "Too many sends. Wait a moment.")
+        case .notFound: return Feedback(tone: .red, message: "\(name) failed (error 404)")
+        case let .server(code): return Feedback(tone: .red, message: "\(name) failed (error \(code))")
+        case .notTailnet:
+            return Feedback(tone: .red, message: "\(name) isn't a tailnet name, so nothing was sent. Pair it again by scanning its QR code.")
+        case let .notSent(code):
+            return Feedback(tone: .red, message: "\(name): the connection was blocked before anything was sent (error \(code)).")
+        case .pinMismatch:
+            return Feedback(tone: .red, message: "\(name)'s certificate didn't match, so nothing was sent. Scan its QR code to pair again.")
+        }
+    }
+
+    /// Pairing reads 404, 401, 429 and a lost reply its own way; anything else as a send would.
+    static func pair(_ failure: HelperClient.Failure, on helper: Helper) -> String {
+        switch failure {
+        case .notFound: "Run phrased pair on \(helper.name) first."
+        case .unauthorized: "That code didn't match. Check it, or run phrased pair again."
+        // Pairing never types: a lost reply means the code may be used up, nothing more.
+        case .noReply: "\(helper.name) didn't answer. Run phrased pair again and retry."
+        case .rateLimited: "Too many pairing attempts. Run phrased pair on \(helper.name) again."
+        default: send(failure, on: helper).message ?? "Couldn't pair with \(helper.name)."
+        }
+    }
+
+    // Pairing problems the app finds before or after asking the helper.
+    static let badCode = "Enter the 6-digit code from phrased pair."
+    static func qrMismatch(on helper: Helper) -> String {
+        "\(helper.name)'s certificate didn't match the QR code, so it wasn't added. Run phrased pair again and rescan."
+    }
+    static func pinSaveFailed(on helper: Helper, _ error: any Error) -> String {
+        "Paired, but couldn't save \(helper.name)'s certificate: \(error.localizedDescription)"
+    }
+}

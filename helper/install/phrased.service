@@ -5,6 +5,10 @@ Description=phrased: types phrases from phrasedeck into the focused window
 PartOf=graphical-session.target
 After=graphical-session.target
 ConditionEnvironment=WAYLAND_DISPLAY
+# Give up after 3 failed starts in a minute (e.g. another user's phrased already has :47811),
+# instead of restarting forever.
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 ExecStart=%h/.local/bin/phrased

@@ -1,9 +1,9 @@
 # The .deb for the Helper (#78). build-linux.sh runs nfpm in its staging directory, which holds
-# phrased and phrased.service, and sets VERSION and ARCH.
+# phrased, phrased.service and postinst.sh, and sets VERSION and ARCH.
 name: phrased
 arch: ${ARCH}
 version: ${VERSION}
-maintainer: Eric Dahl <dahl.eric@gmail.com>
+maintainer: Eric Dahl <eric@skeyelab.com>
 description: Types phrases from the Phrasedeck iPhone app into the focused window (Wayland).
 homepage: https://github.com/ericdahl-dev/phrasedeck
 license: Proprietary
@@ -21,7 +21,6 @@ contents:
       mode: 0755
   - src: ./phrased.service
     dst: /usr/lib/systemd/user/phrased.service
-  # Enabled for every user without an install script; it starts at the next graphical login.
-  - src: ../phrased.service
-    dst: /usr/lib/systemd/user/graphical-session.target.wants/phrased.service
-    type: symlink
+# Each user turns the Helper on for themselves; installing enables nothing.
+scripts:
+  postinstall: ./postinst.sh

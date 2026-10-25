@@ -11,7 +11,9 @@ stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 
 (cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -trimpath -o "$stage/phrased" ./cmd/phrased)
-cp "$here/phrased.service" "$stage/"
+# The packaged unit is the repo's, run from /usr/bin.
+sed 's|^ExecStart=%h/.local/bin/phrased$|ExecStart=/usr/bin/phrased|' "$here/../install/phrased.service" > "$stage/phrased.service"
+cp "$here/postinst.sh" "$stage/"
 tar -C "$stage" -czf "$OUT/phrased-$VERSION-linux-$ARCH.tar.gz" phrased phrased.service
 
 cd "$stage"

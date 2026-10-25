@@ -429,23 +429,15 @@ struct AppModelTests {
         #expect(api.typed.first?.enter == true)
     }
 
-    @Test(arguments: [
-        (HelperClient.Failure.noReply, AppModel.Feedback.Tone.amber, "no reply, it may have typed"),
-        (.unreachable, .red, "lib-2833 unreachable"),
-        (.unauthorized, .red, "lib-2833 refused this device. Pair again."),
-        (.notReady, .red, "lib-2833 can't type yet: grant Accessibility to phrased"),
-        (.rateLimited, .red, "Too many sends. Wait a moment."),
-        (.server(500), .red, "lib-2833 failed (error 500)"),
-    ])
-    func failuresMapToTheirFeedbackWithoutRetrying(failure: HelperClient.Failure, tone: AppModel.Feedback.Tone,
-                                                   message: String) async throws {
+    /// The wording itself is in OutcomeTests; here, a failed send shows it and is never retried.
+    @Test(arguments: [HelperClient.Failure.noReply, .busy, .failedPartway, .unreachable, .notReady])
+    func failuresShowTheirOutcomeWithoutRetrying(failure: HelperClient.Failure) async throws {
         api.typeError = failure
         let model = try model()
 
         let feedback = await model.send(text: "x", enter: false)
 
-        #expect(feedback.tone == tone)
-        #expect(feedback.message == message)
+        #expect(feedback == Outcome.send(failure, on: mac))
         #expect(api.typed.count == 1)
         #expect(model.feedback == feedback)
     }
@@ -538,7 +530,7 @@ struct AppModelTests {
     }
 
     @Test func aMissingPairingWindowSaysToRunPhrasedPairFirst() async throws {
-        api.pairResult = .failure(.noPairingWindow)
+        api.pairResult = .failure(.notFound)
         let model = try model(withMac: false)
 
         let error = await model.addHelper(host: "omarchy-laptop", port: 47811, code: "123456")

@@ -99,6 +99,8 @@ final class AppModel {
         case let .server(code): return Feedback(tone: .red, message: "\(name) failed (error \(code))")
         case .notTailnet:
             return Feedback(tone: .red, message: "\(name) isn't a tailnet name, so nothing was sent. Pair it again by scanning its QR code.")
+        case let .notSent(code):
+            return Feedback(tone: .red, message: "\(name): the connection was blocked before anything was sent (error \(code)).")
         case .pinMismatch:
             return Feedback(tone: .red, message: "\(name)'s certificate didn't match, so nothing was sent. Scan its QR code to pair again.")
         }
@@ -286,6 +288,9 @@ final class AppModel {
             return .failure("Run phrased pair on \(helper.name) first.")
         } catch HelperClient.Failure.unauthorized {
             return .failure("That code didn't match. Check it, or run phrased pair again.")
+        } catch HelperClient.Failure.noReply {
+            // Pairing never types: a lost reply means the code may be used up, nothing more.
+            return .failure("\(helper.name) didn't answer. Run phrased pair again and retry.")
         } catch HelperClient.Failure.rateLimited {
             return .failure("Too many pairing attempts. Run phrased pair on \(helper.name) again.")
         } catch let failure as HelperClient.Failure {

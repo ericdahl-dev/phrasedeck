@@ -27,13 +27,14 @@ enum Outcome {
         }
     }
 
-    /// Pairing reads 404, 401, 429 and a lost reply its own way; anything else as a send would.
+    /// Pairing reads 404, 401, 429, 500 and a lost reply its own way; anything else as a send would.
     static func pair(_ failure: HelperClient.Failure, on helper: Helper) -> String {
         switch failure {
         case .notFound: "Run phrased pair on \(helper.name) first."
         case .unauthorized: "That code didn't match. Check it, or run phrased pair again."
         // Pairing never types: a lost reply means the code may be used up, nothing more.
         case .noReply: "\(helper.name) didn't answer. Run phrased pair again and retry."
+        case .failedPartway: "Pairing with \(helper.name) failed. Run phrased pair again."
         case .rateLimited: "Too many pairing attempts. Run phrased pair on \(helper.name) again."
         default: send(failure, on: helper).message ?? "Couldn't pair with \(helper.name)."
         }

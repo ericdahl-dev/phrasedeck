@@ -32,6 +32,8 @@ struct OutcomeTests {
         (HelperClient.Failure.notFound, "Run phrased pair on lib-2833 first."),
         (.unauthorized, "That code didn't match. Check it, or run phrased pair again."),
         (.noReply, "lib-2833 didn't answer. Run phrased pair again and retry."),
+        // A /pair 500 (say, the token couldn't be saved) types nothing, so no "may have typed".
+        (.failedPartway, "Pairing with lib-2833 failed. Run phrased pair again."),
         (.rateLimited, "Too many pairing attempts. Run phrased pair on lib-2833 again."),
         // Anything else reads as it would for a send.
         (.unreachable, "lib-2833 unreachable"),

@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -153,7 +154,10 @@ func run(o options) error {
 			return fmt.Errorf("LAN certificate: %w", err)
 		}
 		cfg.LANPort = o.lanPort
-		if err := os.WriteFile(filepath.Join(o.config, lanAddrFile), []byte(pairAddr(lanAddrs)+"\n"), 0o600); err != nil {
+		if ip := pairAddr(lanAddrs); ip == "" {
+			os.Remove(filepath.Join(o.config, lanAddrFile))
+		} else if err := os.WriteFile(filepath.Join(o.config, lanAddrFile),
+			[]byte(net.JoinHostPort(ip, strconv.Itoa(o.lanPort))+"\n"), 0o600); err != nil {
 			log.Printf("can't record the LAN address for phrased pair: %v", err)
 		}
 	} else if err := os.Remove(filepath.Join(o.config, lanAddrFile)); err != nil && !errors.Is(err, os.ErrNotExist) {

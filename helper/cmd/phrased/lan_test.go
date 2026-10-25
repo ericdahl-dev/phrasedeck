@@ -14,16 +14,25 @@ import (
 
 const fp64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-func TestPairURLAddsFpAndLanTogether(t *testing.T) {
-	got := pairURL("mac.tail1234.ts.net", 47811, "012345", fp64, "192.168.1.20")
-	want := "phrasedeck://pair?code=012345&fp=" + fp64 + "&host=mac.tail1234.ts.net&lan=192.168.1.20&port=47811&v=1"
+func TestPairURLAddsFpLanAndLanPortTogether(t *testing.T) {
+	got := pairURL("mac.tail1234.ts.net", 47811, "012345", fp64, "192.168.1.20", 47900)
+	want := "phrasedeck://pair?code=012345&fp=" + fp64 + "&host=mac.tail1234.ts.net&lan=192.168.1.20&lanPort=47900&port=47811&v=1"
 	if got != want {
 		t.Fatalf("pairURL = %q, want %q", got, want)
 	}
 	for _, half := range [][2]string{{fp64, ""}, {"", "192.168.1.20"}} {
-		if got := pairURL("h", 1, "1", half[0], half[1]); strings.Contains(got, "fp=") || strings.Contains(got, "lan=") {
+		if got := pairURL("h", 1, "1", half[0], half[1], 47812); strings.Contains(got, "fp=") || strings.Contains(got, "lan") {
 			t.Errorf("fp or lan without the other: %q", got)
 		}
+	}
+}
+
+// The app keeps host tailnet-only, so a LAN-only QR leaves host (and its port) out.
+func TestPairURLWithoutATailnetHostHasOnlyTheLANRoute(t *testing.T) {
+	got := pairURL("", 47811, "012345", fp64, "192.168.1.20", 47812)
+	want := "phrasedeck://pair?code=012345&fp=" + fp64 + "&lan=192.168.1.20&lanPort=47812&v=1"
+	if got != want {
+		t.Fatalf("pairURL = %q, want %q", got, want)
 	}
 }
 
@@ -35,7 +44,7 @@ func lanConfig(t *testing.T) (dir, fp string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, lanAddrFile), []byte("192.168.1.20\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, lanAddrFile), []byte("192.168.1.20:47900\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return dir, fp
@@ -54,7 +63,7 @@ func TestPairQRCarriesTheLANPinWhenLANIsOn(t *testing.T) {
 		t.Fatal(err)
 	}
 	code := regexp.MustCompile(`\b\d{6}\b`).FindString(out)
-	if !strings.Contains(out, pairURL("mac.tail1234.ts.net", 47811, code, fp, "192.168.1.20")) {
+	if !strings.Contains(out, pairURL("mac.tail1234.ts.net", 47811, code, fp, "192.168.1.20", 47900)) {
 		t.Fatalf("no pair URL with fp and lan in %q", out)
 	}
 }
@@ -70,8 +79,11 @@ func TestPairQRWithTailscaleOffUsesTheLANAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 	code := regexp.MustCompile(`\b\d{6}\b`).FindString(out)
-	if !strings.Contains(out, pairURL("192.168.1.20", 47811, code, fp, "192.168.1.20")) {
+	if !strings.Contains(out, pairURL("", 0, code, fp, "192.168.1.20", 47900)) {
 		t.Fatalf("want a LAN-only pair URL in %q", out)
+	}
+	if strings.Contains(out, "host=") {
+		t.Fatalf("LAN IP put in host: %q", out)
 	}
 }
 

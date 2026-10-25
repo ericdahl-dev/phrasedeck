@@ -193,14 +193,14 @@ comment) adds a second listener:
   `phrased-<host>.local`, with TXT `v=1`, `ts=<tailnet name>` and `port`. TXT carries no token
   and no fingerprint.
 - **`/pair`** adds `certSHA256` and `lanPort` to its reply, and the QR code from `phrased pair`
-  adds `fp` and `lan` (this machine's LAN address). With Tailscale off, the QR code uses the LAN
-  address as its host.
-- `/pair`, `/type`, tokens, limits and lockout are the same on both listeners.
+  adds `fp`, `lan` (this machine's LAN address) and `lanPort`. With Tailscale off, the QR code
+  leaves out `host` and `port` and carries only the LAN route.
+- `/pair`, `/type`, tokens, limits and lockout are shared by both listeners. Each accepts only
+  its own `Host` names: tailnet names on 47811, LAN IPs and `.local` names on 47812.
 
 Limits:
 - The LAN addresses and interfaces are read at startup; restart `phrased` after the network
   changes.
-- The QR code has no LAN port, so QR pairing over the LAN needs the default `-lan-port`.
 - On the Mac, the firewall must allow the binary (see above); on a managed Mac that means the
   already-allowed path.
 

@@ -49,7 +49,8 @@ with Tailscale off, on macOS and omarchy, over an encrypted LAN route.
 - **Certificate:** self-signed ECDSA P-256, made once in the config dir (key 0600) and reused.
   The pin, `certSHA256`, is the lowercase hex SHA-256 of the leaf's DER (64 characters, no
   colons).
-- **Host allowlist** adds the machine's LAN IPs, `<host>.local` and `phrased-<host>.local`.
+- **Host allowlist** per listener: 47811 keeps the tailnet names; 47812 accepts the machine's
+  LAN IPs, `<host>.local` and `phrased-<host>.local`. `-allow-host` applies to both.
 - **Bonjour:** `_phrasedeck._tcp` on the LAN interfaces, from the pure-Go `brutella/dnssd`, as
   host `phrased-<host>.local`. A separate name means phrased never publishes records for the
   system's own `<host>.local`, which mDNSResponder or avahi owns. TXT is `v=1`,
@@ -57,8 +58,8 @@ with Tailscale off, on macOS and omarchy, over an encrypted LAN route.
   `port=47812`, with no secrets.
 - **Wire fields:** `/pair` 200 is `{"token","certSHA256","lanPort"}`, with the last two only when
   LAN is on. `GET /info` (Bearer) is `{"certSHA256","lanPort","hostname"}`. The QR code adds
-  `fp=<64 hex>&lan=<IP literal>`, both or neither, and `v` stays 1. With Tailscale off, the QR
-  host is the LAN address.
+  `fp=<64 hex>&lan=<IP literal>&lanPort=<port>`, all or none, and `v` stays 1. `host` stays
+  tailnet-only: with Tailscale off the QR leaves out `host` and `port`.
 - **App:** browses `_phrasedeck._tcp` and calls a paired computer "nearby" when its `ts` matches.
   It sends over `https://<lan ip>:47812` with the certificate pinned, and fails closed on a
   mismatch, never falling back silently. The pin comes only from `/pair` over the tailnet, the

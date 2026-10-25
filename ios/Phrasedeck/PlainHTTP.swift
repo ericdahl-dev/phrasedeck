@@ -2,6 +2,9 @@ import Foundation
 import Network
 
 extension HelperClient {
+    /// The most a reply may be: the helper's are a few hundred bytes.
+    static let maxReply = 1 << 20
+
     /// Sends a plain-HTTP request to `address:port` and returns the status and body.
     typealias PlainSend = @Sendable (URLRequest, _ address: String, _ port: Int) async throws -> (Int, Data)
 
@@ -10,10 +13,19 @@ extension HelperClient {
     /// refuses plain HTTP to a bare 100.x address. The URL's host goes in the Host header.
     /// HTTP/1.0 with Connection: close, so the helper answers without chunking and hangs up.
     static let networkSend: PlainSend = { request, address, port in
-        guard let payload = serialize(request), let nwPort = NWEndpoint.Port(rawValue: UInt16(clamping: port))
+        guard let payload = serialize(request), (1...65535).contains(port),
+              let nwPort = NWEndpoint.Port(rawValue: UInt16(port))
         else { throw Failure.notSent(URLError.badURL.rawValue) }
         let exchange = PlainExchange(NWConnection(host: NWEndpoint.Host(address), port: nwPort, using: .tcp))
         return try await exchange.run(payload, timeout: timeout)
+    }
+
+    /// Whether a connection waiting with this error should give up now. Only a refused port
+    /// (nothing listening) does; no route yet or a tunnel still waking after sleep gets the
+    /// whole timeout to come up.
+    static func stopsWaiting(_ error: NWError) -> Bool {
+        if case .posix(.ECONNREFUSED) = error { return true }
+        return false
     }
 
     /// The request as HTTP/1.0 bytes, or nil if it has no URL or a header would break a line.
@@ -42,13 +54,13 @@ extension HelperClient {
         let statusParts = head.first?.split(separator: " ") ?? []
         guard statusParts.count >= 2, statusParts[0].hasPrefix("HTTP/"), let status = Int(statusParts[1])
         else { return nil }
-        var body = Data(data[split.upperBound...])
-        if let length = head.dropFirst().first(where: { $0.lowercased().hasPrefix("content-length:") })
-            .flatMap({ Int($0.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) }),
-           length <= body.count {
-            body = body.prefix(length)
-        }
-        return (status, body)
+        let body = Data(data[split.upperBound...])
+        guard let length = head.dropFirst().first(where: { $0.lowercased().hasPrefix("content-length:") })
+            .flatMap({ Int($0.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) })
+        else { return (status, body) }
+        // Cut short of its length, the reply isn't one: the caller reads that as no reply.
+        guard length <= body.count else { return nil }
+        return (status, body.prefix(length))
     }
 }
 
@@ -70,8 +82,9 @@ private final class PlainExchange: @unchecked Sendable {
                 connection.stateUpdateHandler = { [self] state in
                     switch state {
                     case .ready: send(payload)
-                    // Refused, no route, or gone: before sending, nothing reached the helper.
-                    case .waiting, .failed: fail()
+                    // Before sending, nothing reached the helper.
+                    case .waiting(let error) where HelperClient.stopsWaiting(error): fail()
+                    case .failed: fail()
                     default: break
                     }
                 }
@@ -92,7 +105,9 @@ private final class PlainExchange: @unchecked Sendable {
     private func receive() {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [self] data, _, isComplete, error in
             if let data { received.append(data) }
-            if isComplete {
+            if received.count > HelperClient.maxReply {
+                fail()
+            } else if isComplete {
                 if let reply = HelperClient.parse(received) { finish(.success(reply)) } else { fail() }
             } else if error != nil {
                 fail()

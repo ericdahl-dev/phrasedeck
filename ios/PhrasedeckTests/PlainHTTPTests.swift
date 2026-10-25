@@ -70,6 +70,46 @@ struct PlainHTTPTests {
         #expect(sent.hasSuffix("\r\n\r\n{\"code\":\"123456\"}"))
     }
 
+    /// A reply cut short of its Content-Length isn't a success: the request went out, so it may
+    /// have typed.
+    @Test func aTruncatedBodyIsNoReply() async throws {
+        let server = try await OneShotServer(reply: "HTTP/1.0 200 OK\r\nContent-Length: 50\r\n\r\n{\"ok\":true}")
+        let request = URLRequest(url: URL(string: "http://100.101.102.103:47811/type")!)
+
+        await #expect(throws: HelperClient.Failure.noReply) {
+            _ = try await HelperClient.networkSend(request, "127.0.0.1", server.port)
+        }
+    }
+
+    /// The helper's replies are tiny; anything over the cap is refused instead of buffered.
+    @Test func aReplyOverTheCapIsNoReply() async throws {
+        let big = String(repeating: "x", count: HelperClient.maxReply + 1)
+        let server = try await OneShotServer(reply: "HTTP/1.0 200 OK\r\nContent-Length: \(big.utf8.count)\r\n\r\n" + big)
+        let request = URLRequest(url: URL(string: "http://100.101.102.103:47811/health")!)
+
+        await #expect(throws: HelperClient.Failure.noReply) {
+            _ = try await HelperClient.networkSend(request, "127.0.0.1", server.port)
+        }
+    }
+
+    @Test(arguments: [0, -1, 65536, 70000])
+    func aPortOutOfRangeIsNotSentNeverClamped(port: Int) async {
+        let request = URLRequest(url: URL(string: "http://100.101.102.103:47811/health")!)
+
+        await #expect(throws: HelperClient.Failure.notSent(URLError.badURL.rawValue)) {
+            _ = try await HelperClient.networkSend(request, "127.0.0.1", port)
+        }
+    }
+
+    /// Waiting on a refused port means no helper is listening: say so at once. Any other wait
+    /// (no route yet, a tunnel still waking) gets the whole timeout to recover.
+    @Test func onlyARefusedConnectionStopsTheWaitEarly() {
+        #expect(HelperClient.stopsWaiting(.posix(.ECONNREFUSED)))
+        #expect(!HelperClient.stopsWaiting(.posix(.ENETUNREACH)))
+        #expect(!HelperClient.stopsWaiting(.posix(.EHOSTUNREACH)))
+        #expect(!HelperClient.stopsWaiting(.posix(.ETIMEDOUT)))
+    }
+
     @Test func aRefusedConnectionIsUnreachable() async throws {
         let server = try await OneShotServer(reply: "")
         let port = server.port
@@ -77,8 +117,10 @@ struct PlainHTTPTests {
         try await Task.sleep(for: .milliseconds(100))
         let request = URLRequest(url: URL(string: "http://100.101.102.103:47811/health")!)
 
+        let start = ContinuousClock.now
         await #expect(throws: HelperClient.Failure.unreachable) {
             _ = try await HelperClient.networkSend(request, "127.0.0.1", port)
         }
+        #expect(ContinuousClock.now - start < .seconds(1), "a refused port shouldn't wait out the timeout")
     }
 }

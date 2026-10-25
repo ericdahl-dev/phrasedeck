@@ -19,7 +19,9 @@ dpkg-deb --ctrl-tarfile "$deb" | tar -xO ./postinst 2>/dev/null | grep -q 'syste
 # wtype can't type on GNOME (Mutter), so it's only suggested until #69; wl-clipboard is for paste.
 depends=$(dpkg-deb -f "$deb" Depends)
 echo "$depends" | grep -qw wtype && fail "depends on wtype, which GNOME can't use (Depends: $depends)"
-dpkg-deb -f "$deb" Recommends | grep -qw wl-clipboard || fail "doesn't recommend wl-clipboard"
+for dep in wl-clipboard ydotool; do
+	dpkg-deb -f "$deb" Recommends | grep -qw "$dep" || fail "doesn't recommend $dep (GNOME and KDE type with ydotool, #84)"
+done
 dpkg-deb -f "$deb" Suggests | grep -qw wtype || fail "doesn't suggest wtype"
 
 unit=$(dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/lib/systemd/user/phrased.service)

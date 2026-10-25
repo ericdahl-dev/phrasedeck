@@ -12,6 +12,7 @@ section: utils
 # The Helper says what's missing when it isn't Ready.
 recommends:
   - wl-clipboard
+  - ydotool   # GNOME and KDE type through it (#84)
 suggests:
   - wtype
 contents:

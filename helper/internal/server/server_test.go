@@ -24,12 +24,14 @@ type env struct {
 	t    *testing.T
 	fake *typer.Fake
 	srv  *httptest.Server
+	dir  string
 }
 
 func newEnv(t *testing.T, fake *typer.Fake, lockWait time.Duration) *env {
 	t.Helper()
 	sum := sha256.Sum256([]byte(token))
-	p := filepath.Join(t.TempDir(), "tokens.json")
+	dir := t.TempDir()
+	p := filepath.Join(dir, "tokens.json")
 	data := `{"devices":[{"name":"curl","sha256":"` + hex.EncodeToString(sum[:]) + `","paired_at":"2026-10-24T00:00:00Z"}]}`
 	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
@@ -41,6 +43,7 @@ func newEnv(t *testing.T, fake *typer.Fake, lockWait time.Duration) *env {
 	srv := httptest.NewUnstartedServer(nil)
 	srv.Config.Handler = New(Config{
 		Store:      store,
+		Pairer:     auth.NewPairer(filepath.Join(dir, "pairing.json"), store),
 		Typer:      fake,
 		Hostname:   "test-mac",
 		OS:         "darwin",
@@ -49,7 +52,7 @@ func newEnv(t *testing.T, fake *typer.Fake, lockWait time.Duration) *env {
 	})
 	srv.Start()
 	t.Cleanup(srv.Close)
-	return &env{t: t, fake: fake, srv: srv}
+	return &env{t: t, fake: fake, srv: srv, dir: dir}
 }
 
 // post sends body to /type with the given token ("" for none) and content type.

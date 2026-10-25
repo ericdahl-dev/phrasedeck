@@ -1,4 +1,9 @@
 // Command phrased types phrases sent over the tailnet into the focused window.
+//
+//	phrased [flags]          run the helper
+//	phrased pair             open a 2-minute pairing window and print its code
+//	phrased devices          list paired devices
+//	phrased revoke <name>    revoke a device
 package main
 
 import (
@@ -69,6 +74,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if handled, err := command(os.Args[1:], home, os.Stdout); handled {
+		if err != nil && !errors.Is(err, flag.ErrHelp) {
+			log.Fatal(err)
+		}
+		return
+	}
 	o, err := parseFlags(os.Args[1:], home)
 	if errors.Is(err, flag.ErrHelp) {
 		return
@@ -103,6 +114,7 @@ func run(o options) error {
 	srv := &http.Server{
 		Handler: server.New(server.Config{
 			Store:      store,
+			Pairer:     auth.NewPairer(filepath.Join(o.config, "pairing.json"), store),
 			Typer:      backend,
 			Hostname:   hostname,
 			OS:         runtime.GOOS,

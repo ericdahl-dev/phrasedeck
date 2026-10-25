@@ -47,21 +47,39 @@ macOS only lets `phrased` type after you allow it once:
    `helper/phrased` (or the terminal app you run it from, if macOS lists that instead).
 3. `curl http://<tailnet-name>:47811/health` from a tailnet device shows `"accessibility_ok": true`.
 
-### Preset a token
+### Pair a device
 
-Pairing from the app comes later (#13). For now, make a token by hand and store only its hash:
+Each phone or tablet gets its own token. On the computer running `phrased`:
 
 ```sh
-mkdir -p ~/.config/phrased
-TOKEN=$(openssl rand -hex 32)
-HASH=$(printf %s "$TOKEN" | shasum -a 256 | cut -d' ' -f1)
-printf '{"devices":[{"name":"curl","sha256":"%s","paired_at":"%s"}]}\n' \
-  "$HASH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > ~/.config/phrased/tokens.json
-chmod 600 ~/.config/phrased/tokens.json
-echo "$TOKEN"   # keep this; phrased only has the hash
+./phrased pair
 ```
 
-`phrased` refuses a `tokens.json` that group or others can read. Restart it after editing the file.
+It prints a 6-digit code, valid for 2 minutes, and on the Mac also shows it as a notification.
+Enter the code in the app, or pair from curl:
+
+```sh
+curl -s http://<tailnet-name>:47811/pair -H 'Content-Type: application/json' \
+  -d '{"code":"123456","device":"curl"}'
+# {"token":"..."}
+```
+
+- The code works once. A wrong code gets 401; with no open window (never opened, expired or
+  already used) `/pair` answers 404.
+- After 10 wrong codes, pairing stays locked (404) until you run `phrased pair` again.
+- `/pair` allows about one attempt a second, separately from `/type`.
+- Only hashes are saved: the token's in `~/.config/phrased/tokens.json` and the code's in
+  `pairing.json`, both mode 0600.
+
+### Devices and revoke
+
+```sh
+./phrased devices          # name and pairing date of each device
+./phrased revoke "curl"    # that device's token gets 401 from its next request
+```
+
+The running helper rereads `tokens.json` when it changes, so neither needs a restart. `pair`,
+`devices` and `revoke` take the same `-config` directory as the helper.
 
 ### Type with curl
 
@@ -77,17 +95,27 @@ curl -s http://<tailnet-name>:47811/type \
   Mac, pasting isn't supported yet (#4), so those requests get 501.
 - `GET /health` needs no token and returns `hostname`, `os` and `accessibility_ok`.
 
-Status codes: 400 bad JSON or mode, 401 bad token, 403 Host not allowed, 409 busy typing another
-phrase for over a second, 413 body over 64 KB or text over 10,000 characters, 415 not
-`application/json`, 429 over 10 requests a second, 501 paste not supported yet, 503 Accessibility
-not granted.
+Status codes:
+
+| Code | Meaning |
+|---|---|
+| 400 | bad JSON, mode or device name |
+| 401 | bad token, or a wrong pairing code |
+| 403 | `Host` not allowed |
+| 404 | no pairing window open, or pairing locked |
+| 409 | busy typing another phrase for over a second |
+| 413 | body over 64 KB, or text over 10,000 characters |
+| 415 | not `application/json` |
+| 429 | over 10 requests a second on `/type`, or about 1 a second on `/pair` |
+| 501 | paste not supported yet on this computer |
+| 503 | Accessibility not granted |
 
 ### Flags
 
 | Flag | Default | |
 |---|---|---|
 | `-port` | `47811` | port to listen on |
-| `-config` | `~/.config/phrased` | directory holding `tokens.json` |
+| `-config` | `~/.config/phrased` | directory holding `tokens.json` and `pairing.json` |
 | `-tailscale` | `tailscale` on PATH, else the Mac app's CLI | used once at startup for this machine's names |
 | `-allow-host` | none | another `Host` to accept; repeat for more |
 

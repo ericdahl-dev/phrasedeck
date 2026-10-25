@@ -4,12 +4,12 @@ import Testing
 
 struct DeckSizeTests {
     @Test func theIPhoneGoesFromTwoToFiveColumnsAndStartsAtThree() {
-        #expect(DeckSize.range(for: .compact) == 2...5)
+        #expect(DeckSize.range(for: .compact, width: 393) == 2...5)
         #expect(DeckSize.defaultColumns(for: .compact, width: 393) == 3)
     }
 
     @Test func theIPadGoesFromThreeToEightAndStartsAtTodaysCount() {
-        #expect(DeckSize.range(for: .regular) == 3...8)
+        #expect(DeckSize.range(for: .regular, width: 834) == 3...8)
         // The old adaptive grid: as many 150-point columns as fit.
         #expect(DeckSize.defaultColumns(for: .regular, width: 834) == 5)
         #expect(DeckSize.defaultColumns(for: .regular, width: 1194) == 7)
@@ -29,9 +29,19 @@ struct DeckSizeTests {
         #expect(DeckSize.columns(pinch: 0, from: 3, in: 2...5) == 5)
     }
 
-    @Test func aStoredSizeOutsideTheLimitsFallsBackToTheDefault() {
+    /// An iPhone in landscape can pinch in to as many columns as fit at about 72 points each;
+    /// portrait and the iPad keep their limits.
+    @Test func aWideScreenAllowsMoreColumns() {
+        #expect(DeckSize.range(for: .compact, width: 750) == 2...8)
+        #expect(DeckSize.range(for: .compact, width: 440) == 2...5)
+        #expect(DeckSize.range(for: .regular, width: 1194) == 3...8)
+    }
+
+    /// Never set means the default; a count from a wider screen (landscape) is clamped, so
+    /// turning the phone back shows the most columns that fit, not the default.
+    @Test func aStoredSizeIsClampedAndNeverSetIsTheDefault() {
         #expect(DeckSize.columns(stored: 0, default: 3, in: 2...5) == 3)
-        #expect(DeckSize.columns(stored: 9, default: 3, in: 2...5) == 3)
+        #expect(DeckSize.columns(stored: 8, default: 3, in: 2...5) == 5)
         #expect(DeckSize.columns(stored: 4, default: 3, in: 2...5) == 4)
     }
 

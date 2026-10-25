@@ -73,7 +73,7 @@ struct DeckView: View {
     private func savedColumns(width: CGFloat) -> Int {
         DeckSize.columns(stored: storedColumns,
                          default: DeckSize.defaultColumns(for: sizeClass, width: width),
-                         in: DeckSize.range(for: sizeClass))
+                         in: DeckSize.range(for: sizeClass, width: width))
     }
 
     private func shownColumns(width: CGFloat) -> Int {
@@ -89,7 +89,7 @@ struct DeckView: View {
                 let start = pinchStart ?? savedColumns(width: width)
                 pinchStart = start
                 pinchColumns = DeckSize.columns(pinch: value.magnification, from: start,
-                                                in: DeckSize.range(for: sizeClass))
+                                                in: DeckSize.range(for: sizeClass, width: width))
             }
             .onEnded { _ in
                 if let pinchColumns { storedColumns = pinchColumns }
@@ -165,15 +165,20 @@ enum DeckSize {
     /// The old iPad grid fit as many columns of at least this width as it could.
     static let iPadDefaultWidth: CGFloat = 150
 
-    static func range(for sizeClass: UserInterfaceSizeClass?) -> ClosedRange<Int> {
-        sizeClass == .regular ? 3...8 : 2...5
+    /// On the iPhone, pinching in reaches 5 columns, or in landscape as many as fit at about
+    /// this width each. The iPad stays at 3 to 8.
+    static let narrowestColumn: CGFloat = 72
+
+    static func range(for sizeClass: UserInterfaceSizeClass?, width: CGFloat) -> ClosedRange<Int> {
+        guard sizeClass != .regular else { return 3...8 }
+        return 2...max(5, Int((width - 2 * padding + spacing) / (narrowestColumn + spacing)))
     }
 
     /// Today's layout: 3 columns on the iPhone, and on the iPad as many 150-point columns as fit.
     static func defaultColumns(for sizeClass: UserInterfaceSizeClass?, width: CGFloat) -> Int {
         guard sizeClass == .regular else { return 3 }
         let fit = Int((width - 2 * padding + spacing) / (iPadDefaultWidth + spacing))
-        return fit.clamped(to: range(for: sizeClass))
+        return fit.clamped(to: range(for: sizeClass, width: width))
     }
 
     /// The column count a pinch of `scale` snaps to, starting from `start`. Pinching out
@@ -183,9 +188,9 @@ enum DeckSize {
         return Int((CGFloat(start) / scale).rounded()).clamped(to: range)
     }
 
-    /// The stored count, or the default when nothing valid is stored (0 means "never set").
+    /// The stored count clamped to what fits now, or the default when never set (0).
     static func columns(stored: Int, default fallback: Int, in range: ClosedRange<Int>) -> Int {
-        range.contains(stored) ? stored : fallback
+        stored > 0 ? stored.clamped(to: range) : fallback
     }
 
     static let compactKey = "deck.columns.compact"

@@ -172,6 +172,17 @@ struct AppModelTests {
         #expect(try tokens.get(mac.id) == "new-token")
     }
 
+    @Test func scanningTheMagicDNSNameOfAComputerAddedByShortNameRepairsIt() async throws {
+        defer { try? tokens.delete(mac.id) }
+        let model = try model()
+
+        let error = await model.addHelper(host: "lib-2833.tail1fdac.ts.net", port: mac.port, code: "123456")
+
+        #expect(error == nil)
+        #expect(model.helpers.map(\.id) == [mac.id])
+        #expect(try tokens.get(mac.id) == "new-token")
+    }
+
     @Test func aMissingPairingWindowSaysToRunPhrasedPairFirst() async throws {
         api.pairResult = .failure(.noPairingWindow)
         let model = try model(withMac: false)

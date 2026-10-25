@@ -15,6 +15,20 @@ struct Helper: Codable, Hashable, Identifiable, Sendable {
     static func displayName(for host: String) -> String {
         host.hasSuffix(".ts.net") ? String(host.prefix { $0 != "." }) : host
     }
+
+    /// Whether two hosts name the same computer: equal (ignoring case and a
+    /// trailing dot), or a bare short name and a MagicDNS name whose first
+    /// label is that name. Two different FQDNs never match on their first label.
+    static func sameMachine(_ a: String, _ b: String) -> Bool {
+        func clean(_ h: String) -> String { h.lowercased().hasSuffix(".") ? String(h.lowercased().dropLast()) : h.lowercased() }
+        let (a, b) = (clean(a), clean(b))
+        if a == b { return true }
+        func short(_ bare: String, matches fqdn: String) -> Bool {
+            !bare.contains(".") && !bare.contains(":") && fqdn.hasSuffix(".ts.net")
+                && fqdn.prefix { $0 != "." } == bare
+        }
+        return short(a, matches: b) || short(b, matches: a)
+    }
 }
 
 /// The computers on this device, in UserDefaults so they can never sync

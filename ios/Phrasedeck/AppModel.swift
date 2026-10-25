@@ -113,7 +113,7 @@ final class AppModel {
         guard !host.isEmpty else { return "Enter the computer's tailnet name." }
         let port = port ?? Helper.defaultPort
         // Scanning a computer that's already here pairs it again instead of adding a copy.
-        if let existing = helpers.first(where: { $0.host.lowercased() == host.lowercased() && $0.port == port }) {
+        if let existing = helpers.first(where: { Helper.sameMachine($0.host, host) && $0.port == port }) {
             if let error = await pair(existing, code: code) { return error }
             selectedHelperID = existing.id
             return nil

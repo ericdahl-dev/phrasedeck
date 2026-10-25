@@ -54,3 +54,25 @@ struct HelperStoreTests {
         #expect(try tokens.get(mac.id) == nil)
     }
 }
+
+struct SameMachineTests {
+    @Test(arguments: [
+        ("lib-2833", "lib-2833.tail1fdac.ts.net", true),
+        ("LIB-2833", "lib-2833.Tail1fdac.ts.net.", true),
+        ("lib-2833.tail1fdac.ts.net", "lib-2833", true),
+        ("lib-2833.tail1fdac.ts.net", "LIB-2833.tail1fdac.ts.net", true),
+        ("lib-2833", "lib-2833", true),
+        ("100.69.235.48", "100.69.235.48", true),
+        // Two different FQDNs never match on their first label alone.
+        ("lib-2833.tail1fdac.ts.net", "lib-2833.tailother.ts.net", false),
+        ("lib-2833.example.com", "lib-2833.tail1fdac.ts.net", false),
+        // A bare name matches only a MagicDNS name, not any FQDN.
+        ("lib-2833", "lib-2833.example.com", false),
+        ("lib", "lib-2833.tail1fdac.ts.net", false),
+        ("100", "100.69.235.48", false),
+        ("omarchy-laptop", "lib-2833.tail1fdac.ts.net", false),
+    ])
+    func matching(a: String, b: String, same: Bool) {
+        #expect(Helper.sameMachine(a, b) == same)
+    }
+}

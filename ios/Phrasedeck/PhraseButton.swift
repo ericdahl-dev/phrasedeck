@@ -10,6 +10,8 @@ struct PhraseButton: View {
     var editDeck: (() -> Void)?
     /// Set in Arrange mode: taps don't type, and the move actions replace the menu.
     var arrange: ArrangeRole?
+    /// Set when holding then moving the finger should carry the Button into Arrange mode (#81).
+    var startDrag: (() -> Void)?
 
     /// What a Button needs in Arrange mode (#81, spec section 11).
     struct ArrangeRole {
@@ -57,6 +59,7 @@ struct PhraseButton: View {
                 Button("Delete", systemImage: "trash", role: .destructive, action: delete)
             }
         }
+        .modifier(DragSource(uid: phrase.uid, start: startDrag))
         .modifier(Jiggle(active: arrange != nil && !reduceMotion))
         .overlay {
             // Reduce Motion: a dashed outline instead of the jiggle.
@@ -138,6 +141,24 @@ extension Arrangement.Nudge {
         case .right: "Move right"
         case .up: "Move up"
         case .down: "Move down"
+        }
+    }
+}
+
+/// Holding a Button opens its menu; moving the finger then hands off to a system drag (spec
+/// section 3). Only applied when `start` is set, so a build without Arrange mode keeps the plain menu.
+private struct DragSource: ViewModifier {
+    let uid: String
+    let start: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        if let start {
+            content.onDrag {
+                start()
+                return NSItemProvider(object: uid as NSString)
+            }
+        } else {
+            content
         }
     }
 }

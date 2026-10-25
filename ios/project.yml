@@ -20,6 +20,9 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # iCloud sync (#10) is off while this is empty. To turn it on, set it to
+        # Phrasedeck/Phrasedeck.entitlements.
+        CODE_SIGN_ENTITLEMENTS: ""
     info:
       path: Phrasedeck/Info.plist
       properties:
@@ -45,7 +48,10 @@ targets:
         NSCameraUsageDescription: phrasedeck uses the camera only to scan the QR code that phrased pair shows, to add a computer.
         # No encryption beyond what the OS provides (TestFlight export compliance).
         ITSAppUsesNonExemptEncryption: false
-    # No iCloud capability or entitlement until the sync slice (#10).
+        # Not empty once the entitlements above are set; the app syncs only then.
+        PhrasedeckCloudSync: $(CODE_SIGN_ENTITLEMENTS)
+        # CloudKit wakes the app with a silent push when the other device changes the deck.
+        UIBackgroundModes: [remote-notification]
   PhrasedeckTests:
     type: bundle.unit-test
     platform: iOS

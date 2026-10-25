@@ -15,13 +15,18 @@ struct PhrasedeckApp: App {
         let stub: StubHelper? = nil
         #endif
         self.stub = stub
-        // Local only until the sync slice (#10) adds the CloudKit container
-        // and the iCloud entitlement. UI tests get a throwaway store.
+        // Phrases and pages sync through the private CloudKit database once the build has the
+        // iCloud entitlement (project.yml); computers and tokens live outside this store.
+        // UI tests get a throwaway local store.
+        let syncs = !((Bundle.main.object(forInfoDictionaryKey: "PhrasedeckCloudSync") as? String) ?? "").isEmpty
         do {
             container = try ModelContainer(
                 for: Page.self, Phrase.self,
-                configurations: ModelConfiguration(isStoredInMemoryOnly: stub != nil, cloudKitDatabase: .none))
+                configurations: ModelConfiguration(
+                    isStoredInMemoryOnly: stub != nil,
+                    cloudKitDatabase: syncs && stub == nil ? .private("iCloud.dev.ericdahl.phrasedeck") : .none))
             try Seed.insertMissing(container.mainContext, defaults: stub?.defaults ?? .standard)
+            try Seed.mergeDuplicates(container.mainContext)
         } catch {
             fatalError("Could not open the phrase store: \(error)")
         }

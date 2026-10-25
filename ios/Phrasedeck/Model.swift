@@ -1,14 +1,16 @@
 import Foundation
 import SwiftData
 
-// Every property is defaulted or optional, and there are no unique
-// constraints, so switching on CloudKit sync (#10) needs no migration.
+// Every property is defaulted or optional and there are no unique
+// constraints, as CloudKit sync requires. `uid` is the same on every device
+// a row syncs to, so the seed merge picks the same survivor everywhere.
 
 @Model
 final class Page {
     var name: String = ""
     var order: Int = 0
     var seedKey: String?
+    var uid: String = ""
     @Relationship(deleteRule: .cascade, inverse: \Phrase.page)
     var phrases: [Phrase]? = []
 
@@ -16,6 +18,7 @@ final class Page {
         self.name = name
         self.order = order
         self.seedKey = seedKey
+        self.uid = UUID().uuidString
     }
 
     var sortedPhrases: [Phrase] { (phrases ?? []).sorted { $0.order < $1.order } }
@@ -31,6 +34,7 @@ final class Phrase {
     var order: Int = 0
     var page: Page?
     var seedKey: String?
+    var uid: String = ""
 
     init(label: String, text: String, pressEnter: Bool = false, confirm: Bool = false,
          colorName: String = "blue", order: Int, page: Page? = nil, seedKey: String? = nil) {
@@ -42,13 +46,15 @@ final class Phrase {
         self.order = order
         self.page = page
         self.seedKey = seedKey
+        self.uid = UUID().uuidString
     }
 }
 
 /// The starter deck from the design. Each row has a fixed seed key, and
 /// only missing keys are inserted, so a row already synced from another
 /// device isn't doubled. It runs once per device: after that, a starter
-/// phrase Eric deletes stays deleted.
+/// phrase Eric deletes stays deleted. Rows seeded on two devices before
+/// either synced are merged by `mergeDuplicates`.
 enum Seed {
     static let doneKey = "seed.starterDeck.done"
 
@@ -93,5 +99,45 @@ enum Seed {
 
         try context.save()
         defaults.set(true, forKey: doneKey)
+    }
+
+    /// Merges starter rows that two devices seeded before syncing: per seed key, the row with
+    /// the lowest `uid` stays, so every device deletes the same copies. Phrases on a duplicate
+    /// page move to the page that stays. Runs at launch and after each CloudKit import.
+    // shortcut: an edit made to a copy that loses is dropped; fine while only seeded rows double.
+    @MainActor
+    static func mergeDuplicates(_ context: ModelContext) throws {
+        let pages = try context.fetch(FetchDescriptor<Page>())
+        let phrases = try context.fetch(FetchDescriptor<Phrase>())
+        for page in pages where page.uid.isEmpty { page.uid = UUID().uuidString }
+        for phrase in phrases where phrase.uid.isEmpty { phrase.uid = UUID().uuidString }
+
+        var touched: [Page] = []
+        for group in Dictionary(grouping: pages.filter { $0.seedKey != nil }, by: \.seedKey).values
+        where group.count > 1 {
+            let sorted = group.sorted { $0.uid < $1.uid }
+            let keep = sorted[0]
+            for duplicate in sorted.dropFirst() {
+                for phrase in duplicate.phrases ?? [] { phrase.page = keep }
+                context.delete(duplicate)
+            }
+            touched.append(keep)
+        }
+
+        for group in Dictionary(grouping: phrases.filter { $0.seedKey != nil }, by: \.seedKey).values
+        where group.count > 1 {
+            for duplicate in group.sorted(by: { $0.uid < $1.uid }).dropFirst() {
+                if let page = duplicate.page { touched.append(page) }
+                duplicate.page = nil
+                context.delete(duplicate)
+            }
+        }
+
+        // Copies of a starter phrase share an order, so (order, uid) keeps the starter layout.
+        for page in touched {
+            let sorted = (page.phrases ?? []).sorted { ($0.order, $0.uid) < ($1.order, $1.uid) }
+            for (order, phrase) in sorted.enumerated() { phrase.order = order }
+        }
+        if context.hasChanges { try context.save() }
     }
 }

@@ -56,7 +56,8 @@ struct HelperClient: Sendable {
                          authorized: Bool = false) throws -> URLRequest {
         var components = URLComponents()
         components.scheme = "http"
-        components.host = helper.host
+        // URLComponents wants IPv6 literals in brackets.
+        components.host = helper.host.contains(":") && !helper.host.hasPrefix("[") ? "[\(helper.host)]" : helper.host
         components.port = helper.port
         components.path = path
         guard let url = components.url else { throw Failure.unreachable }

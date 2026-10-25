@@ -19,6 +19,15 @@ struct HelperClientTests {
 
     // MARK: type
 
+    @Test func anIPv6HostIsBracketedInTheURL() async throws {
+        StubURLProtocol.reset(.status(200, body: Data(#"{"hostname":"m","os":"darwin","accessibility_ok":true}"#.utf8)))
+        let v6 = Helper(name: "m", host: "fd7a:115c:a1e0::1", port: 47811)
+
+        _ = try await HelperClient(helper: v6, token: nil, session: StubURLProtocol.session()).health()
+
+        #expect(StubURLProtocol.requests.first?.request.url?.absoluteString == "http://[fd7a:115c:a1e0::1]:47811/health")
+    }
+
     @Test func typeSendsBearerJSONAndModeAutoOnce() async throws {
         StubURLProtocol.reset(.status(200))
 

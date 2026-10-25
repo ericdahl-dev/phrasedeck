@@ -111,7 +111,14 @@ final class AppModel {
     func addHelper(host: String, port: Int?, code: String) async -> String? {
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty else { return "Enter the computer's tailnet name." }
-        let helper = Helper(name: host, host: host, port: port ?? Helper.defaultPort)
+        let port = port ?? Helper.defaultPort
+        // Scanning a computer that's already here pairs it again instead of adding a copy.
+        if let existing = helpers.first(where: { $0.host.lowercased() == host.lowercased() && $0.port == port }) {
+            if let error = await pair(existing, code: code) { return error }
+            selectedHelperID = existing.id
+            return nil
+        }
+        let helper = Helper(name: Helper.displayName(for: host), host: host, port: port)
         if let error = await pairAndStore(helper, code: code) { return error }
         do {
             try store.add(helper)

@@ -37,6 +37,11 @@ targets:
             ts.net:
               NSIncludesSubdomains: true
               NSExceptionAllowsInsecureHTTPLoads: true
+        # phrasedeck://pair links from the QR code `phrased pair` prints (#25).
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.ericdahl.phrasedeck.pair
+            CFBundleURLSchemes: [phrasedeck]
+        NSCameraUsageDescription: phrasedeck uses the camera only to scan the QR code that phrased pair shows, to add a computer.
         # No encryption beyond what the OS provides (TestFlight export compliance).
         ITSAppUsesNonExemptEncryption: false
     # No iCloud capability or entitlement until the sync slice (#10).

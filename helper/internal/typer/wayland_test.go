@@ -51,8 +51,10 @@ func (f *fakeRunner) start(name string, args []string, stdin string) (func(time.
 	}, nil
 }
 
-func newTestWayland(f *fakeRunner) *Wayland {
-	return &Wayland{
+func newTestWayland(f *fakeRunner) *Desktop {
+	return &Desktop{
+		keys:     wtypeKeys,
+		clip:     waylandClip,
 		run:      f,
 		lookPath: func(string) (string, error) { return "/usr/bin/wtype", nil },
 		getenv:   func(string) string { return "wayland-1" },

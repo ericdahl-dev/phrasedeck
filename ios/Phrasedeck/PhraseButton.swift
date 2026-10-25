@@ -2,6 +2,8 @@ import SwiftUI
 
 struct PhraseButton: View {
     let phrase: Phrase
+    var edit: () -> Void = {}
+    var delete: () -> Void = {}
 
     @Environment(AppModel.self) private var model
     @State private var flash: AppModel.Feedback.Tone?
@@ -29,6 +31,10 @@ struct PhraseButton: View {
             .background(background, in: .rect(cornerRadius: 16))
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Edit", systemImage: "pencil", action: edit)
+            Button("Delete", systemImage: "trash", role: .destructive, action: delete)
+        }
         .accessibilityIdentifier(phrase.seedKey ?? "phrase.\(phrase.label)")
         .sensoryFeedback(.impact(weight: .light), trigger: taps)
     }

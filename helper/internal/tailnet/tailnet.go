@@ -28,11 +28,16 @@ func Allowed(ip netip.Addr) bool {
 // Listen listens on addr but closes, without a response, every connection whose remote
 // address isn't Allowed.
 func Listen(addr string) (net.Listener, error) {
+	return ListenAllowing(addr, Allowed)
+}
+
+// ListenAllowing is Listen with its own test for which remote addresses get through.
+func ListenAllowing(addr string, allow func(netip.Addr) bool) (net.Listener, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	return &filter{Listener: ln, allow: Allowed, seen: map[netip.Addr]bool{}}, nil
+	return &filter{Listener: ln, allow: allow, seen: map[netip.Addr]bool{}}, nil
 }
 
 type filter struct {
@@ -49,7 +54,7 @@ func (f *filter) Accept() (net.Conn, error) {
 			return nil, err
 		}
 		ap, err := netip.ParseAddrPort(c.RemoteAddr().String())
-		if err == nil && f.allow(ap.Addr()) {
+		if err == nil && f.allow(ap.Addr().Unmap()) {
 			return c, nil
 		}
 		c.Close()
@@ -66,7 +71,7 @@ func (f *filter) logOnce(ip netip.Addr) {
 		return
 	}
 	f.seen[ip] = true
-	log.Printf("dropped connection from %v (not a tailnet address)", ip)
+	log.Printf("dropped connection from %v (not an allowed address)", ip)
 }
 
 // ParseSelf returns this machine's names from `tailscale status --json`: its host name, the

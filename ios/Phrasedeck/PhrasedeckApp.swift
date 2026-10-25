@@ -7,6 +7,8 @@ struct PhrasedeckApp: App {
     @State private var model: AppModel
     private let container: ModelContainer
     private let stub: StubHelper?
+    /// Bonjour discovery (#11); nil under UI tests, so no local-network prompt.
+    @State private var browser: NearbyBrowser?
 
     init() {
         #if DEBUG
@@ -35,7 +37,7 @@ struct PhrasedeckApp: App {
         } else {
             _model = State(initialValue: AppModel(
                 store: HelperStore(), tokens: TokenStore(), device: UIDevice.current.name,
-                makeClient: { helper, token in HelperClient(helper: helper, token: token) }))
+                makeClient: { helper, token, route in HelperClient(helper: helper, token: token, route: route) }))
         }
     }
 
@@ -43,6 +45,12 @@ struct PhrasedeckApp: App {
         WindowGroup {
             ContentView(stubProbe: stub?.probe)
                 .environment(model)
+                .task {
+                    guard stub == nil, browser == nil else { return }
+                    let model = model
+                    browser = NearbyBrowser { model.setNearby($0) }
+                    browser?.start()
+                }
         }
         .modelContainer(container)
         // UI tests keep the button size in their throwaway defaults.

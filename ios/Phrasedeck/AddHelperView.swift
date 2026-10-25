@@ -25,9 +25,10 @@ struct AddHelperView: View {
             Form {
                 if let confirming {
                     Section {
-                        Text(confirming.host)
+                        let shown = confirming.host ?? "\(confirming.lan ?? "") on the home network"
+                        Text(shown)
                             .font(.callout.monospaced())
-                            .accessibilityIdentifier(confirming.host)
+                            .accessibilityIdentifier(confirming.host ?? confirming.lan ?? "")
                         Button("Pair with \(confirming.name)") { pair(confirming) }
                             .font(.headline)
                             .disabled(working)
@@ -70,6 +71,25 @@ struct AddHelperView: View {
     }
 
     @ViewBuilder private var manualEntry: some View {
+                if pairAgain == nil, !model.unpairedNearby.isEmpty {
+                    // Seen on the home network, but Bonjour can't be trusted to pair: scan only.
+                    Section {
+                        ForEach(model.unpairedNearby, id: \.self) { service in
+                            Button {
+                                error = nil
+                                scanning = true
+                            } label: {
+                                VStack(alignment: .leading) {
+                                    Text(service.tailnetName.map(Helper.displayName) ?? service.address?.host ?? "A computer").font(.headline)
+                                    Text("Scan its QR code to pair").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            .disabled(!QRScannerView.isAvailable)
+                        }
+                    } header: {
+                        Text("On this network")
+                    }
+                }
                 if pairAgain == nil {
                     Section {
                         Button("Scan QR code", systemImage: "qrcode.viewfinder") { error = nil; scanning = true }
@@ -115,7 +135,7 @@ struct AddHelperView: View {
     private func pair(_ link: PairLink) {
         working = true
         Task {
-            error = await model.addHelper(host: link.host, port: link.port, code: link.code)
+            error = await model.addHelper(from: link)
             working = false
             if error == nil { dismiss() } else { confirming = nil }
         }

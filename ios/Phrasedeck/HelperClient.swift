@@ -1,4 +1,6 @@
 import Foundation
+import Network
+import Synchronization
 
 struct Health: Decodable, Equatable, Sendable {
     let hostname: String
@@ -11,10 +13,40 @@ struct Health: Decodable, Equatable, Sendable {
     }
 }
 
-/// Talks to one `phrased` helper over plain HTTP inside the tailnet.
+/// What `/pair` returns: the token, plus the LAN certificate's fingerprint
+/// and port when the helper serves the LAN (#11).
+struct Pairing: Equatable, Sendable {
+    let token: String
+    var certSHA256: String?
+    var lanPort: Int?
+}
+
+/// What `GET /info` returns; both nil when the helper has no LAN listener.
+struct LANInfo: Equatable, Sendable {
+    var certSHA256: String?
+    var lanPort: Int?
+}
+
+/// The LAN fields as the helper sends them, checked: a fingerprint that
+/// isn't 64 hex digits or a port out of range is dropped.
+private struct LANFields: Decodable {
+    let certSHA256: String?
+    let lanPort: Int?
+
+    var fingerprint: String? { certSHA256.flatMap(Fingerprint.normalize) }
+    var port: Int? { lanPort.flatMap { (1...65535).contains($0) ? $0 : nil } }
+}
+
+/// Talks to one `phrased` helper: plain HTTP inside the tailnet, or HTTPS
+/// to its LAN address with the certificate pinned (#11).
 /// Every call makes exactly one request: nothing is ever retried, because
 /// a retried `/type` could type the phrase twice.
 struct HelperClient: Sendable {
+    enum Route: Equatable, Sendable {
+        case tailnet
+        case lan(host: String, port: Int, pin: String)
+    }
+
     enum Failure: Error, Equatable, Sendable {
         /// Timed out, lost mid-request, or 409: the phrase may have been typed.
         case noReply
@@ -26,24 +58,122 @@ struct HelperClient: Sendable {
         case notReady
         case rateLimited
         case server(Int)
+        /// The LAN certificate wasn't the pinned one: nothing was sent.
+        case pinMismatch
+        /// A LAN IP or .local name on the plain-HTTP route: refused, nothing sent.
+        case notTailnet
     }
 
     static let timeout: TimeInterval = 3
 
     let helper: Helper
     let token: String?
+    var route: Route = .tailnet
     var session: URLSession = .shared
+    /// A host name's addresses, as strings. Tests stub it.
+    typealias Resolve = @Sendable (String) async -> [String]
+    var resolve: Resolve = HelperClient.systemResolve
+
+    init(helper: Helper, token: String?, route: Route = .tailnet, session: URLSession? = nil,
+         resolve: Resolve? = nil) {
+        self.helper = helper
+        self.token = token
+        self.route = route
+        if let resolve { self.resolve = resolve }
+        self.session = session ?? {
+            if case let .lan(_, _, pin) = route { return Self.lanSession(for: pin) }
+            return .shared
+        }()
+    }
+
+    /// One ephemeral session per pin. A session reuses its TLS connections
+    /// without asking the delegate again, so a connection checked against one
+    /// pin must never carry a request that expects another.
+    private static func lanSession(for pin: String) -> URLSession {
+        lanSessions.withLock { sessions in
+            if let session = sessions[pin] { return session }
+            let session = URLSession(configuration: .ephemeral)
+            sessions[pin] = session
+            return session
+        }
+    }
+
+    /// Drops a pin's session and cancels its connections, when a computer's
+    /// fingerprint changes or it's deleted.
+    static func forgetLANSession(pin: String) {
+        lanSessions.withLock { $0.removeValue(forKey: pin) }?.invalidateAndCancel()
+    }
+
+    /// Plain HTTP goes only to a tailnet address. With Tailscale off, a bare name can resolve
+    /// through the router's DNS to a LAN machine, so a name's addresses must all be tailnet
+    /// ones, and the request goes to the checked address (IPv4 first) so a second lookup
+    /// can't swap it. The helper accepts its tailnet IPs as Host.
+    private func checkedTailnetURL(_ url: URL?) async throws -> URL? {
+        guard var components = url.map({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) ?? nil,
+              let host = components.host?.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        else { throw Failure.unreachable }
+        // An IP literal was already checked by request().
+        if IPv4Address(host) != nil && host.allSatisfy({ $0.isNumber || $0 == "." }) || IPv6Address(host) != nil {
+            return url
+        }
+        let addresses = await resolve(host)
+        guard !addresses.isEmpty else { throw Failure.unreachable }
+        guard addresses.allSatisfy({ PairLink.tailnetHost($0) != nil }) else { throw Failure.notTailnet }
+        let address = addresses.first { !$0.contains(":") } ?? addresses[0]
+        components.host = address.contains(":") ? "[\(address)]" : address
+        return components.url
+    }
+
+    /// getaddrinfo, off the main thread. No answer is an empty list.
+    static let systemResolve: Resolve = { name in
+        await Task.detached {
+            var hints = addrinfo(ai_flags: 0, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM,
+                                 ai_protocol: 0, ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
+            var list: UnsafeMutablePointer<addrinfo>?
+            guard getaddrinfo(name, nil, &hints, &list) == 0, let first = list else { return [] }
+            defer { freeaddrinfo(first) }
+            var out: [String] = []
+            for info in sequence(first: first, next: { $0.pointee.ai_next }) {
+                var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                if getnameinfo(info.pointee.ai_addr, info.pointee.ai_addrlen, &buffer, socklen_t(buffer.count),
+                               nil, 0, NI_NUMERICHOST) == 0 {
+                    // Drop an IPv6 zone like %en0; it's never a tailnet address anyway.
+                    let text = String(cString: buffer).split(separator: "%").first.map(String.init) ?? ""
+                    if !text.isEmpty, !out.contains(text) { out.append(text) }
+                }
+            }
+            return out
+        }.value
+    }
+
+    // One entry per paired computer's certificate; forgetLANSession removes stale ones.
+    private static let lanSessions = Mutex<[String: URLSession]>([:])
 
     func health() async throws -> Health {
         let data = try await send(request("GET", "/health"))
         return try JSONDecoder().decode(Health.self, from: data)
     }
 
-    func pair(code: String, device: String) async throws -> String {
+    func pair(code: String, device: String) async throws -> Pairing {
         struct Reply: Decodable { let token: String }
         let data = try await send(request("POST", "/pair", body: ["code": code, "device": device]),
                                   notFound: .noPairingWindow)
-        return try JSONDecoder().decode(Reply.self, from: data).token
+        let token = try JSONDecoder().decode(Reply.self, from: data).token
+        let lan = try? JSONDecoder().decode(LANFields.self, from: data)
+        return Pairing(token: token, certSHA256: lan?.fingerprint, lanPort: lan?.port)
+    }
+
+    /// The LAN certificate fingerprint and port, over an authenticated
+    /// request. A helper without `/info` (404) has nothing to tell.
+    func info() async throws -> LANInfo {
+        let data: Data
+        do {
+            data = try await send(request("GET", "/info", authorized: true))
+        } catch Failure.server(404) {
+            return LANInfo()
+        }
+        let lan = try JSONDecoder().decode(LANFields.self, from: data)
+        return LANInfo(certSHA256: lan.fingerprint, lanPort: lan.port)
     }
 
     /// Always `mode: "auto"`: the helper decides between typing and pasting.
@@ -54,11 +184,17 @@ struct HelperClient: Sendable {
 
     private func request(_ method: String, _ path: String, body: (some Encodable)? = String?.none,
                          authorized: Bool = false) throws -> URLRequest {
+        let (scheme, host, port) = switch route {
+        case .tailnet: ("http", helper.host, helper.port)
+        case let .lan(host, port, _): ("https", host, port)
+        }
+        // The token never goes over plain HTTP to a LAN address or .local name.
+        if route == .tailnet, !PairLink.isTailnetRouteHost(host) { throw Failure.notTailnet }
         var components = URLComponents()
-        components.scheme = "http"
+        components.scheme = scheme
         // URLComponents wants IPv6 literals in brackets.
-        components.host = helper.host.contains(":") && !helper.host.hasPrefix("[") ? "[\(helper.host)]" : helper.host
-        components.port = helper.port
+        components.host = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
+        components.port = port
         components.path = path
         guard let url = components.url else { throw Failure.unreachable }
 
@@ -75,12 +211,15 @@ struct HelperClient: Sendable {
     }
 
     private func send(_ request: URLRequest, notFound: Failure = .server(404)) async throws -> Data {
+        var request = request
+        if route == .tailnet { request.url = try await checkedTailnetURL(request.url) }
         let data: Data
         let response: URLResponse
+        let pinning: PinningDelegate? = if case let .lan(_, _, pin) = route { PinningDelegate(pin: pin) } else { nil }
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await session.data(for: request, delegate: pinning)
         } catch let error as URLError {
-            throw Self.failure(for: error.code)
+            throw Self.failure(for: error.code, pinMismatched: pinning?.mismatched ?? false)
         }
 
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -95,7 +234,9 @@ struct HelperClient: Sendable {
         }
     }
 
-    static func failure(for code: URLError.Code) -> Failure {
+    static func failure(for code: URLError.Code, pinMismatched: Bool = false) -> Failure {
+        // A refused pin surfaces as a cancel; it must read as a red error, never "may have typed".
+        if pinMismatched { return .pinMismatch }
         switch code {
         case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
             return .unreachable

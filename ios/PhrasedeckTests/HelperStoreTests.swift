@@ -54,3 +54,59 @@ struct HelperStoreTests {
         #expect(try tokens.get(mac.id) == nil)
     }
 }
+
+struct SameMachineTests {
+    @Test(arguments: [
+        ("lib-2833", "lib-2833.tail1fdac.ts.net", true),
+        ("LIB-2833", "lib-2833.Tail1fdac.ts.net.", true),
+        ("lib-2833.tail1fdac.ts.net", "lib-2833", true),
+        ("lib-2833.tail1fdac.ts.net", "LIB-2833.tail1fdac.ts.net", true),
+        ("lib-2833", "lib-2833", true),
+        ("100.69.235.48", "100.69.235.48", true),
+        // Two different FQDNs never match on their first label alone.
+        ("lib-2833.tail1fdac.ts.net", "lib-2833.tailother.ts.net", false),
+        ("lib-2833.example.com", "lib-2833.tail1fdac.ts.net", false),
+        // A bare name matches only a MagicDNS name, not any FQDN.
+        ("lib-2833", "lib-2833.example.com", false),
+        ("lib", "lib-2833.tail1fdac.ts.net", false),
+        ("100", "100.69.235.48", false),
+        ("omarchy-laptop", "lib-2833.tail1fdac.ts.net", false),
+    ])
+    func matching(a: String, b: String, same: Bool) {
+        #expect(Helper.sameMachine(a, b) == same)
+    }
+}
+
+@Suite(.serialized)
+struct HelperLANFieldTests {
+    @Test func aComputerSavedBeforeLANSupportStillLoads() throws {
+        let suite = "HelperLANFieldTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let id = UUID()
+        defaults.set(Data(#"[{"id":"\#(id.uuidString)","name":"lib-2833","host":"lib-2833","port":47811}]"#.utf8),
+                     forKey: "helpers")
+
+        let helpers = HelperStore(defaults: defaults, tokens: TokenStore(service: "dev.ericdahl.phrasedeck.tests")).helpers
+
+        #expect(helpers == [Helper(id: id, name: "lib-2833", host: "lib-2833", port: 47811)])
+        #expect(helpers.first?.certSHA256 == nil && helpers.first?.lanPort == nil)
+    }
+
+    @Test func updateReplacesTheComputerInPlace() throws {
+        let suite = "HelperLANFieldTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = HelperStore(defaults: defaults, tokens: TokenStore(service: "dev.ericdahl.phrasedeck.tests"))
+        var a = Helper(name: "a", host: "a.tail1.ts.net")
+        let b = Helper(name: "b", host: "b.tail1.ts.net")
+        try store.add(a)
+        try store.add(b)
+
+        a.certSHA256 = String(repeating: "ab", count: 32)
+        a.lanPort = 47812
+        try store.update(a)
+
+        #expect(store.helpers == [a, b])
+    }
+}

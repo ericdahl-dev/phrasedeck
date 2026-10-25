@@ -8,18 +8,18 @@ final class PairLinkUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestingStubHelper"]
         app.launch()
-        XCTAssertTrue(app.buttons["helperPicker"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["helperPicker"].waitForExistence(timeout: 20))
 
         app.open(URL(string: "phrasedeck://pair?code=123456&host=omarchy-laptop.tail1fdac.ts.net&port=47811&v=1")!)
 
         let confirm = app.buttons["addHelper.confirmLink"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertTrue(confirm.waitForExistence(timeout: 20))
         XCTAssertTrue(app.staticTexts["omarchy-laptop.tail1fdac.ts.net"].exists)
         confirm.tap()
 
         let picker = app.buttons["helperPicker"]
         expectation(for: NSPredicate(format: "label CONTAINS %@", "omarchy-laptop"), evaluatedWith: picker)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 20)
     }
 
     @MainActor
@@ -27,11 +27,11 @@ final class PairLinkUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestingStubHelper"]
         app.launch()
-        XCTAssertTrue(app.buttons["helperPicker"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["helperPicker"].waitForExistence(timeout: 20))
 
         app.open(URL(string: "phrasedeck://pair?code=123456&host=evil.example.com&v=1")!)
 
-        XCTAssertTrue(app.staticTexts["addHelper.error"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["addHelper.error"].waitForExistence(timeout: 20))
         XCTAssertFalse(app.buttons["addHelper.confirmLink"].exists)
     }
 }

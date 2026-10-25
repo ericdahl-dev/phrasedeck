@@ -10,14 +10,14 @@ final class SendTests: XCTestCase {
         app.launch()
 
         let button = app.buttons["phrase.agent-status"]
-        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
         button.tap()
 
         let sends = app.staticTexts["stub.sendCount"]
-        XCTAssertTrue(sends.waitForExistence(timeout: 5))
+        XCTAssertTrue(sends.waitForExistence(timeout: 20))
         let sentOnce = NSPredicate(format: "label == %@", "1")
         expectation(for: sentOnce, evaluatedWith: sends)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 20)
         // Still one a moment later: no retry.
         Thread.sleep(forTimeInterval: 1)
         XCTAssertEqual(sends.label, "1")

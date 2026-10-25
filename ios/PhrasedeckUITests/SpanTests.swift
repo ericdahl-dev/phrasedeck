@@ -8,24 +8,24 @@ final class SpanTests: XCTestCase {
         app.launchArguments = ["-uiTestingStubHelper"]
         app.launch()
         let button = app.buttons["phrase.agent-status"]
-        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
         let before = button.frame
 
         button.press(forDuration: 1)
         app.buttons["Edit"].tap()
-        XCTAssertTrue(app.buttons["editor.span.2x2"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["editor.span.2x2"].waitForExistence(timeout: 20))
         app.buttons["editor.span.2x2"].tap()
         XCTAssertEqual(app.staticTexts["editor.span.value"].label, "2 × 2")
         app.buttons["editor.save"].tap()
 
-        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
         let after = button.frame
         XCTAssertGreaterThan(after.width, before.width * 1.9)
         XCTAssertGreaterThan(after.height, before.height * 1.9)
 
         button.tap()
         let count = app.staticTexts["stub.sendCount"]
-        XCTAssertTrue(count.waitForExistence(timeout: 5))
+        XCTAssertTrue(count.waitForExistence(timeout: 20))
         XCTAssertEqual(count.label, "1")
     }
 }

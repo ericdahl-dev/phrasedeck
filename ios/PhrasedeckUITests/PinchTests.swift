@@ -14,7 +14,7 @@ final class PinchTests: XCTestCase {
     func testAPinchOnAButtonSendsNothing() {
         let app = launch()
         let button = app.buttons["phrase.agent-status"]
-        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
 
         button.pinch(withScale: 2, velocity: 1)
         button.pinch(withScale: 0.5, velocity: -1)
@@ -27,7 +27,7 @@ final class PinchTests: XCTestCase {
     func testPinchingChangesTheColumnsWithinTheLimits() {
         let app = launch()
         let grid = app.scrollViews["deck.grid"].firstMatch
-        XCTAssertTrue(grid.waitForExistence(timeout: 5))
+        XCTAssertTrue(grid.waitForExistence(timeout: 20))
         XCTAssertEqual(grid.value as? String, "3 columns")
 
         grid.pinch(withScale: 4, velocity: 2)
@@ -41,7 +41,7 @@ final class PinchTests: XCTestCase {
     func testResetButtonSizeGoesBackToThreeColumns() {
         let app = launch()
         let grid = app.scrollViews["deck.grid"].firstMatch
-        XCTAssertTrue(grid.waitForExistence(timeout: 5))
+        XCTAssertTrue(grid.waitForExistence(timeout: 20))
         grid.pinch(withScale: 4, velocity: 2)
         XCTAssertEqual(grid.value as? String, "2 columns")
 

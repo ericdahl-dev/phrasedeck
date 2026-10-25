@@ -40,6 +40,18 @@ _Avoid_: cell, zoom, scale, grid density
 How many Squares a Button covers, from 1x1 to 3x3 (for example 2x1). It's the same everywhere the Deck appears, but a Page narrower than the Size shows the Button only as wide as the Page.
 _Avoid_: span
 
+**Arrange mode**:
+The Home Screen-style mode for moving and deleting Buttons: they jiggle, taps don't type, and Done ends it.
+_Avoid_: edit mode, jiggle mode, wiggle mode
+
+**Spot**:
+Where a Button sits on its Page: the column and row of its top-left Square. Gaps between Spots are allowed.
+_Avoid_: position, slot, cell, index
+
+**Layout width**:
+The kind of screen an arrangement belongs to: compact (iPhone) or regular (iPad). Each Layout width keeps its own Spots, while the Deck itself is the same everywhere.
+_Avoid_: size class, device width, breakpoint
+
 ## Reaching a Computer
 
 **Route**:

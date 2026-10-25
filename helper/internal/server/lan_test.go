@@ -140,3 +140,27 @@ func TestBothListenersShareTheirLimits(t *testing.T) {
 		t.Fatalf("LAN /pair after the tailnet used the burst: %d, want 429", got)
 	}
 }
+
+// /info hands out the pin, so it's served only where the pin can be trusted: the tailnet.
+func TestTheLANHandlerDoesNotServeInfo(t *testing.T) {
+	cfg, _ := testConfig(t, &typer.Fake{}, 0)
+	cfg.CertSHA256, cfg.LANPort = fp, 47812
+	h := NewHelper(cfg)
+	get := func(h http.Handler, path string) int {
+		r := httptest.NewRequest("GET", path, nil)
+		r.Host = "h"
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	if got := get(h.LANHandler([]string{"h"}), "/info"); got != http.StatusNotFound {
+		t.Fatalf("LAN /info: %d, want 404", got)
+	}
+	if got := get(h.LANHandler([]string{"h"}), "/health"); got != http.StatusOK {
+		t.Fatalf("LAN /health: %d, want 200", got)
+	}
+	if got := get(h.Handler([]string{"h"}), "/info"); got != http.StatusOK {
+		t.Fatalf("tailnet /info: %d, want 200", got)
+	}
+}

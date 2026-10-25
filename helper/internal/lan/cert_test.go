@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -63,5 +64,38 @@ func TestAHalfWrittenPairIsReplaced(t *testing.T) {
 	}
 	if _, _, err := LoadOrCreateCert(dir); err != nil {
 		t.Fatalf("a cert without its key should be replaced, got %v", err)
+	}
+}
+
+// A pinned certificate must never change silently: a key that exists but can't be read is an
+// error naming the file, and the files stay as they are.
+func TestAnUnreadableKeyIsAnErrorNotANewCert(t *testing.T) {
+	for name, spoil := range map[string]func(path string) error{
+		"corrupt": func(p string) error { return os.WriteFile(p, []byte("junk"), 0o600) },
+		"no permission": func(p string) error {
+			if os.Getuid() == 0 {
+				t.Skip("root reads any file")
+			}
+			return os.Chmod(p, 0)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if _, _, err := LoadOrCreateCert(dir); err != nil {
+				t.Fatal(err)
+			}
+			certBefore, _ := os.ReadFile(filepath.Join(dir, certFile))
+			key := filepath.Join(dir, keyFile)
+			if err := spoil(key); err != nil {
+				t.Fatal(err)
+			}
+			_, _, err := LoadOrCreateCert(dir)
+			if err == nil || !strings.Contains(err.Error(), keyFile) {
+				t.Fatalf("err = %v, want one naming %s", err, keyFile)
+			}
+			if after, _ := os.ReadFile(filepath.Join(dir, certFile)); string(after) != string(certBefore) {
+				t.Fatal("the certificate was replaced")
+			}
+		})
 	}
 }

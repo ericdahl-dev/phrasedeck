@@ -11,6 +11,8 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
+	"fmt"
+	"io/fs"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -29,7 +31,14 @@ const (
 // DER, which the app pins. The certificate is kept across restarts so pinned devices keep
 // working.
 func LoadOrCreateCert(dir string) (tls.Certificate, string, error) {
-	if cert, err := tls.LoadX509KeyPair(filepath.Join(dir, certFile), filepath.Join(dir, keyFile)); err == nil {
+	certPath, keyPath := filepath.Join(dir, certFile), filepath.Join(dir, keyFile)
+	if exists(certPath) && exists(keyPath) {
+		// Never replace a pair that exists: a new certificate breaks every device's pin.
+		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+		if err != nil {
+			return tls.Certificate{}, "", fmt.Errorf("LAN certificate %s or key %s: %w (fix them, or delete both "+
+				"to make a new one and re-pair every device)", certPath, keyPath, err)
+		}
 		return cert, fingerprint(cert.Certificate[0]), nil
 	}
 	certPEM, keyPEM, err := newCert()
@@ -49,6 +58,13 @@ func LoadOrCreateCert(dir string) (tls.Certificate, string, error) {
 		return tls.Certificate{}, "", err
 	}
 	return cert, fingerprint(cert.Certificate[0]), nil
+}
+
+// exists is false only when path is missing; any other stat error counts as existing, so it
+// surfaces when the pair is loaded.
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return !errors.Is(err, fs.ErrNotExist)
 }
 
 // Fingerprint reads the stored certificate's fingerprint without creating one, for

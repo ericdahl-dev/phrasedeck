@@ -44,8 +44,8 @@ with Tailscale off, on macOS and omarchy, over an encrypted LAN route.
 - **Opt-in:** `-lan <cidr>` (repeatable) or `<config>/lan-subnets`. With none, nothing changes.
   Only private subnets are accepted.
 - **Second listener:** HTTPS (TLS 1.2 or later) on 47812, open to the `-lan` subnets and tailnet
-  peers. It serves `/health`, `/pair`, `/type` and `/info` with the same handler, tokens, limits
-  and lockout as 47811, which is unchanged.
+  peers. It serves `/health`, `/pair` and `/type` with the same tokens, limits and lockout as
+  47811, which is unchanged. `/info` is tailnet-only (404 on 47812), since it hands out the pin.
 - **Certificate:** self-signed ECDSA P-256, made once in the config dir (key 0600) and reused.
   The pin, `certSHA256`, is the lowercase hex SHA-256 of the leaf's DER (64 characters, no
   colons).

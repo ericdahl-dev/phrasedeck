@@ -146,7 +146,7 @@ curl -s http://<tailnet-name>:47811/type \
   copy something in that half second, your new copy is kept instead.
 - `GET /health` needs no token and returns `hostname`, `os` and `accessibility_ok`.
 - `GET /info` needs the token and returns `hostname`, plus `certSHA256` and `lanPort` when the
-  LAN route is on.
+  LAN route is on. It's served over the tailnet only.
 
 Status codes:
 
@@ -188,7 +188,9 @@ comment) adds a second listener:
 - **Its certificate** is self-signed ECDSA, made on first run as `lan-cert.pem` and `lan-key.pem`
   (both mode 0600) in the config directory and reused after that. The app pins its SHA-256, which
   `phrased` logs at startup, and gets it only over a trusted channel: `/pair` over the tailnet,
-  `GET /info`, or the QR code. Delete both files to make a new one, and then re-pair every device.
+  `GET /info` over the tailnet, or the QR code. If either file is unreadable or corrupt, `phrased`
+  stops with an error naming it rather than making a new one. Delete both files to make a new
+  one, and then re-pair every device.
 - **Bonjour** advertises `_phrasedeck._tcp` on the interfaces in those subnets, as
   `phrased-<host>.local`, with TXT `v=1`, `ts=<tailnet name>` and `port`. TXT carries no token
   and no fingerprint.

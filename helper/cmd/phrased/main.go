@@ -180,7 +180,7 @@ func run(o options) error {
 	servers := []*http.Server{newHTTPServer(helper.Handler(allow))}
 	log.Printf("listening on %s (tailnet peers only)", addr)
 	if lanLn != nil {
-		lanSrv := newHTTPServer(helper.Handler(lanAllow))
+		lanSrv := newHTTPServer(helper.LANHandler(lanAllow))
 		lanSrv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{tlsCert}, MinVersion: tls.VersionTLS12}
 		servers = append(servers, lanSrv)
 		log.Printf("listening on :%d over HTTPS (tailnet peers and %v); certificate SHA-256 %s", o.lanPort, prefixes, cfg.CertSHA256)

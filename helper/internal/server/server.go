@@ -55,8 +55,8 @@ func New(cfg Config) http.Handler { return NewHelper(cfg).Handler(cfg.AllowHosts
 // Helper holds the state every listener shares: tokens, rate limits, pairing lockout and the
 // typing lock. Each listener gets its own Handler, with its own Host allowlist.
 type Helper struct {
-	s   *server
-	mux http.Handler
+	s           *server
+	mux, lanMux http.Handler
 }
 
 func NewHelper(cfg Config) *Helper {
@@ -69,23 +69,32 @@ func NewHelper(cfg Config) *Helper {
 		pairLimit: rate.NewLimiter(1, 3),
 		lock:      make(chan struct{}, 1),
 	}
+	lanMux := http.NewServeMux()
+	lanMux.HandleFunc("/health", s.health)
+	lanMux.HandleFunc("/type", s.typeText)
+	lanMux.HandleFunc("/pair", s.pair)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", s.health)
-	mux.HandleFunc("/type", s.typeText)
-	mux.HandleFunc("/pair", s.pair)
+	mux.Handle("/", lanMux)
+	// Only over the tailnet: /info hands out the pin, which a LAN peer could otherwise
+	// fetch over a connection it can't yet verify.
 	mux.HandleFunc("/info", s.info)
-	return &Helper{s: s, mux: mux}
+	return &Helper{s: s, mux: mux, lanMux: lanMux}
 }
 
 // Handler answers 403 to any Host not in allow (this listener's names and IPs for this
 // machine), so a web page can't reach the helper through DNS rebinding.
-func (h *Helper) Handler(allow []string) http.Handler {
+func (h *Helper) Handler(allow []string) http.Handler { return guard(allow, h.mux) }
+
+// LANHandler is Handler for the LAN listener, which serves everything but /info.
+func (h *Helper) LANHandler(allow []string) http.Handler { return guard(allow, h.lanMux) }
+
+func guard(allow []string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !tailnet.HostAllowed(r.Host, allow) {
 			fail(w, http.StatusForbidden, "host not allowed: "+r.Host)
 			return
 		}
-		h.mux.ServeHTTP(w, r)
+		next.ServeHTTP(w, r)
 	})
 }
 

@@ -17,13 +17,12 @@ import (
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/plan"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/tailnet"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/typer"
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/typing"
 )
 
 const (
 	// MaxBody caps a request body.
 	MaxBody = 64 << 10
-	// MaxText caps the text of one phrase, in runes.
-	MaxText = 10000
 	// MaxDevice caps a device name, in runes.
 	MaxDevice = 64
 )
@@ -46,7 +45,7 @@ type server struct {
 	cfg       Config
 	limit     *rate.Limiter
 	pairLimit *rate.Limiter
-	lock      chan struct{}
+	typist    *typing.Typist
 }
 
 // New returns the helper's handler for one listener, accepting cfg.AllowHosts.
@@ -67,7 +66,7 @@ func NewHelper(cfg Config) *Helper {
 		cfg:       cfg,
 		limit:     rate.NewLimiter(10, 10),
 		pairLimit: rate.NewLimiter(1, 3),
-		lock:      make(chan struct{}, 1),
+		typist:    typing.New(cfg.Typer, cfg.LockWait),
 	}
 	lanMux := http.NewServeMux()
 	lanMux.HandleFunc("/health", s.health)
@@ -106,7 +105,7 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, map[string]any{
 		"hostname":         s.cfg.Hostname,
 		"os":               s.cfg.OS,
-		"accessibility_ok": s.cfg.Typer.Ready(),
+		"accessibility_ok": s.typist.Ready(),
 	})
 }
 
@@ -165,38 +164,18 @@ func (s *server) typeText(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	switch req.Mode {
-	case "":
-		req.Mode = plan.ModeAuto
-	case plan.ModeAuto, plan.ModeType, plan.ModePaste:
-	default:
-		fail(w, http.StatusBadRequest, `mode must be "auto", "type" or "paste"`)
-		return
-	}
-	if utf8.RuneCountInString(req.Text) > MaxText {
-		fail(w, http.StatusRequestEntityTooLarge, "text over 10,000 characters")
-		return
-	}
-	if !s.cfg.Typer.Ready() {
-		fail(w, http.StatusServiceUnavailable, "can't type yet: grant Accessibility to phrased")
-		return
-	}
-
-	t := time.NewTimer(s.cfg.LockWait)
-	defer t.Stop()
-	select {
-	case s.lock <- struct{}{}:
-		defer func() { <-s.lock }()
-	case <-t.C:
-		fail(w, http.StatusConflict, "busy typing another phrase")
-		return
-	}
-
-	err := typer.Run(s.cfg.Typer, plan.Build(req.Text, req.Enter, req.Mode))
-	switch {
-	case err == nil:
+	switch outcome, err := s.typist.Type(req.Text, req.Enter, req.Mode); outcome {
+	case typing.Typed:
 		reply(w, http.StatusOK, map[string]any{"ok": true})
-	case errors.Is(err, typer.ErrPasteUnsupported):
+	case typing.BadMode:
+		fail(w, http.StatusBadRequest, `mode must be "auto", "type" or "paste"`)
+	case typing.TooLong:
+		fail(w, http.StatusRequestEntityTooLarge, "text over 10,000 characters")
+	case typing.NotReady:
+		fail(w, http.StatusServiceUnavailable, "can't type yet: grant Accessibility to phrased")
+	case typing.Busy:
+		fail(w, http.StatusConflict, "busy typing another phrase")
+	case typing.PasteUnsupported:
 		fail(w, http.StatusNotImplemented, "paste is not supported yet on this computer; send single-line text under 300 characters, or mode \"type\"")
 	default:
 		log.Printf("type: %v", err)

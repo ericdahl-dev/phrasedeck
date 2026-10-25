@@ -29,6 +29,19 @@ type env struct {
 
 func newEnv(t *testing.T, fake *typer.Fake, lockWait time.Duration, opts ...func(*Config)) *env {
 	t.Helper()
+	cfg, dir := testConfig(t, fake, lockWait)
+	for _, o := range opts {
+		o(&cfg)
+	}
+	srv := httptest.NewUnstartedServer(nil)
+	srv.Config.Handler = New(cfg)
+	srv.Start()
+	t.Cleanup(srv.Close)
+	return &env{t: t, fake: fake, srv: srv, dir: dir}
+}
+
+func testConfig(t *testing.T, fake *typer.Fake, lockWait time.Duration) (Config, string) {
+	t.Helper()
 	sum := sha256.Sum256([]byte(token))
 	dir := t.TempDir()
 	p := filepath.Join(dir, "tokens.json")
@@ -49,14 +62,7 @@ func newEnv(t *testing.T, fake *typer.Fake, lockWait time.Duration, opts ...func
 		AllowHosts: []string{"127.0.0.1"},
 		LockWait:   lockWait,
 	}
-	for _, o := range opts {
-		o(&cfg)
-	}
-	srv := httptest.NewUnstartedServer(nil)
-	srv.Config.Handler = New(cfg)
-	srv.Start()
-	t.Cleanup(srv.Close)
-	return &env{t: t, fake: fake, srv: srv, dir: dir}
+	return cfg, dir
 }
 
 // post sends body to /type with the given token ("" for none) and content type.

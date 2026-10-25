@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,5 +92,51 @@ func TestPairWithoutLANIsJustTheToken(t *testing.T) {
 	got := newEnv(t, &typer.Fake{}, time.Second).pairReply()
 	if len(got) != 1 || got["token"] == nil {
 		t.Fatalf("/pair = %v, want only a token", got)
+	}
+}
+
+func TestEachListenerAcceptsOnlyItsOwnHostNames(t *testing.T) {
+	cfg, _ := testConfig(t, &typer.Fake{}, 0)
+	h := NewHelper(cfg)
+	tail, lanH := h.Handler([]string{"mac.tail1234.ts.net"}), h.Handler([]string{"192.168.1.20"})
+	for _, c := range []struct {
+		h    http.Handler
+		host string
+		want int
+	}{
+		{tail, "mac.tail1234.ts.net", 200},
+		{tail, "192.168.1.20", 403},
+		{lanH, "192.168.1.20:47812", 200},
+		{lanH, "mac.tail1234.ts.net", 403},
+	} {
+		r := httptest.NewRequest("GET", "/health", nil)
+		r.Host = c.host
+		w := httptest.NewRecorder()
+		c.h.ServeHTTP(w, r)
+		if w.Code != c.want {
+			t.Errorf("Host %s: %d, want %d", c.host, w.Code, c.want)
+		}
+	}
+}
+
+// Rate limits, lockout and the typing lock must be one set for both listeners, or a second
+// listener would double the attempts a guesser gets and let two phrases type at once.
+func TestBothListenersShareTheirLimits(t *testing.T) {
+	cfg, _ := testConfig(t, &typer.Fake{}, 0)
+	h := NewHelper(cfg)
+	tail, lanH := h.Handler([]string{"tail"}), h.Handler([]string{"lan"})
+	pair := func(h http.Handler, host string) int {
+		r := httptest.NewRequest("POST", "/pair", strings.NewReader(`{"code":"000000","device":"x"}`))
+		r.Host = host
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	for i := 0; i < 3; i++ { // the pairing burst
+		pair(tail, "tail")
+	}
+	if got := pair(lanH, "lan"); got != http.StatusTooManyRequests {
+		t.Fatalf("LAN /pair after the tailnet used the burst: %d, want 429", got)
 	}
 }

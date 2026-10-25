@@ -141,13 +141,14 @@ func run(o options) error {
 		return err
 	}
 	var lanAddrs []lan.Addr
+	var lanAllow []string
 	var tlsCert tls.Certificate
 	if lanLn != nil {
 		lanAddrs = lan.LocalAddrs(prefixes)
 		if len(lanAddrs) == 0 {
 			log.Printf("warning: this machine has no address in %v, so no LAN device can reach it", prefixes)
 		}
-		allow = append(allow, lanHosts(hostname, lanAddrs)...)
+		lanAllow = append(lanHosts(hostname, lanAddrs), o.allowHosts...)
 		if tlsCert, cfg.CertSHA256, err = lan.LoadOrCreateCert(o.config); err != nil {
 			return fmt.Errorf("LAN certificate: %w", err)
 		}
@@ -159,9 +160,9 @@ func run(o options) error {
 		// A stale file would put a LAN route the helper no longer serves into the QR code.
 		log.Printf("can't remove %s: %v", lanAddrFile, err)
 	}
-	cfg.AllowHosts = allow
-	// One handler for both listeners, so rate limits and the typing lock are shared.
-	handler := server.New(cfg)
+	// Both listeners share one Helper, so rate limits, lockout and the typing lock are one set;
+	// each accepts only its own Host names.
+	helper := server.NewHelper(cfg)
 
 	addr := fmt.Sprintf(":%d", o.port)
 	ln, err := tailnet.Listen(addr)
@@ -172,15 +173,18 @@ func run(o options) error {
 	if err := os.WriteFile(filepath.Join(o.config, "port"), []byte(strconv.Itoa(o.port)+"\n"), 0o600); err != nil {
 		log.Printf("can't record the port for phrased pair: %v", err)
 	}
-	servers := []*http.Server{newHTTPServer(handler)}
+	servers := []*http.Server{newHTTPServer(helper.Handler(allow))}
 	log.Printf("listening on %s (tailnet peers only)", addr)
 	if lanLn != nil {
-		lanSrv := newHTTPServer(handler)
+		lanSrv := newHTTPServer(helper.Handler(lanAllow))
 		lanSrv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{tlsCert}, MinVersion: tls.VersionTLS12}
 		servers = append(servers, lanSrv)
 		log.Printf("listening on :%d over HTTPS (tailnet peers and %v); certificate SHA-256 %s", o.lanPort, prefixes, cfg.CertSHA256)
 	}
 	log.Printf("allowed hosts: %s", strings.Join(allow, ", "))
+	if lanLn != nil {
+		log.Printf("allowed hosts on the LAN listener: %s", strings.Join(lanAllow, ", "))
+	}
 	if runtime.GOOS == "darwin" {
 		if warn := checkFirewall(); warn != "" {
 			log.Printf("warning: %s", warn)

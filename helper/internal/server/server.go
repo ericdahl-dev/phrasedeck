@@ -49,8 +49,17 @@ type server struct {
 	lock      chan struct{}
 }
 
-// New returns the helper's handler.
-func New(cfg Config) http.Handler {
+// New returns the helper's handler for one listener, accepting cfg.AllowHosts.
+func New(cfg Config) http.Handler { return NewHelper(cfg).Handler(cfg.AllowHosts) }
+
+// Helper holds the state every listener shares: tokens, rate limits, pairing lockout and the
+// typing lock. Each listener gets its own Handler, with its own Host allowlist.
+type Helper struct {
+	s   *server
+	mux http.Handler
+}
+
+func NewHelper(cfg Config) *Helper {
 	if cfg.LockWait == 0 {
 		cfg.LockWait = time.Second
 	}
@@ -65,18 +74,18 @@ func New(cfg Config) http.Handler {
 	mux.HandleFunc("/type", s.typeText)
 	mux.HandleFunc("/pair", s.pair)
 	mux.HandleFunc("/info", s.info)
-	return s.hostGuard(mux)
+	return &Helper{s: s, mux: mux}
 }
 
-// hostGuard answers 403 to any Host that isn't this machine's tailnet name or IP, so a web
-// page can't reach the helper through DNS rebinding.
-func (s *server) hostGuard(next http.Handler) http.Handler {
+// Handler answers 403 to any Host not in allow (this listener's names and IPs for this
+// machine), so a web page can't reach the helper through DNS rebinding.
+func (h *Helper) Handler(allow []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !tailnet.HostAllowed(r.Host, s.cfg.AllowHosts) {
+		if !tailnet.HostAllowed(r.Host, allow) {
 			fail(w, http.StatusForbidden, "host not allowed: "+r.Host)
 			return
 		}
-		next.ServeHTTP(w, r)
+		h.mux.ServeHTTP(w, r)
 	})
 }
 

@@ -159,20 +159,21 @@ final class AppModel {
 
     /// Nearby helpers that aren't paired on this device.
     var unpairedNearby: [NearbyService] {
-        nearby.filter { service in !helpers.contains { Helper.sameMachine($0.host, service.tailnetName) } }
+        nearby.filter { service in !helpers.contains { service.matches($0) } }
     }
 
     /// The LAN, pinned, when the computer is nearby and has a fingerprint
     /// from a trusted channel; otherwise the tailnet.
     func route(for helper: Helper) -> HelperClient.Route {
-        // Paired with Tailscale off: only its pinned LAN address.
-        if !helper.hasTailnetHost, let pin = helper.certSHA256, let lanHost = helper.lanHost {
+        guard let pin = helper.certSHA256 else { return .tailnet }
+        if let address = nearby.first(where: { $0.matches(helper) && $0.address != nil })?.address {
+            return .lan(host: address.host, port: address.port, pin: pin)
+        }
+        // Paired with Tailscale off and not seen by Bonjour: the address from its QR code.
+        if !helper.hasTailnetHost, let lanHost = helper.lanHost {
             return .lan(host: lanHost, port: helper.lanPort ?? PairLink.defaultLANPort, pin: pin)
         }
-        guard let pin = helper.certSHA256,
-              let address = nearby.first(where: { Helper.sameMachine(helper.host, $0.tailnetName) })?.address
-        else { return .tailnet }
-        return .lan(host: address.host, port: address.port, pin: pin)
+        return .tailnet
     }
 
     /// Stores a fingerprint from /pair, the QR code or /info. A changed one

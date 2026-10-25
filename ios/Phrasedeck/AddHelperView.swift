@@ -80,7 +80,7 @@ struct AddHelperView: View {
                                 scanning = true
                             } label: {
                                 VStack(alignment: .leading) {
-                                    Text(Helper.displayName(for: service.tailnetName)).font(.headline)
+                                    Text(service.tailnetName.map(Helper.displayName) ?? service.address?.host ?? "A computer").font(.headline)
                                     Text("Scan its QR code to pair").font(.caption).foregroundStyle(.secondary)
                                 }
                             }

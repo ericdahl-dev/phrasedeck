@@ -199,32 +199,77 @@ struct AppModelTests {
 
     @Test func unpairedNearbyListsOnlyComputersNotOnThisDevice() throws {
         defer { try? tokens.delete(mac.id) }
-        let model = try model()
+        let model = try nearbyModel()
         let other = NearbyService(tailnetName: "omarchy-black2.tail1fdac.ts.net", address: nil)
+        let samePin = NearbyService(tailnetName: nil, address: nil, advertisedFingerprint: Self.pin)
 
-        model.setNearby([Self.home, other])
+        model.setNearby([Self.home, other, samePin])
 
         #expect(model.unpairedNearby == [other])
     }
 
     // MARK: fingerprint trust (#11)
 
-    @Test func bonjourTXTCannotCarryAFingerprint() throws {
+    @Test func bonjourTXTCannotCarryAFingerprint() async throws {
         defer { try? tokens.delete(mac.id) }
         let txt = ["v": "1", "ts": "LIB-2833.tail1fdac.ts.net.", "port": "47812",
                    "fp": Self.pin, "certSHA256": Self.pin, "lan": "192.168.1.20"]
         let service = try #require(NearbyService(txt: txt, address: Self.home.address))
-        #expect(service == NearbyService(tailnetName: "lib-2833.tail1fdac.ts.net", address: Self.home.address))
+        // The TXT fp is kept only as a key for "nearby", never as a pin.
+        #expect(service == NearbyService(tailnetName: "lib-2833.tail1fdac.ts.net", address: Self.home.address,
+                                         advertisedFingerprint: Self.pin))
 
         let model = try model()
         model.setNearby([service])
         #expect(model.helpers.first?.certSHA256 == nil)
         #expect(model.route(for: mac) == .tailnet)
+        await model.refreshStatus(of: mac)
+        #expect(model.helpers.first?.certSHA256 == nil)
     }
 
-    @Test(arguments: [["v": "1"], ["v": "2", "ts": "a.tail1.ts.net"], ["v": "1", "ts": "evil.example.com"]])
+    @Test func aMatchingTXTFingerprintMakesAComputerNearby() async throws {
+        defer { try? tokens.delete(mac.id) }
+        let model = try nearbyModel()
+        let byPin = NearbyService(tailnetName: nil, address: LANAddress(host: "192.168.1.44", port: 47812),
+                                  advertisedFingerprint: Self.pin)
+
+        model.setNearby([byPin])
+
+        #expect(model.route(for: try #require(model.selectedHelper))
+                == .lan(host: "192.168.1.44", port: 47812, pin: Self.pin))
+    }
+
+    @Test func aDifferentTXTFingerprintDoesNotMakeItNearby() async throws {
+        defer { try? tokens.delete(mac.id) }
+        let model = try nearbyModel()
+        model.setNearby([NearbyService(tailnetName: nil, address: Self.home.address,
+                                       advertisedFingerprint: String(repeating: "cd", count: 32))])
+
+        #expect(model.route(for: try #require(model.selectedHelper)) == .tailnet)
+    }
+
+    @Test func aLANOnlyComputerFollowsItsBonjourAddress() async throws {
+        lan.pairResult = .success(Pairing(token: "t", certSHA256: Self.pin, lanPort: 47900))
+        let model = try model(withMac: false)
+        _ = await model.addHelper(from: Self.hostlessLink)
+        let added = try #require(model.helpers.first)
+        defer { try? tokens.delete(added.id) }
+
+        model.setNearby([NearbyService(tailnetName: nil, address: LANAddress(host: "192.168.1.77", port: 47900),
+                                       advertisedFingerprint: Self.pin)])
+
+        #expect(model.route(for: added) == .lan(host: "192.168.1.77", port: 47900, pin: Self.pin))
+    }
+
+    @Test(arguments: [["v": "1"], ["v": "2", "ts": "a.tail1.ts.net"], ["v": "1", "ts": "evil.example.com"],
+                      ["v": "1", "fp": "nope"]])
     func badTXTIsIgnored(txt: [String: String]) {
         #expect(NearbyService(txt: txt, address: nil) == nil)
+    }
+
+    @Test func aTXTWithOnlyAFingerprintIsANearbyLANOnlyHelper() throws {
+        let service = try #require(NearbyService(txt: ["v": "1", "fp": Self.pin.uppercased()], address: nil))
+        #expect(service.tailnetName == nil && service.advertisedFingerprint == Self.pin)
     }
 
     @Test func theTailnetStatusCheckLearnsTheFingerprintFromInfo() async throws {

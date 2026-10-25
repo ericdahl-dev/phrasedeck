@@ -100,6 +100,22 @@ struct DeckEditTests {
         #expect(try context.fetch(FetchDescriptor<Phrase>()).map(\.label) == ["a"])
     }
 
+    @Test func theSpanIsSavedAndNewPhrasesAreOneByOne() throws {
+        let page = Deck.addPage(named: "Agents", in: context)
+        let phrase = Deck.addPhrase(PhraseDraft(label: "a", text: "a"), to: page, in: context)
+        #expect(phrase.spanColumns == 1 && phrase.spanRows == 1)
+
+        var draft = PhraseDraft(phrase)
+        draft.spanColumns = 2
+        draft.spanRows = 3
+        Deck.save(draft, into: phrase)
+        #expect(phrase.spanColumns == 2 && phrase.spanRows == 3)
+        #expect(PhraseDraft(phrase).spanColumns == 2)
+
+        let big = Deck.addPhrase(PhraseDraft(label: "b", text: "b", spanColumns: 3, spanRows: 1), to: page, in: context)
+        #expect(big.spanColumns == 3 && big.spanRows == 1)
+    }
+
     @Test func aBlankDraftCannotBeSaved() {
         #expect(!PhraseDraft(label: " ", text: "x").isValid)
         #expect(!PhraseDraft(label: "x", text: "").isValid)

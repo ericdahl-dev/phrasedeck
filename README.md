@@ -92,8 +92,9 @@ from the session environment uwsm imports at login, and skips starting without o
 - Typing uses `wtype`. Pasting serves the phrase once with `wl-copy --foreground --paste-once`,
   sends Ctrl+Shift+V (the terminal paste key), waits for `wl-copy` to exit (at most 2 seconds),
   and puts the old clipboard text back. Only text is restored: a copied image is lost.
-- `/health` reports `accessibility_ok: false` when `wtype` is missing or there's no Wayland
-  display.
+- `/health` reports `accessibility_ok: false` when `wtype`, `wl-copy` or `wl-paste` is missing
+  or there's no Wayland display.
+- Each line goes to a single `wtype` call.
 - Stop it with `systemctl --user disable --now phrased`.
 
 ### Pair a device
@@ -158,7 +159,6 @@ Status codes:
 | 413 | body over 64 KB, or text over 10,000 characters |
 | 415 | not `application/json` |
 | 429 | over 10 requests a second on `/type`, or about 1 a second on `/pair` |
-| 501 | this computer's backend can't paste |
 | 503 | Accessibility not granted |
 
 ### Flags

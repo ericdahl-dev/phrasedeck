@@ -26,9 +26,6 @@ const (
 // PasteThreshold is the length (in runes) above which auto mode pastes instead of typing.
 const PasteThreshold = 300
 
-// ChunkSize is how many runes go into one typing step. Backends may split further.
-const ChunkSize = 20
-
 type Step struct {
 	Kind Kind
 	Text string
@@ -48,7 +45,9 @@ func Build(text string, enter bool, mode Mode) []Step {
 				if i > 0 {
 					steps = append(steps, Step{Kind: ShiftEnter})
 				}
-				steps = append(steps, chunk(line)...)
+				if line != "" {
+					steps = append(steps, Step{Kind: TypeText, Text: line})
+				}
 			}
 		}
 	}
@@ -56,15 +55,4 @@ func Build(text string, enter bool, mode Mode) []Step {
 		steps = append(steps, Step{Kind: Enter})
 	}
 	return steps
-}
-
-func chunk(s string) []Step {
-	var out []Step
-	r := []rune(s)
-	for len(r) > 0 {
-		n := min(ChunkSize, len(r))
-		out = append(out, Step{Kind: TypeText, Text: string(r[:n])})
-		r = r[n:]
-	}
-	return out
 }

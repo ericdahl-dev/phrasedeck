@@ -143,8 +143,6 @@ func (s *server) typeText(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 		reply(w, http.StatusOK, map[string]any{"ok": true})
-	case errors.Is(err, typer.ErrPasteUnsupported):
-		fail(w, http.StatusNotImplemented, "paste is not supported yet on this computer; send single-line text under 300 characters, or mode \"type\"")
 	default:
 		log.Printf("type: %v", err)
 		fail(w, http.StatusInternalServerError, "typing failed: "+err.Error())

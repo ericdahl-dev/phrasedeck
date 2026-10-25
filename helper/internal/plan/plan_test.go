@@ -69,11 +69,10 @@ func TestTypeModeNeverPastes(t *testing.T) {
 	}
 }
 
-func TestChunksAt20Runes(t *testing.T) {
-	got := Build(strings.Repeat("é", 45), false, ModeType)
-	if len(got) != 3 || len([]rune(got[0].Text)) != 20 || len([]rune(got[2].Text)) != 5 {
-		t.Fatalf("bad chunks: %#v", got)
-	}
+// Splitting text for the keyboard is each backend's job, so a line stays one step.
+func TestALineIsOneStep(t *testing.T) {
+	line := strings.Repeat("é", 299)
+	check(t, Build(line, false, ModeType), []Step{{Kind: TypeText, Text: line}})
 }
 
 func TestForcedPasteKeepsNewlines(t *testing.T) {

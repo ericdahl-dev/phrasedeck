@@ -74,6 +74,7 @@ enum Deck {
     static func delete(_ page: Page, in context: ModelContext) throws {
         let rest = ((try? context.fetch(FetchDescriptor<Page>(sortBy: [SortDescriptor(\.order)]))) ?? [])
             .filter { $0 !== page }
+        deleteSpots(of: page.sortedPhrases, in: context)
         context.delete(page)
         for (order, page) in rest.enumerated() { page.order = order }
         try context.save()
@@ -104,12 +105,15 @@ enum Deck {
             phrase.order = target.sortedPhrases.count
             phrase.page = target
             if let old { renumber(old, without: phrase) }
+            // Without Spots it shows at the end of the new Page on every Layout width (#81).
+            if let context = phrase.modelContext { deleteSpots(of: [phrase], in: context) }
         }
         try phrase.modelContext?.save()
     }
 
     static func delete(_ phrase: Phrase, in context: ModelContext) throws {
         if let page = phrase.page { renumber(page, without: phrase) }
+        deleteSpots(of: [phrase], in: context)
         context.delete(phrase)
         try context.save()
     }

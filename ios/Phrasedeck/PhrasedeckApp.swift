@@ -18,13 +18,15 @@ struct PhrasedeckApp: App {
         let stub: StubHelper? = nil
         #endif
         self.stub = stub
-        // Phrases and pages sync through the private CloudKit database once the build has the
+        // Phrases, pages and Spots sync through the private CloudKit database once the build has the
         // iCloud entitlement (project.yml); computers and tokens live outside this store.
+        // SavedSpot (#81) is a new record type: deploy it to the Production schema before a
+        // release writes any.
         // UI tests get a throwaway local store.
         let syncs = !((Bundle.main.object(forInfoDictionaryKey: "PhrasedeckCloudSync") as? String) ?? "").isEmpty
         do {
             container = try ModelContainer(
-                for: Page.self, Phrase.self,
+                for: Page.self, Phrase.self, SavedSpot.self,
                 configurations: ModelConfiguration(
                     isStoredInMemoryOnly: stub != nil,
                     cloudKitDatabase: syncs && stub == nil ? .private("iCloud.dev.ericdahl.phrasedeck") : .none))

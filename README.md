@@ -156,10 +156,11 @@ Status codes:
 | 401 | bad token, or a wrong pairing code |
 | 403 | `Host` not allowed |
 | 404 | no pairing window open, or pairing locked |
-| 409 | busy typing another phrase for over a second |
+| 409 | busy typing another phrase for over a second; nothing was typed |
 | 413 | body over 64 KB, or text over 10,000 characters |
 | 415 | not `application/json` |
 | 429 | over 10 requests a second on `/type`, or about 1 a second on `/pair` |
+| 500 | typing failed partway; some keys may have been typed |
 | 501 | this computer's backend can't paste |
 | 503 | Accessibility not granted |
 

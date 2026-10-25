@@ -104,6 +104,28 @@ Plain HTTP with a bearer token, inside the tailnet.
 - `GET /health` returns `{hostname, os, accessibility_ok}` with no auth.
 - `POST /pair` as above.
 
+### What each status means (#44)
+
+The helper sets these in one table (`server/answers.go`), and the app reads only the code, showing
+the `{"error": "..."}` text when there is one. Every refusal has that body.
+
+| Code | Meaning | Typed? | App shows |
+|---|---|---|---|
+| 200 | typed | yes | green flash |
+| 400 | bad JSON, mode or device name | no | red |
+| 401 | bad token, or a wrong pairing code | no | red, **Pair again** |
+| 403 | `Host` not allowed | no | red |
+| 404 | no pairing window open, or pairing locked | no | red |
+| 409 | busy: another phrase held the keyboard for the whole 1-second wait | **no**, tap again | "<computer> is busy, tap again"; never retried |
+| 413 | body or text too large | no | red |
+| 415 | not `application/json` | no | red |
+| 429 | rate-limited | no | red |
+| 500 | typing failed partway | **maybe** | amber, "it may have typed" |
+| 501 | this computer can't paste | no | red |
+| 503 | can't type yet (Accessibility not granted) | no | red |
+
+A send that times out or drops after the request went out is also "it may have typed".
+
 ### Server limits
 
 - `/type` is rate-limited to 10 requests per second, applied after auth, so a stuck button can't
@@ -143,7 +165,8 @@ Helper { id, name, host, port }   // local to each device; token in the Keychain
   401, the banner offers **Pair again**.
 - **Feedback:** a haptic tick on a tap and a green flash when the helper returns 200. Failures show
   a flash plus a banner, in two kinds:
-  - **Amber, "no reply, it may have typed":** the send timed out, or the helper answered 409.
+  - **Amber, "it may have typed":** the send timed out or dropped after it went out, or the
+    helper answered 500. A 409 means nothing was typed (see "What each status means").
   - **Red, "unreachable":** the connection was refused, or the host name couldn't be resolved.
   - Other errors (unauthorized, not ready, rate-limited) are red with their own text.
 - **No automatic retry.** A retry could type the phrase twice.

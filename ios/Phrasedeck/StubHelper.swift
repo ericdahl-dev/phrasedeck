@@ -3,7 +3,7 @@ import Observation
 
 /// For UI tests (launch argument -uiTestingStubHelper, DEBUG builds only): an in-process
 /// helper that answers every call and counts sends, with a throwaway
-/// computers list. No network and no Keychain items that outlive the run.
+/// computers list. No network and no Keychain items.
 @MainActor
 final class StubHelper {
     @MainActor @Observable
@@ -37,12 +37,11 @@ final class StubHelper {
     }
 
     func makeModel() -> AppModel {
-        let tokens = TokenStore(service: "dev.ericdahl.phrasedeck.uitests")
-        let store = HelperStore(defaults: defaults, tokens: tokens)
-        let mac = Helper(name: "stub-mac", host: "stub-mac")
-        try? store.add(mac)
-        store.selectedHelperID = mac.id
         let api = API(probe: probe)
-        return AppModel(store: store, tokens: tokens, device: "UI test") { _, _, _ in api }
+        let computers = Computers(defaults: defaults, tokens: MemoryTokens()) { _, _, _ in api }
+        let mac = Helper(name: "stub-mac", host: "stub-mac")
+        try? computers.add(mac)
+        computers.selectedID = mac.id
+        return AppModel(computers: computers, device: "UI test")
     }
 }

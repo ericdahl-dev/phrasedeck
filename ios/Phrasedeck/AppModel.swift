@@ -29,35 +29,27 @@ final class AppModel {
         var pairAgain: Helper?
     }
 
-    typealias MakeClient = @MainActor (Helper, String?, HelperClient.Route) -> any HelperAPI
-
-    private let store: HelperStore
-    private let tokens: TokenStore
+    let computers: Computers
     private let device: String
-    private let makeClient: MakeClient
 
-    private(set) var helpers: [Helper]
     private(set) var statuses: [UUID: Status] = [:]
     private(set) var statusRoutes: [UUID: RouteKind] = [:]
-    /// Phrasedeck helpers Bonjour sees on the home network.
-    private(set) var nearby: [NearbyService] = []
     /// Computers already asked for /info this run.
     private var infoAsked: Set<UUID> = []
     private(set) var feedback: Feedback?
 
+    var helpers: [Helper] { computers.all }
+
     var selectedHelperID: UUID? {
-        didSet { store.selectedHelperID = selectedHelperID }
+        get { computers.selectedID }
+        set { computers.selectedID = newValue }
     }
 
-    var selectedHelper: Helper? { helpers.first { $0.id == selectedHelperID } }
+    var selectedHelper: Helper? { computers.selected }
 
-    init(store: HelperStore, tokens: TokenStore, device: String, makeClient: @escaping MakeClient) {
-        self.store = store
-        self.tokens = tokens
+    init(computers: Computers, device: String) {
+        self.computers = computers
         self.device = device
-        self.makeClient = makeClient
-        helpers = store.helpers
-        selectedHelperID = store.selectedHelper?.id
     }
 
     // MARK: sending
@@ -67,16 +59,16 @@ final class AppModel {
         guard let helper = selectedHelper else {
             return show(Feedback(tone: .red, message: "Add a computer first."))
         }
-        let route = route(for: helper)
+        let route = computers.route(for: helper)
         do {
-            try await client(for: helper, route).type(text: text, enter: enter)
+            try await computers.connection(to: helper, via: route).type(text: text, enter: enter)
             return show(Feedback(tone: .success, message: nil))
         } catch let failure as HelperClient.Failure where route != .tailnet && helper.hasTailnetHost
                     && (failure == .unreachable || failure == .pinMismatch) {
             // Nothing reached the helper (refused, or a wrong certificate before the token was
             // sent), so the tailnet gets one try. A LAN timeout may have typed: never retried.
             do {
-                try await client(for: helper, .tailnet).type(text: text, enter: enter)
+                try await computers.connection(to: helper, via: .tailnet).type(text: text, enter: enter)
                 return show(Feedback(tone: .success, message: failure == .pinMismatch
                     ? "Sent over the tailnet: on the home network, \(helper.name) showed a different certificate. Scan its QR code to pair again."
                     : nil))
@@ -126,8 +118,8 @@ final class AppModel {
     /// Checks the route a send would take, then the tailnet if that fails.
     /// Over the tailnet it also learns the LAN fingerprint from /info once.
     func refreshStatus(of helper: Helper) async {
-        let route = route(for: helper)
-        if route != .tailnet, let health = try? await client(for: helper, route).health() {
+        let route = computers.route(for: helper)
+        if route != .tailnet, let health = try? await computers.connection(to: helper, via: route).health() {
             statuses[helper.id] = health.accessibilityOK ? .reachable : .notReady
             statusRoutes[helper.id] = .home
             return
@@ -138,7 +130,7 @@ final class AppModel {
             return
         }
         do {
-            let health = try await client(for: helper, .tailnet).health()
+            let health = try await computers.connection(to: helper, via: .tailnet).health()
             statuses[helper.id] = health.accessibilityOK ? .reachable : .notReady
             statusRoutes[helper.id] = .tailnet
         } catch {
@@ -148,44 +140,24 @@ final class AppModel {
         }
         guard helper.certSHA256 == nil, !infoAsked.contains(helper.id) else { return }
         infoAsked.insert(helper.id)
-        if let info = try? await client(for: helper, .tailnet).info(), let fp = info.certSHA256 {
-            learn(fp, lanPort: info.lanPort, for: helper.id)
+        if let info = try? await computers.connection(to: helper, via: .tailnet).info(), let fp = info.certSHA256 {
+            // Best effort: the next status check asks again if this can't be saved.
+            try? computers.learn(fp, lanPort: info.lanPort, for: helper.id)
         }
     }
 
     // MARK: home network (#11)
 
-    func setNearby(_ services: [NearbyService]) { nearby = services }
+    func setNearby(_ services: [NearbyService]) { computers.setNearby(services) }
+
+    var nearby: [NearbyService] { computers.nearby }
 
     /// Nearby helpers that aren't paired on this device.
     var unpairedNearby: [NearbyService] {
         nearby.filter { service in !helpers.contains { service.matches($0) } }
     }
 
-    /// The LAN, pinned, when the computer is nearby and has a fingerprint
-    /// from a trusted channel; otherwise the tailnet.
-    func route(for helper: Helper) -> HelperClient.Route {
-        guard let pin = helper.certSHA256 else { return .tailnet }
-        if let address = nearby.first(where: { $0.matches(helper) && $0.address != nil })?.address {
-            return .lan(host: address.host, port: address.port, pin: pin)
-        }
-        // Paired with Tailscale off and not seen by Bonjour: the address from its QR code.
-        if !helper.hasTailnetHost, let lanHost = helper.lanHost {
-            return .lan(host: lanHost, port: helper.lanPort ?? PairLink.defaultLANPort, pin: pin)
-        }
-        return .tailnet
-    }
-
-    /// Stores a fingerprint from /pair, the QR code or /info. A changed one
-    /// drops the old pin's connections.
-    private func learn(_ fingerprint: String, lanPort: Int?, for id: UUID) {
-        guard var helper = helpers.first(where: { $0.id == id }) else { return }
-        if let old = helper.certSHA256, old != fingerprint { HelperClient.forgetLANSession(pin: old) }
-        helper.certSHA256 = fingerprint
-        helper.lanPort = lanPort ?? helper.lanPort
-        try? store.update(helper)
-        helpers = store.helpers
-    }
+    func route(for helper: Helper) -> HelperClient.Route { computers.route(for: helper) }
 
     // MARK: computers
 
@@ -239,12 +211,10 @@ final class AppModel {
         helper.certSHA256 = pairing.certSHA256 ?? qr?.fingerprint
         helper.lanPort = pairing.lanPort ?? qr?.lanPort
         do {
-            try store.add(helper)
+            try computers.add(helper)
         } catch {
-            try? tokens.delete(helper.id)
             return "Couldn't save \(helper.name): \(error.localizedDescription)"
         }
-        helpers = store.helpers
         selectedHelperID = helper.id
         return nil
     }
@@ -256,13 +226,17 @@ final class AppModel {
         return error
     }
 
-    func delete(_ helper: Helper) {
-        try? store.delete(helper)
-        if let pin = helper.certSHA256 { HelperClient.forgetLANSession(pin: pin) }
-        helpers = store.helpers
+    /// Removes the computer. Returns a message if it couldn't be (its Keychain token
+    /// wouldn't delete), and then nothing changed.
+    func delete(_ helper: Helper) -> String? {
+        do {
+            try computers.delete(helper)
+        } catch {
+            return "Couldn't remove \(helper.name): \(error.localizedDescription)"
+        }
         statuses[helper.id] = nil
         statusRoutes[helper.id] = nil
-        if selectedHelperID == helper.id { selectedHelperID = helpers.first?.id }
+        return nil
     }
 
     /// Pairs an existing computer and stores its new token and fingerprint.
@@ -271,7 +245,11 @@ final class AppModel {
         case let .failure(message): return message
         case let .success(pairing):
             if let fp = pairing.certSHA256 ?? qr?.fingerprint {
-                learn(fp, lanPort: pairing.lanPort ?? qr?.lanPort, for: helper.id)
+                do {
+                    try computers.learn(fp, lanPort: pairing.lanPort ?? qr?.lanPort, for: helper.id)
+                } catch {
+                    return "Paired, but couldn't save \(helper.name)'s certificate: \(error.localizedDescription)"
+                }
             }
             return nil
         }
@@ -292,17 +270,17 @@ final class AppModel {
             if let qr, let lan = qr.lan {
                 let route = HelperClient.Route.lan(host: lan, port: qr.lanPort, pin: qr.fingerprint)
                 do {
-                    pairing = try await makeClient(helper, nil, route).pair(code: code, device: device)
+                    pairing = try await computers.pairingConnection(to: helper, via: route).pair(code: code, device: device)
                 } catch HelperClient.Failure.unreachable where helper.hasTailnetHost {
-                    pairing = try await makeClient(helper, nil, .tailnet).pair(code: code, device: device)
+                    pairing = try await computers.pairingConnection(to: helper, via: .tailnet).pair(code: code, device: device)
                 }
             } else {
-                pairing = try await makeClient(helper, nil, .tailnet).pair(code: code, device: device)
+                pairing = try await computers.pairingConnection(to: helper, via: .tailnet).pair(code: code, device: device)
             }
             if let qr, let fp = pairing.certSHA256, fp != qr.fingerprint {
                 return .failure("\(helper.name)'s certificate didn't match the QR code, so it wasn't added. Run phrased pair again and rescan.")
             }
-            try tokens.set(pairing.token, for: helper.id)
+            try computers.setToken(pairing.token, for: helper)
             return .success(pairing)
         } catch HelperClient.Failure.noPairingWindow {
             return .failure("Run phrased pair on \(helper.name) first.")
@@ -315,9 +293,5 @@ final class AppModel {
         } catch {
             return .failure("Couldn't pair with \(helper.name): \(error.localizedDescription)")
         }
-    }
-
-    private func client(for helper: Helper, _ route: HelperClient.Route) -> any HelperAPI {
-        makeClient(helper, (try? tokens.get(helper.id)) ?? nil, route)
     }
 }

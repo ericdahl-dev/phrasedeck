@@ -6,6 +6,7 @@ struct ComputersView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var adding = false
+    @State private var deleteError: String?
 
     var body: some View {
         NavigationStack {
@@ -25,7 +26,10 @@ struct ComputersView: View {
                     }
                 }
                 .onDelete { offsets in
-                    for helper in offsets.map({ model.helpers[$0] }) { model.delete(helper) }
+                    // Stops at the first failure, which is shown; that computer stays.
+                    for helper in offsets.map({ model.helpers[$0] }) {
+                        if let error = model.delete(helper) { deleteError = error; break }
+                    }
                 }
             }
             .overlay {
@@ -42,6 +46,12 @@ struct ComputersView: View {
                 }
             }
             .sheet(isPresented: $adding) { AddHelperView() }
+            .alert("Couldn't remove the computer",
+                   isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(deleteError ?? "")
+            }
         }
     }
 }

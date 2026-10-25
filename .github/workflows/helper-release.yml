@@ -1,6 +1,7 @@
 # Tag a version on main (for example v0.2.0) to build the Linux Helper packages (#78) and attach
-# them to that tag's GitHub Release: a .deb and a tarball (for AUR phrased-bin) per arch, plus
-# SHA256SUMS. release.yml uploads the iOS app from the same tag.
+# them to that tag's GitHub Release: a .deb and a tarball per arch, the AUR phrased-bin PKGBUILD,
+# phrased-bin.install and .SRCINFO (built and checked with makepkg), plus SHA256SUMS. Pushing those
+# to the AUR is a separate, manual step. release.yml uploads the iOS app from the same tag.
 name: helper-release
 
 on:
@@ -41,11 +42,14 @@ jobs:
             packaging/build-linux.sh "$version" "$arch" "$RUNNER_TEMP/pkg"
             packaging/check-deb.sh "$RUNNER_TEMP/pkg/phrased_${version}_$arch.deb"
           done
-          (cd "$RUNNER_TEMP/pkg" && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+          packaging/aur/render.sh "$version" "$RUNNER_TEMP/pkg"
+          docker run --rm -v "$PWD:/w" -v "$RUNNER_TEMP/pkg:/pkg" archlinux:latest \
+            sh /w/packaging/aur/makepkg-check.sh /pkg "$version"
+          (cd "$RUNNER_TEMP/pkg" && sudo chown -R "$(id -u)" . && sha256sum * .SRCINFO > SHA256SUMS && cat SHA256SUMS)
       - name: Attach them to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
             gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes "Helper packages for Linux."
-          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/pkg/* --clobber
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/pkg/* "$RUNNER_TEMP/pkg/.SRCINFO" --clobber

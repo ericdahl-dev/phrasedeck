@@ -164,22 +164,16 @@ func (s *server) typeText(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	switch outcome, err := s.typist.Type(req.Text, req.Enter, req.Mode); outcome {
-	case typing.Typed:
-		reply(w, http.StatusOK, map[string]any{"ok": true})
-	case typing.BadMode:
-		fail(w, http.StatusBadRequest, `mode must be "auto", "type" or "paste"`)
-	case typing.TooLong:
-		fail(w, http.StatusRequestEntityTooLarge, "text over 10,000 characters")
-	case typing.NotReady:
-		fail(w, http.StatusServiceUnavailable, "can't type yet: grant Accessibility to phrased")
-	case typing.Busy:
-		fail(w, http.StatusConflict, "busy typing another phrase")
-	case typing.PasteUnsupported:
-		fail(w, http.StatusNotImplemented, "paste is not supported yet on this computer; send single-line text under 300 characters, or mode \"type\"")
-	default:
+	outcome, err := s.typist.Type(req.Text, req.Enter, req.Mode)
+	status, msg := typeAnswer(outcome, err)
+	switch {
+	case status == http.StatusOK:
+		reply(w, status, map[string]any{"ok": true})
+	case outcome == typing.Failed:
 		log.Printf("type: %v", err)
-		fail(w, http.StatusInternalServerError, "typing failed: "+err.Error())
+		fallthrough
+	default:
+		fail(w, status, msg)
 	}
 }
 

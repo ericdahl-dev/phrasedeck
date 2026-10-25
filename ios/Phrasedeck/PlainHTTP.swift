@@ -55,11 +55,13 @@ extension HelperClient {
         guard statusParts.count >= 2, statusParts[0].hasPrefix("HTTP/"), let status = Int(statusParts[1])
         else { return nil }
         let body = Data(data[split.upperBound...])
-        guard let length = head.dropFirst().first(where: { $0.lowercased().hasPrefix("content-length:") })
-            .flatMap({ Int($0.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) })
+        guard let header = head.dropFirst().first(where: { $0.lowercased().hasPrefix("content-length:") })
         else { return (status, body) }
-        // Cut short of its length, the reply isn't one: the caller reads that as no reply.
-        guard length <= body.count else { return nil }
+        // A length that isn't a count, or a body cut short of it, isn't a reply: the caller reads
+        // that as no reply.
+        guard let length = Int(header.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)),
+              length >= 0, length <= body.count
+        else { return nil }
         return (status, body.prefix(length))
     }
 }

@@ -81,6 +81,18 @@ struct PlainHTTPTests {
         }
     }
 
+    /// A Content-Length that isn't a count (negative, junk) makes the reply unreadable: Maybe
+    /// typed, since the request went out. -1 used to trap in Data.prefix.
+    @Test(arguments: ["-1", "abc", "", "1e3"])
+    func aBadContentLengthIsNoReply(length: String) async throws {
+        let server = try await OneShotServer(reply: "HTTP/1.0 200 OK\r\nContent-Length: \(length)\r\n\r\n{}")
+        let request = URLRequest(url: URL(string: "http://100.101.102.103:47811/type")!)
+
+        await #expect(throws: HelperClient.Failure.noReply) {
+            _ = try await HelperClient.networkSend(request, "127.0.0.1", server.port)
+        }
+    }
+
     /// The helper's replies are tiny; anything over the cap is refused instead of buffered.
     @Test func aReplyOverTheCapIsNoReply() async throws {
         let big = String(repeating: "x", count: HelperClient.maxReply + 1)

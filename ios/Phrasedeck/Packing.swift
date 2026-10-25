@@ -1,4 +1,4 @@
-/// Dense packing for phrase buttons with spans (#51). A page is `columns` cells wide and grows
+/// Dense packing for Buttons of any Size (#51). A page is `columns` Squares wide and grows
 /// down. Each button, in order, takes the first spot from the top-left where it fits, so later
 /// small buttons fill holes left before bigger ones, and order is kept as far as packing allows.
 enum Packing {
@@ -16,8 +16,8 @@ enum Packing {
         let rows: Int
     }
 
-    /// Placements in input order. A span wider than the page is narrowed to fit; the item
-    /// itself (the stored span) is left alone.
+    /// Placements in input order. A Size wider than the page is narrowed to fit; the item
+    /// itself (the stored Size) is left alone.
     static func pack<ID: Hashable>(_ items: [Item<ID>], columns: Int) -> [Placement<ID>] {
         let columns = max(1, columns)
         var used: [[Bool]] = []

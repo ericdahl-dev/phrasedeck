@@ -1,0 +1,26 @@
+# The .deb for the Helper (#78). build-linux.sh runs nfpm in its staging directory, which holds
+# phrased, phrased.service and postinst.sh, and sets VERSION and ARCH.
+name: phrased
+arch: ${ARCH}
+version: ${VERSION}
+maintainer: Eric Dahl <eric@skeyelab.com>
+description: Types phrases from the Phrasedeck iPhone app into the focused window (Wayland).
+homepage: https://github.com/ericdahl-dev/phrasedeck
+license: Proprietary
+section: utils
+# GNOME (Mutter) can't use wtype, so the .deb only suggests it until #69 adds a GNOME backend.
+# The Helper says what's missing when it isn't Ready.
+recommends:
+  - wl-clipboard
+suggests:
+  - wtype
+contents:
+  - src: ./phrased
+    dst: /usr/bin/phrased
+    file_info:
+      mode: 0755
+  - src: ./phrased.service
+    dst: /usr/lib/systemd/user/phrased.service
+# Each user turns the Helper on for themselves; installing enables nothing.
+scripts:
+  postinstall: ./postinst.sh

@@ -79,13 +79,17 @@ struct HelperClient: Sendable {
     /// A host name's addresses, as strings. Tests stub it.
     typealias Resolve = @Sendable (String) async -> [String]
     var resolve: Resolve = HelperClient.systemResolve
+    /// Sends the tailnet route's plain HTTP to the checked address. Network.framework in the
+    /// app; through the injected session in tests.
+    var plainSend: PlainSend = HelperClient.networkSend
 
     init(helper: Helper, token: String?, route: Route = .tailnet, session: URLSession? = nil,
-         resolve: Resolve? = nil) {
+         resolve: Resolve? = nil, plainSend: PlainSend? = nil) {
         self.helper = helper
         self.token = token
         self.route = route
         if let resolve { self.resolve = resolve }
+        if let plainSend { self.plainSend = plainSend } else if let session { self.plainSend = Self.sessionSend(session) }
         self.session = session ?? {
             if case let .lan(_, _, pin) = route { return Self.lanSession(for: pin) }
             return .shared
@@ -110,24 +114,38 @@ struct HelperClient: Sendable {
         lanSessions.withLock { $0.removeValue(forKey: pin) }?.invalidateAndCancel()
     }
 
-    /// Plain HTTP goes only to a tailnet address. With Tailscale off, a bare name can resolve
-    /// through the router's DNS to a LAN machine, so a name's addresses must all be tailnet
-    /// ones. The request still goes to the name: ATS refuses plain HTTP to a bare 100.x
-    /// address (-1022), while *.ts.net and bare names are allowed by Info.plist.
-    // shortcut: the OS resolves the name again for the request, so a lookup that changes in
-    // the milliseconds between can still swap it; upgrade if the LAN route ever goes HTTPS-only.
-    private func checkedTailnetURL(_ url: URL?) async throws -> URL? {
+    /// The address plain HTTP may go to. With Tailscale off, a bare name can resolve through
+    /// the router's DNS to a LAN machine, so a name's addresses must all be tailnet ones, and
+    /// the request goes to the checked one (IPv4 first): there's no second lookup to swap it.
+    private func checkedTailnetAddress(_ url: URL?) async throws -> String {
         guard let host = url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false)?.host })?
                 .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         else { throw Failure.unreachable }
         // An IP literal was already checked by request().
         if IPv4Address(host) != nil && host.allSatisfy({ $0.isNumber || $0 == "." }) || IPv6Address(host) != nil {
-            return url
+            return host
         }
         let addresses = await resolve(host)
         guard !addresses.isEmpty else { throw Failure.unreachable }
         guard addresses.allSatisfy({ PairLink.tailnetHost($0) != nil }) else { throw Failure.notTailnet }
-        return url
+        return addresses.first { !$0.contains(":") } ?? addresses[0]
+    }
+
+    /// A PlainSend through a URLSession, for tests' stub sessions: the URL is rewritten to the
+    /// address so the stub records where the request went.
+    static func sessionSend(_ session: URLSession) -> PlainSend {
+        { request, address, port in
+            var request = request
+            if let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let host = components.host {
+                request.setValue(components.port.map { "\(host):\($0)" } ?? host, forHTTPHeaderField: "Host")
+                components.host = address.contains(":") ? "[\(address)]" : address
+                components.port = port
+                request.url = components.url
+            }
+            let (data, response) = try await session.data(for: request)
+            return ((response as? HTTPURLResponse)?.statusCode ?? 0, data)
+        }
     }
 
     /// getaddrinfo, off the main thread. No answer is an empty list.
@@ -216,18 +234,22 @@ struct HelperClient: Sendable {
     }
 
     private func send(_ request: URLRequest) async throws -> Data {
-        var request = request
-        if route == .tailnet { request.url = try await checkedTailnetURL(request.url) }
         let data: Data
-        let response: URLResponse
+        let status: Int
         let pinning: PinningDelegate? = if case let .lan(_, _, pin) = route { PinningDelegate(pin: pin) } else { nil }
         do {
-            (data, response) = try await session.data(for: request, delegate: pinning)
+            if route == .tailnet {
+                let address = try await checkedTailnetAddress(request.url)
+                (status, data) = try await plainSend(request, address, request.url?.port ?? helper.port)
+            } else {
+                let response: URLResponse
+                (data, response) = try await session.data(for: request, delegate: pinning)
+                status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            }
         } catch let error as URLError {
             throw Self.failure(for: error.code, pinMismatched: pinning?.mismatched ?? false)
         }
 
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         switch status {
         case 200..<300: return data
         case 401: throw Failure.unauthorized

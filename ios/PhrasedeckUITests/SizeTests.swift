@@ -1,7 +1,7 @@
 import XCTest
 
 /// A button's size is set in its editor and shows on the deck right away (#51).
-final class SpanTests: XCTestCase {
+final class SizeTests: XCTestCase {
     @MainActor
     func testAButtonSetToTwoByTwoDoublesInSizeAndStillSends() {
         let app = XCUIApplication()
@@ -16,9 +16,9 @@ final class SpanTests: XCTestCase {
         let edit = app.buttons["Edit"]
         XCTAssertTrue(edit.waitForExistence(timeout: 20))
         edit.tap()
-        XCTAssertTrue(app.buttons["editor.span.2x2"].waitForExistence(timeout: 20))
-        app.buttons["editor.span.2x2"].tap()
-        XCTAssertEqual(app.staticTexts["editor.span.value"].label, "2 × 2")
+        XCTAssertTrue(app.buttons["editor.size.2x2"].waitForExistence(timeout: 20))
+        app.buttons["editor.size.2x2"].tap()
+        XCTAssertEqual(app.staticTexts["editor.size.value"].label, "2 × 2")
         app.buttons["editor.save"].tap()
 
         XCTAssertTrue(button.waitForExistence(timeout: 20))

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import Synchronization
 @testable import Phrasedeck
 
 // Against the HTTP contract in docs/plans/2026-10-24-phrasedeck-design.md.
@@ -61,9 +62,9 @@ struct HelperClientTests {
         #expect(StubURLProtocol.requests.isEmpty)
     }
 
-    /// The name is checked, then the request goes to the name: ATS refuses plain HTTP to a
-    /// bare 100.x address (error -1022), which broke pairing after #48.
-    @Test func aCheckedTailnetNameIsReachedByName() async throws {
+    /// The name is checked, then the request goes to the checked address, never a second
+    /// lookup, with the name as Host (#71).
+    @Test func theTokenGoesOnlyToTheCheckedAddress() async throws {
         StubURLProtocol.reset(.status(204))
         let c = HelperClient(helper: helper, token: "tok", session: StubURLProtocol.session(),
                              resolve: { name in
@@ -74,8 +75,26 @@ struct HelperClientTests {
         try await c.type(text: "x", enter: false)
 
         let request = try #require(StubURLProtocol.requests.first?.request)
-        #expect(request.url?.absoluteString == "http://erics-mac:47811/type")
+        #expect(request.url?.absoluteString == "http://100.70.1.5:47811/type")
+        #expect(request.value(forHTTPHeaderField: "Host") == "erics-mac:47811")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok")
+    }
+
+    /// With MagicDNS off the QR code's host is a tailnet IP. It pairs: the request goes to that
+    /// address through Network.framework (no ATS -1022), with no lookup (#71).
+    @Test func anIPLiteralTailnetHostPairs() async throws {
+        let sent = Mutex<[String]>([])
+        let c = HelperClient(helper: Helper(name: "m", host: "100.101.102.103"), token: nil,
+                             resolve: { _ in Issue.record("an IP literal was looked up"); return [] },
+                             plainSend: { request, address, port in
+                                 sent.withLock { $0.append("\(address):\(port) \(request.url?.host() ?? "")") }
+                                 return (200, Data(#"{"token":"t"}"#.utf8))
+                             })
+
+        let pairing = try await c.pair(code: "123456", device: "iPhone")
+
+        #expect(pairing.token == "t")
+        #expect(sent.withLock { $0 } == ["100.101.102.103:47811 100.101.102.103"])
     }
 
     @Test(arguments: ["192.168.1.20", "fe80::1", "mac.local"])
@@ -102,7 +121,7 @@ struct HelperClientTests {
 
         #expect(info == LANInfo(certSHA256: TestCerts.helperPin, lanPort: 47812))
         let request = try #require(StubURLProtocol.requests.first?.request)
-        #expect(request.url?.absoluteString == "http://erics-mac:47811/info")
+        #expect(request.url?.absoluteString == "http://100.101.102.103:47811/info")
         #expect(request.httpMethod == "GET")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
     }
@@ -148,7 +167,7 @@ struct HelperClientTests {
         #expect(sent.count == 1)
         let request = try #require(sent.first?.request)
         #expect(request.httpMethod == "POST")
-        #expect(request.url?.absoluteString == "http://erics-mac:47811/type")
+        #expect(request.url?.absoluteString == "http://100.101.102.103:47811/type")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
         #expect(request.timeoutInterval == 3)
@@ -205,7 +224,7 @@ struct HelperClientTests {
         let sent = StubURLProtocol.requests
         #expect(sent.count == 1)
         let request = try #require(sent.first?.request)
-        #expect(request.url?.absoluteString == "http://erics-mac:47811/pair")
+        #expect(request.url?.absoluteString == "http://100.101.102.103:47811/pair")
         #expect(request.httpMethod == "POST")
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
@@ -237,7 +256,7 @@ struct HelperClientTests {
         #expect(health == Health(hostname: "erics-mac", os: "darwin", accessibilityOK: false))
         let request = try #require(StubURLProtocol.requests.first?.request)
         #expect(request.httpMethod == "GET")
-        #expect(request.url?.absoluteString == "http://erics-mac:47811/health")
+        #expect(request.url?.absoluteString == "http://100.101.102.103:47811/health")
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
         #expect(StubURLProtocol.requests.count == 1)
     }

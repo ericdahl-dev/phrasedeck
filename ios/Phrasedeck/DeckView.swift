@@ -102,11 +102,11 @@ struct DeckView: View {
         case add
     }
 
-    /// The page's buttons packed by span (#51), with the "+" tile as a trailing 1×1.
+    /// The page's Buttons packed by Size (#51), with the "+" tile as a trailing 1×1.
     private func grid(_ page: Page, columns: Int, cell: CGSize) -> some View {
         let phrases = Dictionary(uniqueKeysWithValues: page.sortedPhrases.map { ($0.persistentModelID, $0) })
         let items = page.sortedPhrases.map {
-            Packing.Item(id: Tile.phrase($0.persistentModelID), columns: $0.spanColumns, rows: $0.spanRows)
+            Packing.Item(id: Tile.phrase($0.persistentModelID), columns: $0.sizeColumns, rows: $0.sizeRows)
         } + [Packing.Item(id: Tile.add, columns: 1, rows: 1)]
         let placed = Packing.pack(items, columns: columns)
         let step = CGSize(width: cell.width + DeckSize.spacing, height: cell.height + DeckSize.spacing)
@@ -205,7 +205,7 @@ enum DeckSize {
         (max(56, columnWidth * 0.86), min(34, max(13, columnWidth * 0.17)))
     }
 
-    /// Label size for a button of any span: it grows with the smaller side, so a wide button
+    /// Label size for a Button of any Size: it grows with the smaller side, so a wide button
     /// doesn't get text taller than it is.
     static func metrics(button size: CGSize) -> (height: CGFloat, font: CGFloat) {
         (size.height, metrics(columnWidth: min(size.width, size.height / 0.86)).font)

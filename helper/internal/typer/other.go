@@ -1,10 +1,10 @@
-//go:build !darwin
+//go:build !darwin && !linux
 
 package typer
 
 import "errors"
 
-// ErrNoBackend is returned on an OS without a typing backend yet (Linux arrives in #5).
+// ErrNoBackend is returned on an OS without a typing backend yet (macOS and Linux have one).
 var ErrNoBackend = errors.New("no typing backend for this OS yet")
 
 type none struct{}

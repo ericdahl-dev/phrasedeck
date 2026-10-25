@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brutella/dnssd"
+
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/lan"
 )
 
@@ -135,18 +137,18 @@ func TestBonjourAdvertisesOnlyLANInterfacesAndNoSecrets(t *testing.T) {
 		{IP: []byte{192, 168, 1, 21}, Iface: "en0"},
 		{IP: []byte{10, 0, 0, 5}, Iface: "en7"},
 	}
-	cfg := bonjourConfig("Lib-2833.lan", "lib-2833.tail1234.ts.net", 47812, addrs)
+	cfg := bonjourConfig("Lib-2833.lan", "lib-2833.tail1234.ts.net", fp64, 47812, addrs)
 	if cfg.Type != "_phrasedeck._tcp" || cfg.Port != 47812 || cfg.Host != "phrased-lib-2833" || cfg.Name != "lib-2833" {
 		t.Fatalf("config %+v", cfg)
 	}
 	if !reflect.DeepEqual(cfg.Ifaces, []string{"en0", "en7"}) {
 		t.Fatalf("ifaces %v, want only the LAN interfaces, once each", cfg.Ifaces)
 	}
-	want := map[string]string{"v": "1", "ts": "lib-2833.tail1234.ts.net", "port": "47812"}
+	want := map[string]string{"v": "1", "ts": "lib-2833.tail1234.ts.net", "port": "47812", "fp": fp64}
 	if !reflect.DeepEqual(cfg.Text, want) {
 		t.Fatalf("TXT %v, want exactly %v", cfg.Text, want)
 	}
-	if off := bonjourConfig("mac", "", 47812, addrs); off.Text["ts"] != "" || len(off.Text) != 2 {
+	if off := bonjourConfig("mac", "", fp64, 47812, addrs); off.Text["ts"] != "" || len(off.Text) != 3 {
 		t.Fatalf("with Tailscale off, TXT %v should leave out ts", off.Text)
 	}
 }
@@ -177,7 +179,12 @@ func TestTheTailnetIsPickedUpWhenTailscaleComesUp(t *testing.T) {
 	got := make(chan []string, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	go waitForTailnet(ctx, "tailscale", time.Millisecond, func(names []string) { got <- names })
+	go waitForTailnet(ctx, "tailscale", time.Millisecond, func(names []string, ts string) {
+		if ts != "mac.tail1234.ts.net" {
+			t.Errorf("ts %q", ts)
+		}
+		got <- names
+	})
 	select {
 	case names := <-got:
 		if !slices.Contains(names, "mac.tail1234.ts.net") {
@@ -185,5 +192,36 @@ func TestTheTailnetIsPickedUpWhenTailscaleComesUp(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("never picked up the tailnet")
+	}
+}
+
+type fakeRegistrar struct {
+	added   []dnssd.Service
+	removed int
+}
+
+func (f *fakeRegistrar) Add(s dnssd.Service) (dnssd.ServiceHandle, error) {
+	f.added = append(f.added, s)
+	return nil, nil
+}
+func (f *fakeRegistrar) Remove(dnssd.ServiceHandle) { f.removed++ }
+
+// A helper that started without Tailscale gets ts into its TXT once Tailscale is up, so the
+// app can match it as nearby without a restart.
+func TestTheTXTGainsTsWhenTailscaleComesUp(t *testing.T) {
+	cfg := bonjourConfig("mac", "", fp64, 47812, []lan.Addr{{IP: []byte{192, 168, 1, 20}, Iface: "en0"}})
+	rp := &fakeRegistrar{}
+	if _, err := retag(rp, nil, cfg, "mac.tail1234.ts.net"); err != nil {
+		t.Fatal(err)
+	}
+	if rp.removed != 1 || len(rp.added) != 1 {
+		t.Fatalf("removed %d, added %d; want the old record replaced", rp.removed, len(rp.added))
+	}
+	want := map[string]string{"v": "1", "port": "47812", "fp": fp64, "ts": "mac.tail1234.ts.net"}
+	if got := rp.added[0].Text; !reflect.DeepEqual(got, want) {
+		t.Fatalf("TXT %v, want %v", got, want)
+	}
+	if cfg.Text["ts"] != "" {
+		t.Fatal("retag changed the caller's config")
 	}
 }

@@ -193,8 +193,9 @@ comment) adds a second listener:
   stops with an error naming it rather than making a new one. Delete both files to make a new
   one, and then re-pair every device.
 - **Bonjour** advertises `_phrasedeck._tcp` on the interfaces in those subnets, as
-  `phrased-<host>.local`, with TXT `v=1`, `ts=<tailnet name>` and `port`. TXT carries no token
-  and no fingerprint.
+  `phrased-<host>.local`, with TXT `v=1`, `ts=<tailnet name>`, `fp` (the certificate
+  fingerprint, for matching a paired computer) and `port`. TXT carries no token. If Tailscale
+  comes up after `phrased` starts, `ts` is added without a restart.
 - **`/pair`** adds `certSHA256` and `lanPort` to its reply, and the QR code from `phrased pair`
   adds `fp`, `lan` (this machine's LAN address) and `lanPort`. With Tailscale off, the QR code
   leaves out `host` and `port` and carries only the LAN route.

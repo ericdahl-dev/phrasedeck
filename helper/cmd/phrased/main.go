@@ -202,18 +202,22 @@ func run(o options) error {
 	defer stop()
 	errc := make(chan error, 2)
 	go func() { errc <- servers[0].Serve(ln) }()
+	tsUp := make(chan string, 1)
 	if waitTailnet {
-		go waitForTailnet(ctx, o.tailscale, 30*time.Second, func(names []string) {
+		go waitForTailnet(ctx, o.tailscale, 30*time.Second, func(names []string, tsName string) {
 			allow := append(names, o.allowHosts...)
 			setTailnet(allow)
 			log.Printf("Tailscale is up; allowed hosts: %s", strings.Join(allow, ", "))
+			if tsName != "" {
+				tsUp <- tsName
+			}
 		})
 	}
 	bonjourDone := make(chan struct{})
 	if lanLn != nil {
 		go func() { errc <- servers[1].ServeTLS(lanLn, "", "") }()
 		go func() {
-			advertise(ctx, bonjourConfig(hostname, tsName, o.lanPort, lanAddrs))
+			advertise(ctx, bonjourConfig(hostname, tsName, cfg.CertSHA256, o.lanPort, lanAddrs), tsUp)
 			close(bonjourDone)
 		}()
 	} else {
@@ -267,9 +271,7 @@ func tailnetAtStartup(tailscale string, prefixes []netip.Prefix) (names []string
 }
 
 // waitForTailnet retries every interval until Tailscale answers, then hands found the names.
-// shortcut: Bonjour's ts TXT stays empty until a restart, so the app can't yet tell this
-// machine is nearby; re-register Bonjour here if that matters.
-func waitForTailnet(ctx context.Context, tailscale string, every time.Duration, found func(names []string)) {
+func waitForTailnet(ctx context.Context, tailscale string, every time.Duration, found func(names []string, tsName string)) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -277,8 +279,8 @@ func waitForTailnet(ctx context.Context, tailscale string, every time.Duration, 
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if names, _, err := tailnetSelf(tailscale); err == nil {
-				found(names)
+			if names, tsName, err := tailnetSelf(tailscale); err == nil {
+				found(names, tsName)
 				return
 			}
 		}

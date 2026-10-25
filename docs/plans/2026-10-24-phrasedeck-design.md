@@ -54,8 +54,10 @@ with Tailscale off, on macOS and omarchy, over an encrypted LAN route.
 - **Bonjour:** `_phrasedeck._tcp` on the LAN interfaces, from the pure-Go `brutella/dnssd`, as
   host `phrased-<host>.local`. A separate name means phrased never publishes records for the
   system's own `<host>.local`, which mDNSResponder or avahi owns. TXT is `v=1`,
-  `ts=<MagicDNS name, lowercase, no trailing dot>` (left out with Tailscale off) and
-  `port=47812`, with no secrets.
+  `ts=<MagicDNS name, lowercase, no trailing dot>`, `fp=<certSHA256>` and `port=47812`, with no
+  secrets. `ts` is left out while Tailscale is off and added live when it comes up. `fp` lets
+  the app match a computer paired over the LAN only; it is for matching, never trust, since
+  the app trusts only the pin it stored at pairing and the TLS handshake proves it.
 - **Wire fields:** `/pair` 200 is `{"token","certSHA256","lanPort"}`, with the last two only when
   LAN is on. `GET /info` (Bearer) is `{"certSHA256","lanPort","hostname"}`. The QR code adds
   `fp=<64 hex>&lan=<IP literal>&lanPort=<port>`, all or none, and `v` stays 1. `host` stays

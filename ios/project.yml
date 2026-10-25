@@ -20,9 +20,8 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        # iCloud sync (#10) is off while this is empty. To turn it on, set it to
-        # Phrasedeck/Phrasedeck.entitlements.
-        CODE_SIGN_ENTITLEMENTS: ""
+        # iCloud sync (#10): phrases and pages sync through CloudKit. Empty turns it off.
+        CODE_SIGN_ENTITLEMENTS: Phrasedeck/Phrasedeck.entitlements
     info:
       path: Phrasedeck/Info.plist
       properties:

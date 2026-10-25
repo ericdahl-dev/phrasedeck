@@ -1,0 +1,183 @@
+name: release
+
+# Tag a version on main (for example v0.2.0) to archive the iOS app, sign it and upload it to
+# TestFlight for internal testers. Modeled on ShowRecorder's release workflow, iOS only.
+#
+# This repository is public. Only a tag pushed to ericdahl-dev/phrasedeck runs this workflow:
+# pull requests, forks and branch pushes never do, so the signing secrets never reach a fork's code.
+#
+# Signs manually with one fixed Apple Distribution certificate (DIST_CERT_P12_BASE64 and
+# DIST_CERT_PASSWORD), and ios/scripts/ci_profile.py fetches or makes the App Store profile through
+# the App Store Connect API. Automatic signing on a runner asks Apple for a new certificate on every
+# run until the account hits its certificate limit (see ShowRecorder's docs/DEVELOPING.md, "Why a
+# fixed certificate"), so nothing here creates a certificate. ios/scripts/testflight.sh stays the
+# local, automatically signed path.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    if: github.repository == 'ericdahl-dev/phrasedeck'
+    runs-on: macos-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: ios
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
+      BUNDLE_ID: dev.ericdahl.phrasedeck
+      PROFILE_NAME: Phrasedeck CI App Store
+      PROFILE_TYPE: IOS_APP_STORE
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check the tag
+        run: |
+          # Only releases from main, or from a release branch (release/1.0), so a stray tag on a
+          # feature branch can't ship.
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            && ! git branch -r --contains "$GITHUB_SHA" | grep -q '^ *origin/release/'; then
+            echo "::error::Tag ${GITHUB_REF_NAME} is not on main or a release/ branch. Tag a commit that has been merged."
+            exit 1
+          fi
+          # The version is the tag; the build number is the run number plus the attempt, so
+          # re-running a tag uploads a new, higher build instead of a duplicate.
+          echo "MARKETING_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          echo "Version ${MARKETING_VERSION} (${BUILD_NUMBER})"
+
+      - name: Write the App Store Connect key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          set +x
+          umask 077
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8"
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8" >> "$GITHUB_ENV"
+
+      - name: Import the Apple Distribution certificate
+        env:
+          DIST_CERT_P12_BASE64: ${{ secrets.DIST_CERT_P12_BASE64 }}
+          DIST_CERT_PASSWORD: ${{ secrets.DIST_CERT_PASSWORD }}
+        run: |
+          set +x
+          umask 077
+          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          printf '%s' "$DIST_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/dist.p12" -k "$KEYCHAIN" -P "$DIST_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          # Splitting is intended: the existing keychains are separate arguments.
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/dist.p12"
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          # ci_profile.py finds the certificate in App Store Connect by its serial number.
+          SERIAL="$(security find-certificate -c "Apple Distribution" -p "$KEYCHAIN" | openssl x509 -noout -serial | cut -d= -f2)"
+          echo "CERT_SERIAL=$SERIAL" >> "$GITHUB_ENV"
+          security find-certificate -c "Apple Distribution" -p "$KEYCHAIN" | openssl x509 -noout -enddate \
+            | sed 's/^notAfter=/Apple Distribution certificate expires: /'
+
+      - name: Get the App Store provisioning profile
+        run: |
+          set +x
+          python3 scripts/ci_profile.py | tee "$RUNNER_TEMP/profile.txt"
+          UUID="$(sed -n 's/^uuid=//p' "$RUNNER_TEMP/profile.txt")"
+          test -n "$UUID"
+          # iCloud sync (#10) needs CloudKit and production push in the profile; the App ID has both.
+          security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision" > "$RUNNER_TEMP/profile.plist"
+          /usr/libexec/PlistBuddy -c 'Print :Entitlements' "$RUNNER_TEMP/profile.plist"
+          [ "$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:aps-environment' "$RUNNER_TEMP/profile.plist")" = production ] \
+            || { echo "::error::The profile has no production aps-environment. Turn on Push Notifications for the App ID."; exit 1; }
+          /usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.icloud-services' "$RUNNER_TEMP/profile.plist" | grep -q CloudKit \
+            || { echo "::error::The profile has no CloudKit. Turn on iCloud (CloudKit) for the App ID, then re-run."; exit 1; }
+
+      - name: Generate the project
+        run: |
+          brew install xcodegen
+          xcodegen
+
+      - name: Archive
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project Phrasedeck.xcodeproj -scheme Phrasedeck -configuration Release \
+            -destination generic/platform=iOS -archivePath "$RUNNER_TEMP/Phrasedeck.xcarchive" \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN" \
+            MARKETING_VERSION="$MARKETING_VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            2>&1 | tee "$RUNNER_TEMP/archive.log"
+          # For the log: the version, build and entitlements the archive was signed with.
+          APP="$RUNNER_TEMP/Phrasedeck.xcarchive/Products/Applications/Phrasedeck.app"
+          plutil -p "$APP/Info.plist" | grep -E 'CFBundleShortVersionString|CFBundleVersion'
+          codesign -d --entitlements - --xml "$APP" | plutil -p -
+
+      - name: Upload to TestFlight
+        run: |
+          set -o pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict><key>${BUNDLE_ID}</key><string>${PROFILE_NAME}</string></dict>
+            <key>teamID</key><string>${DEVELOPMENT_TEAM}</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Phrasedeck.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            2>&1 | tee "$RUNNER_TEMP/upload.log"
+          echo "Uploaded ${MARKETING_VERSION} (${BUILD_NUMBER}). It shows in TestFlight once Apple has processed it."
+
+      - name: Remove the key and the keychain
+        if: always()
+        working-directory: .
+        run: |
+          rm -rf "$RUNNER_TEMP/asc" "$RUNNER_TEMP/dist.p12"
+          [ -n "$KEYCHAIN" ] && security delete-keychain "$KEYCHAIN" || true
+          rm -f ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision || true
+          rm -f ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/*.mobileprovision || true
+
+      - name: Keep the logs when something failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-logs
+          path: |
+            ${{ runner.temp }}/archive.log
+            ${{ runner.temp }}/upload.log
+          retention-days: 14

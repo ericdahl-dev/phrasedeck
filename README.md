@@ -198,7 +198,36 @@ Beta App Review and no App Store release. Day-to-day development still runs stra
 The Apple Distribution certificate for team `5HR8E5CWR7` must be in the login keychain (check with
 `security find-identity -v -p codesigning`).
 
-### Upload a build
+### Release by tag (the usual way)
+
+Tag a version on `main` and push the tag; `.github/workflows/release.yml` builds it and uploads it
+to TestFlight:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+- **Version and build:** the tag sets the version (`v0.2.0` becomes `0.2.0`), and the build number
+  is the run number plus the attempt (for example `12.1`), so re-running a tag uploads a new, higher
+  build. Both go on the `xcodebuild` command line; no file changes.
+- **Only from `main`** or a `release/` branch: a tag on any other commit fails at "Check the tag".
+- **Signing** uses one fixed Apple Distribution certificate, and `ios/scripts/ci_profile.py` gets
+  (or makes) the App Store profile `Phrasedeck CI App Store` through the App Store Connect API. The
+  workflow checks that the profile has CloudKit and production push before it archives. Nothing
+  makes a new certificate, so Apple's certificate limit is never reached.
+- **Secrets** (repository secrets): `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` (the `.p8`
+  contents), `DEVELOPMENT_TEAM`, `DIST_CERT_P12_BASE64` (the certificate and its key as a `.p12`,
+  run through `base64`) and `DIST_CERT_PASSWORD`. The repository is public, but only a tag pushed
+  here runs the workflow, never a pull request or a fork, so the secrets never reach outside code.
+- **If it fails**, open the run's Archive or Upload step; the logs are also attached to the run as
+  `release-logs`.
+
+**Don't mix the two upload paths within one version.** A local upload's build number (for example
+`202610251430`) is higher than any CI build number, so after one local upload at `0.2.0`, every
+tagged `v0.2.0` run fails with `bundle version must be higher`. Use the local script for a version
+no tag will ship, or set `BUILD_NUMBER` to match.
+
+### Upload a build from this Mac
 
 ```sh
 ASC_KEY_ID=… ASC_ISSUER_ID=… ASC_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_….p8 \

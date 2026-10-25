@@ -8,7 +8,8 @@ import (
 var ErrFake = errors.New("fake failure")
 
 // Fake records calls; used in tests. If Hold is set, Type blocks until it's closed,
-// which lets server tests keep the typing lock busy. If PasteErr is set, Paste returns it.
+// which lets server tests keep the typing lock busy; Entered, if set, gets a value as each
+// Type starts. If PasteErr is set, Paste returns it.
 type Fake struct {
 	mu       sync.Mutex
 	log      []string
@@ -16,6 +17,7 @@ type Fake struct {
 	PasteErr error
 	NotReady bool
 	Hold     chan struct{}
+	Entered  chan struct{}
 }
 
 // Calls returns a copy of the calls made so far.
@@ -36,6 +38,9 @@ func (f *Fake) rec(s string) error {
 }
 
 func (f *Fake) Type(t string) error {
+	if f.Entered != nil {
+		f.Entered <- struct{}{}
+	}
 	if f.Hold != nil {
 		<-f.Hold
 	}

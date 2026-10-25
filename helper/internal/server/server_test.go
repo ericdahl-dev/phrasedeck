@@ -1,0 +1,276 @@
+package server
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/auth"
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/typer"
+)
+
+const token = "test-token"
+
+type env struct {
+	t    *testing.T
+	fake *typer.Fake
+	srv  *httptest.Server
+}
+
+func newEnv(t *testing.T, fake *typer.Fake, lockWait time.Duration) *env {
+	t.Helper()
+	sum := sha256.Sum256([]byte(token))
+	p := filepath.Join(t.TempDir(), "tokens.json")
+	data := `{"devices":[{"name":"curl","sha256":"` + hex.EncodeToString(sum[:]) + `","paired_at":"2026-10-24T00:00:00Z"}]}`
+	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := auth.NewStore(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewUnstartedServer(nil)
+	srv.Config.Handler = New(Config{
+		Store:      store,
+		Typer:      fake,
+		Hostname:   "test-mac",
+		OS:         "darwin",
+		AllowHosts: []string{"127.0.0.1"},
+		LockWait:   lockWait,
+	})
+	srv.Start()
+	t.Cleanup(srv.Close)
+	return &env{t: t, fake: fake, srv: srv}
+}
+
+// post sends body to /type with the given token ("" for none) and content type.
+func (e *env) post(tok, contentType, body string) *http.Response {
+	e.t.Helper()
+	req, err := http.NewRequest("POST", e.srv.URL+"/type", bytes.NewBufferString(body))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", contentType)
+	if tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := e.srv.Client().Do(req)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	resp.Body.Close()
+	return resp
+}
+
+func (e *env) typeJSON(body string) int {
+	return e.post(token, "application/json", body).StatusCode
+}
+
+func wantCode(t *testing.T, got, want int) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("status %d, want %d", got, want)
+	}
+}
+
+func health(t *testing.T, e *env) map[string]any {
+	t.Helper()
+	resp, err := e.srv.Client().Get(e.srv.URL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	wantCode(t, resp.StatusCode, 200)
+	var h map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+func TestHealthNoAuth(t *testing.T) {
+	h := health(t, newEnv(t, &typer.Fake{}, time.Second))
+	want := map[string]any{"hostname": "test-mac", "os": "darwin", "accessibility_ok": true}
+	if !reflect.DeepEqual(h, want) {
+		t.Fatalf("got %v want %v", h, want)
+	}
+}
+
+func TestTypeNeedsAuth(t *testing.T) {
+	e := newEnv(t, &typer.Fake{}, time.Second)
+	wantCode(t, e.post("", "application/json", `{"text":"hi"}`).StatusCode, 401)
+	wantCode(t, e.post("wrong", "application/json", `{"text":"hi"}`).StatusCode, 401)
+	if len(e.fake.Calls()) != 0 {
+		t.Fatalf("typed without auth: %v", e.fake.Calls())
+	}
+}
+
+func TestTypeOK(t *testing.T) {
+	e := newEnv(t, &typer.Fake{}, time.Second)
+	wantCode(t, e.typeJSON(`{"text":"hi","enter":true}`), 200)
+	if got := e.fake.Calls(); !reflect.DeepEqual(got, []string{"type:hi", "enter"}) {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestTypeNoEnter(t *testing.T) {
+	e := newEnv(t, &typer.Fake{}, time.Second)
+	wantCode(t, e.typeJSON(`{"text":"merge ","enter":false}`), 200)
+	if got := e.fake.Calls(); !reflect.DeepEqual(got, []string{"type:merge "}) {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestTypeMultilineAutoPastes(t *testing.T) {
+	e := newEnv(t, &typer.Fake{}, time.Second)
+	wantCode(t, e.typeJSON(`{"text":"a\nb"}`), 200)
+	if got := e.fake.Calls(); !reflect.DeepEqual(got, []string{"paste:a\nb"}) {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestTypeBadJSON(t *testing.T) {
+	e := newEnv(t, &typer.Fake{}, time.Second)
+	wantCode(t, e.typeJSON(`{"text":`), 400)
+}
+
+func TestTypeBadMode(t *testing.T) {
+	e := newEnv(t, &typer.Fake{}, time.Second)
+	wantCode(t, e.typeJSON(`{"text":"hi","mode":"x"}`), 400)
+}
+
+func TestTypeTooLong(t *testing.T) {
+	e := newEnv(t, &typer.Fake{}, time.Second)
+	wantCode(t, e.typeJSON(`{"text":"`+strings.Repeat("é", 10001)+`"}`), 413)
+	if len(e.fake.Calls()) != 0 {
+		t.Fatal("typed an over-long text")
+	}
+}
+
+func TestBodyCap(t *testing.T) {
+	e := newEnv(t, &typer.Fake{}, time.Second)
+	wantCode(t, e.typeJSON(`{"text":"hi","pad":"`+strings.Repeat("x", 65*1024)+`"}`), 413)
+}
+
+func TestContentType(t *testing.T) {
+	e := newEnv(t, &typer.Fake{}, time.Second)
+	wantCode(t, e.post(token, "text/plain", `{"text":"hi"}`).StatusCode, 415)
+	wantCode(t, e.post(token, "application/json; charset=utf-8", `{"text":"hi"}`).StatusCode, 200)
+}
+
+func TestMethod(t *testing.T) {
+	e := newEnv(t, &typer.Fake{}, time.Second)
+	resp, err := e.srv.Client().Get(e.srv.URL + "/type")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	wantCode(t, resp.StatusCode, 405)
+}
+
+func TestHostAllowlist(t *testing.T) {
+	e := newEnv(t, &typer.Fake{}, time.Second)
+	for _, path := range []string{"/type", "/health"} {
+		req, _ := http.NewRequest("POST", e.srv.URL+path, bytes.NewBufferString(`{"text":"hi"}`))
+		if path == "/health" {
+			req.Method = "GET"
+		}
+		req.Host = "evil.example"
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := e.srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		wantCode(t, resp.StatusCode, 403)
+	}
+	if len(e.fake.Calls()) != 0 {
+		t.Fatal("typed for a bad Host")
+	}
+}
+
+func TestTypeNotReady(t *testing.T) {
+	e := newEnv(t, &typer.Fake{NotReady: true}, time.Second)
+	wantCode(t, e.typeJSON(`{"text":"hi"}`), 503)
+	if h := health(t, e); h["accessibility_ok"] != false {
+		t.Fatalf("accessibility_ok = %v, want false", h["accessibility_ok"])
+	}
+}
+
+func TestRateLimitAfterAuth(t *testing.T) {
+	e := newEnv(t, &typer.Fake{}, time.Second)
+	for i := 0; i < 20; i++ {
+		wantCode(t, e.post("wrong", "application/json", `{"text":"hi"}`).StatusCode, 401)
+	}
+	wantCode(t, e.typeJSON(`{"text":"hi"}`), 200)
+}
+
+func TestRateLimit(t *testing.T) {
+	e := newEnv(t, &typer.Fake{}, time.Second)
+	limited := 0
+	for i := 0; i < 15; i++ {
+		if e.typeJSON(`{"text":"hi"}`) == 429 {
+			limited++
+		}
+	}
+	if limited == 0 {
+		t.Fatal("15 rapid requests, none rate-limited")
+	}
+}
+
+func TestBusyLock409(t *testing.T) {
+	hold, entered := make(chan struct{}), make(chan struct{}, 1)
+	e := newEnv(t, &typer.Fake{Hold: hold, Entered: entered}, 50*time.Millisecond)
+	first := make(chan int)
+	go func() { first <- e.typeJSON(`{"text":"one"}`) }()
+	select {
+	case <-entered: // the first request holds the lock
+	case <-time.After(2 * time.Second):
+		t.Fatal("first request never started typing")
+	}
+	start := time.Now()
+	wantCode(t, e.typeJSON(`{"text":"two"}`), 409)
+	if waited := time.Since(start); waited < 50*time.Millisecond {
+		t.Fatalf("409 after %v, before LockWait", waited)
+	}
+	close(hold)
+	wantCode(t, <-first, 200)
+	if got := e.fake.Calls(); !reflect.DeepEqual(got, []string{"type:one"}) {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestPasteUnsupported501(t *testing.T) {
+	e := newEnv(t, &typer.Fake{PasteErr: typer.ErrPasteUnsupported}, time.Second)
+	resp, err := func() (*http.Response, error) {
+		req, _ := http.NewRequest("POST", e.srv.URL+"/type", bytes.NewBufferString(`{"text":"hi","mode":"paste"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		return e.srv.Client().Do(req)
+	}()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	wantCode(t, resp.StatusCode, 501)
+	var body map[string]string
+	json.NewDecoder(resp.Body).Decode(&body)
+	if !strings.Contains(body["error"], "not supported yet") {
+		t.Fatalf("error %q doesn't say paste isn't supported yet", body["error"])
+	}
+}
+
+func TestTyperError500(t *testing.T) {
+	e := newEnv(t, &typer.Fake{FailOn: "type:hi"}, time.Second)
+	wantCode(t, e.typeJSON(`{"text":"hi"}`), 500)
+}

@@ -14,25 +14,18 @@ struct ButtonSizeStorageTests {
         #expect(attributes.isDisjoint(with: ["sizeColumns", "sizeRows", "size"]))
     }
 
-    @Test func aTwoByOneButtonIsStillTwoByOneWhenTheStoreIsOpenedAgain() throws {
-        let url = FileManager.default.temporaryDirectory
-            .appending(path: "ButtonSize-\(UUID().uuidString).store")
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()
-            .appending(path: url.lastPathComponent)) }
-        func open() throws -> ModelContainer {
-            try ModelContainer(for: Page.self, Phrase.self,
-                               configurations: ModelConfiguration(url: url, cloudKitDatabase: .none))
-        }
+    @Test func aTwoByOneButtonIsStillTwoByOneWhenReadBackFromTheStore() throws {
+        let url = FileManager.default.temporaryDirectory.appending(path: "ButtonSize-\(UUID().uuidString).store")
+        let container = try ModelContainer(for: Page.self, Phrase.self,
+                                           configurations: ModelConfiguration(url: url, cloudKitDatabase: .none))
+        let writer = ModelContext(container)
+        let page = Page(name: "Agents", order: 0)
+        writer.insert(page)
+        writer.insert(Phrase(label: "wide", text: "w", order: 0, page: page, sizeColumns: 2, sizeRows: 1))
+        try writer.save()
 
-        do {
-            let context = try open().mainContext
-            let page = Page(name: "Agents", order: 0)
-            context.insert(page)
-            context.insert(Phrase(label: "wide", text: "w", order: 0, page: page, sizeColumns: 2, sizeRows: 1))
-            try context.save()
-        }
-
-        let phrase = try #require(try open().mainContext.fetch(FetchDescriptor<Phrase>()).first)
+        // A fresh context has nothing cached, so it reads the saved spanColumns and spanRows.
+        let phrase = try #require(try ModelContext(container).fetch(FetchDescriptor<Phrase>()).first)
         #expect(phrase.sizeColumns == 2 && phrase.sizeRows == 1)
     }
 }

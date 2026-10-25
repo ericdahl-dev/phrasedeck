@@ -35,7 +35,7 @@ struct PhrasedeckApp: App {
         } else {
             _model = State(initialValue: AppModel(
                 store: HelperStore(), tokens: TokenStore(), device: UIDevice.current.name,
-                makeClient: { helper, token in HelperClient(helper: helper, token: token) }))
+                makeClient: { helper, token, route in HelperClient(helper: helper, token: token, route: route) }))
         }
     }
 

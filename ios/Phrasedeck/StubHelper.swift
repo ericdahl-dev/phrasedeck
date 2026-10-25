@@ -43,6 +43,6 @@ final class StubHelper {
         try? store.add(mac)
         store.selectedHelperID = mac.id
         let api = API(probe: probe)
-        return AppModel(store: store, tokens: tokens, device: "UI test") { _, _ in api }
+        return AppModel(store: store, tokens: tokens, device: "UI test") { _, _, _ in api }
     }
 }

@@ -90,7 +90,13 @@ struct HelperClient: Sendable {
         }
     }
 
-    // shortcut: never shrinks; there is one entry per paired computer's certificate.
+    /// Drops a pin's session and cancels its connections, when a computer's
+    /// fingerprint changes or it's deleted.
+    static func forgetLANSession(pin: String) {
+        lanSessions.withLock { $0.removeValue(forKey: pin) }?.invalidateAndCancel()
+    }
+
+    // One entry per paired computer's certificate; forgetLANSession removes stale ones.
     private static let lanSessions = Mutex<[String: URLSession]>([:])
 
     func health() async throws -> Health {

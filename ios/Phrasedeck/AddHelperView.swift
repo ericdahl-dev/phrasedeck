@@ -115,7 +115,7 @@ struct AddHelperView: View {
     private func pair(_ link: PairLink) {
         working = true
         Task {
-            error = await model.addHelper(host: link.host, port: link.port, code: link.code)
+            error = await model.addHelper(from: link)
             working = false
             if error == nil { dismiss() } else { confirming = nil }
         }

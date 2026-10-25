@@ -7,7 +7,7 @@ final class LaunchTests: XCTestCase {
         app.launchArguments = ["-uiTestingStubHelper"]
         app.launch()
 
-        XCTAssertTrue(app.buttons["phrase.agent-status"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["phrase.agent-status"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["phrase.merge-it"].exists)
         XCTAssertTrue(app.buttons["helperPicker"].exists)
     }

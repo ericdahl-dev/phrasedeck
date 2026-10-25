@@ -14,20 +14,25 @@ struct PhraseDraft {
     var confirm = false
     var colorName = "blue"
     var page: Page?
+    var spanColumns = 1
+    var spanRows = 1
 
     init(label: String = "", text: String = "", pressEnter: Bool = false, confirm: Bool = false,
-         colorName: String = "blue", page: Page? = nil) {
+         colorName: String = "blue", page: Page? = nil, spanColumns: Int = 1, spanRows: Int = 1) {
         self.label = label
         self.text = text
         self.pressEnter = pressEnter
         self.confirm = confirm
         self.colorName = colorName
         self.page = page
+        self.spanColumns = spanColumns
+        self.spanRows = spanRows
     }
 
     init(_ phrase: Phrase) {
         self.init(label: phrase.label, text: phrase.text, pressEnter: phrase.pressEnter,
-                  confirm: phrase.confirm, colorName: phrase.colorName, page: phrase.page)
+                  confirm: phrase.confirm, colorName: phrase.colorName, page: phrase.page,
+                  spanColumns: phrase.spanColumns, spanRows: phrase.spanRows)
     }
 
     var isValid: Bool { !label.trimmingCharacters(in: .whitespaces).isEmpty && !text.isEmpty }
@@ -69,7 +74,8 @@ enum Deck {
     static func addPhrase(_ draft: PhraseDraft, to page: Page, in context: ModelContext) -> Phrase {
         let phrase = Phrase(label: draft.label.trimmingCharacters(in: .whitespaces), text: draft.text,
                             pressEnter: draft.pressEnter, confirm: draft.confirm,
-                            colorName: draft.colorName, order: page.sortedPhrases.count, page: page)
+                            colorName: draft.colorName, order: page.sortedPhrases.count, page: page,
+                            spanColumns: draft.spanColumns, spanRows: draft.spanRows)
         context.insert(phrase)
         return phrase
     }
@@ -81,6 +87,8 @@ enum Deck {
         phrase.pressEnter = draft.pressEnter
         phrase.confirm = draft.confirm
         phrase.colorName = draft.colorName
+        phrase.spanColumns = draft.spanColumns
+        phrase.spanRows = draft.spanRows
         if let target = draft.page, target !== phrase.page {
             let old = phrase.page
             phrase.order = target.sortedPhrases.count

@@ -27,6 +27,11 @@ jobs:
           if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi
       - run: go vet ./...
       - run: go test -race ./...
+      - name: Linux package builds and passes its check (#78)
+        run: |
+          GOTOOLCHAIN=auto go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0
+          packaging/build-linux.sh 0.0.0-ci amd64 "$RUNNER_TEMP/pkg"
+          packaging/check-deb.sh "$RUNNER_TEMP/pkg/phrased_0.0.0-ci_amd64.deb"
 
   macos:
     runs-on: macos-latest

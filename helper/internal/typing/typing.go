@@ -3,15 +3,13 @@
 package typing
 
 import (
+	"errors"
 	"time"
 	"unicode/utf8"
 
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/plan"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/typer"
 )
-
-// NotReadyHelp says how to make a backend that isn't Ready able to type.
-const NotReadyHelp = "grant Accessibility to phrased (System Settings > Privacy & Security > Accessibility)"
 
 // MaxText caps the text of one phrase, in runes.
 const MaxText = 10000
@@ -44,10 +42,10 @@ func New(backend typer.Backend, lockWait time.Duration) *Typist {
 }
 
 // Ready reports whether the backend can type.
-func (t *Typist) Ready() bool { return t.backend.Ready() }
+func (t *Typist) Ready() bool { return t.backend.Problem() == "" }
 
 // Type types text in mode ("" is auto), then Enter if enter is set. The error is set only
-// for Failed.
+// for NotReady (the backend's problem) and Failed (what went wrong).
 func (t *Typist) Type(text string, enter bool, mode plan.Mode) (Outcome, error) {
 	if !mode.Valid() {
 		return BadMode, nil
@@ -55,8 +53,8 @@ func (t *Typist) Type(text string, enter bool, mode plan.Mode) (Outcome, error) 
 	if utf8.RuneCountInString(text) > MaxText {
 		return TooLong, nil
 	}
-	if !t.backend.Ready() {
-		return NotReady, nil
+	if problem := t.backend.Problem(); problem != "" {
+		return NotReady, errors.New(problem)
 	}
 	timer := time.NewTimer(t.wait)
 	defer timer.Stop()

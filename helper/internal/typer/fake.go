@@ -52,4 +52,9 @@ func (f *Fake) Paste(t string) error {
 
 func (f *Fake) ShiftEnter() error { return f.rec("shift-enter") }
 func (f *Fake) Enter() error      { return f.rec("enter") }
-func (f *Fake) Ready() bool       { return !f.NotReady }
+func (f *Fake) Problem() string {
+	if f.NotReady {
+		return "the fake backend is not ready"
+	}
+	return ""
+}

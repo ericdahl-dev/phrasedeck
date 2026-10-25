@@ -60,11 +60,31 @@ func TestBusyAndFailedAnswersAreAnErrorObject(t *testing.T) {
 	}
 }
 
+// The 503 says this backend's problem, so Linux isn't told to grant macOS Accessibility.
+func TestNotReadySaysTheBackendsProblem(t *testing.T) {
+	e := newEnv(t, &typer.Fake{NotReady: true}, time.Second)
+	req, _ := http.NewRequest("POST", e.srv.URL+"/type", bytes.NewBufferString(`{"text":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := e.srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct{ Error string }
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if want := "can't type yet: the fake backend is not ready"; resp.StatusCode != 503 || body.Error != want {
+		t.Fatalf("status %d error %q; want 503 %q", resp.StatusCode, body.Error, want)
+	}
+}
+
 // An outcome added to typing without a row here would answer status 0, which panics in
 // WriteHeader.
 func TestEveryTypingOutcomeHasAnAnswer(t *testing.T) {
 	for o := typing.Outcome(0); o < typing.NumOutcomes; o++ {
-		if status, _ := typeAnswer(o, errors.New("x")); status == 0 {
+		if status, _ := typeAnswer(o, errors.New("x")); status == 0 || status == http.StatusOK && o != typing.Typed {
 			t.Errorf("outcome %v has no answer", o)
 		}
 	}

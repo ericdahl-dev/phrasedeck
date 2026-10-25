@@ -121,7 +121,7 @@ the `{"error": "..."}` text when there is one. Every refusal has that body.
 | 415 | not `application/json` | no | red |
 | 429 | rate-limited | no | red |
 | 500 | typing failed partway | **maybe** | amber, "it may have typed" |
-| 503 | can't type yet (Accessibility not granted) | no | red |
+| 503 | can't type yet; the error names the fix for this computer (Accessibility, a missing Wayland tool, or no display) | no | red |
 
 A send that times out or drops after the request went out is also "it may have typed".
 

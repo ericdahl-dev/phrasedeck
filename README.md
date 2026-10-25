@@ -161,7 +161,7 @@ Status codes:
 | 415 | not `application/json` |
 | 429 | over 10 requests a second on `/type`, or about 1 a second on `/pair` |
 | 500 | typing failed partway; some keys may have been typed |
-| 503 | Accessibility not granted |
+| 503 | can't type yet: Accessibility not granted (macOS), or `wtype`/`wl-clipboard` missing or no `WAYLAND_DISPLAY` (Linux); the error says which |
 
 ### Flags
 

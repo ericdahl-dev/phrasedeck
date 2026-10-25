@@ -121,16 +121,17 @@ func TestWaylandPasteChordFailureStillRestores(t *testing.T) {
 	}
 }
 
-func TestWaylandReady(t *testing.T) {
+// Problem is what the 503 and the startup log show, so it names the Linux fix, not macOS's.
+func TestWaylandProblemSaysWhatIsMissing(t *testing.T) {
 	w := newTestWayland(&fakeRunner{})
-	if !w.Ready() {
-		t.Fatal("not ready with wtype and a display")
+	if p := w.Problem(); p != "" {
+		t.Fatalf("problem %q with every tool and a display", p)
 	}
 	w.getenv = func(string) string { return "" }
-	if w.Ready() {
-		t.Fatal("ready without WAYLAND_DISPLAY")
+	if p := w.Problem(); !strings.Contains(p, "WAYLAND_DISPLAY") {
+		t.Fatalf("no display: problem %q doesn't name WAYLAND_DISPLAY", p)
 	}
-	for _, missing := range []string{"wtype", "wl-copy", "wl-paste"} {
+	for missing, pkg := range map[string]string{"wtype": "wtype", "wl-copy": "wl-clipboard", "wl-paste": "wl-clipboard"} {
 		w = newTestWayland(&fakeRunner{})
 		w.lookPath = func(name string) (string, error) {
 			if name == missing {
@@ -138,8 +139,8 @@ func TestWaylandReady(t *testing.T) {
 			}
 			return "/usr/bin/" + name, nil
 		}
-		if w.Ready() {
-			t.Errorf("ready without %s", missing)
+		if p := w.Problem(); !strings.Contains(p, missing) || !strings.Contains(p, pkg) {
+			t.Errorf("without %s: problem %q doesn't name it and its package %s", missing, p, pkg)
 		}
 	}
 }

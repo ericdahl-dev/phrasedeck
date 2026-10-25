@@ -16,4 +16,4 @@ func (none) Type(string) error  { return ErrNoBackend }
 func (none) Paste(string) error { return ErrNoBackend }
 func (none) ShiftEnter() error  { return ErrNoBackend }
 func (none) Enter() error       { return ErrNoBackend }
-func (none) Ready() bool        { return false }
+func (none) Problem() string    { return "this OS has no typing backend" }

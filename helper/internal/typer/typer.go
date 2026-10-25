@@ -10,8 +10,8 @@ type Backend interface {
 	Paste(text string) error
 	ShiftEnter() error
 	Enter() error
-	// Ready reports whether the backend can type (e.g. macOS Accessibility granted).
-	Ready() bool
+	// Problem says why the backend can't type and how to fix it, or "" when it can.
+	Problem() string
 }
 
 // Run sends steps to b in order and stops at the first error.

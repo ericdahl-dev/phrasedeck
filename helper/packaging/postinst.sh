@@ -1,0 +1,4 @@
+#!/bin/sh
+# Installing enables nothing: each user who wants the Helper turns it on once (#78).
+echo "phrased is installed. To start it now and at every login, run as your user (not root):"
+echo "  systemctl --user enable --now phrased"

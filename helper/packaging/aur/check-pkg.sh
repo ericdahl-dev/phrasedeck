@@ -22,6 +22,11 @@ for dep in wtype wl-clipboard; do
 	echo "$depends" | grep -qw "$dep" || fail "doesn't depend on $dep (Depends On: $depends)"
 done
 
+optdepends=$(pacman -Qip "$pkg" | sed -n '/^Optional Deps/,/^Required By/p')
+for dep in ydotool xdotool xclip; do
+	echo "$optdepends" | grep -qw "$dep" || fail "doesn't list $dep as an optional dependency (GNOME/KDE, X11; #84)"
+done
+
 unit=$(tar -xOf "$pkg" usr/lib/systemd/user/phrased.service)
 echo "$unit" | grep -qx 'ExecStart=/usr/bin/phrased' || fail "the unit doesn't run /usr/bin/phrased"
 echo "$unit" | grep -qx 'StartLimitBurst=3' || fail "the unit has no start limit"

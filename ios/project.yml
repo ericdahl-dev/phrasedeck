@@ -19,6 +19,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.ericdahl.phrasedeck
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
+        # iCloud sync (#10) stays off until the container iCloud.dev.ericdahl.phrasedeck
+        # exists. To turn it on, set this to Phrasedeck/Phrasedeck.entitlements.
+        CODE_SIGN_ENTITLEMENTS: ""
     info:
       path: Phrasedeck/Info.plist
       properties:
@@ -39,7 +42,10 @@ targets:
               NSExceptionAllowsInsecureHTTPLoads: true
         # No encryption beyond what the OS provides (TestFlight export compliance).
         ITSAppUsesNonExemptEncryption: false
-    # No iCloud capability or entitlement until the sync slice (#10).
+        # Not empty once the entitlements above are set; the app syncs only then.
+        PhrasedeckCloudSync: $(CODE_SIGN_ENTITLEMENTS)
+        # CloudKit wakes the app with a silent push when the other device changes the deck.
+        UIBackgroundModes: [remote-notification]
   PhrasedeckTests:
     type: bundle.unit-test
     platform: iOS

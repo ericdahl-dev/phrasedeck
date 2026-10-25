@@ -1,3 +1,4 @@
+import CoreData
 import SwiftData
 import SwiftUI
 
@@ -46,6 +47,9 @@ struct DeckView: View {
         }
         .sheet(item: $editing) { PhraseEditor(target: $0) }
         .sheet(isPresented: $editingPages) { PageEditor() }
+        // The other device's starter deck can arrive after this one seeded its own.
+        .onReceive(NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)
+            .receive(on: RunLoop.main)) { _ in try? Seed.mergeDuplicates(context) }
     }
 
     private func addTile(_ page: Page) -> some View {

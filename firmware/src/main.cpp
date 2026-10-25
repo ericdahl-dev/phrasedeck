@@ -68,7 +68,12 @@ void setup() {
     Serial.begin(115200);
     Serial.println("phrasedeck panel: boot");
     Wire.begin(board::I2C_SDA, board::I2C_SCL, board::I2C_HZ);
-    panel_mcu::begin();
+    // The companion chip at 0x30 can come up after the ESP32 (seen at power-on on a V1.4).
+    // Elecrow's V1.3+ example retries, sending the touch-activate byte, until it answers.
+    for (int i = 0; i < 20 && !panel_mcu::begin(); ++i) {
+        panel_mcu::activateTouch();
+        delay(100);
+    }
     if (!display_init()) {
         Serial.println("phrasedeck panel: no display, halting");
         while (true) delay(1000);

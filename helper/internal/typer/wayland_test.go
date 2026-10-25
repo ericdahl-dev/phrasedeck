@@ -53,6 +53,8 @@ func (f *fakeRunner) start(name string, args []string, stdin string) (func(time.
 
 func newTestWayland(f *fakeRunner) *Wayland {
 	return &Wayland{
+		keys:     wtypeKeys,
+		clip:     waylandClip,
 		run:      f,
 		lookPath: func(string) (string, error) { return "/usr/bin/wtype", nil },
 		getenv:   func(string) string { return "wayland-1" },

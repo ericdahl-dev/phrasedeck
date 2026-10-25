@@ -112,8 +112,10 @@ curl -s http://<tailnet-name>:47811/type \
 
 - `enter: true` presses Enter after the text; leave it out to type without sending.
 - `mode` is `auto` (the default), `type` or `paste`. `auto` pastes any text with a newline and
-  anything over 300 characters, and types the rest. `type` types newlines as Shift+Enter. On the
-  Mac, pasting isn't supported yet (#4), so those requests get 501.
+  anything over 300 characters, and types the rest. `type` types newlines as Shift+Enter.
+- On the Mac, a paste puts the phrase on the clipboard, sends Cmd+V, and about half a second
+  later puts back everything that was on the clipboard before (images and rich text too). If you
+  copy something in that half second, your new copy is kept instead.
 - `GET /health` needs no token and returns `hostname`, `os` and `accessibility_ok`.
 
 Status codes:
@@ -128,7 +130,7 @@ Status codes:
 | 413 | body over 64 KB, or text over 10,000 characters |
 | 415 | not `application/json` |
 | 429 | over 10 requests a second on `/type`, or about 1 a second on `/pair` |
-| 501 | paste not supported yet on this computer |
+| 501 | this computer's backend can't paste |
 | 503 | Accessibility not granted |
 
 ### Flags

@@ -14,10 +14,9 @@ var typeAnswers = map[typing.Outcome]struct {
 	status int
 	msg    string
 }{
-	typing.BadMode:  {http.StatusBadRequest, `mode must be "auto", "type" or "paste"`},
-	typing.TooLong:  {http.StatusRequestEntityTooLarge, "text over 10,000 characters"},
-	typing.NotReady: {http.StatusServiceUnavailable, "can't type yet: " + typing.NotReadyHelp},
-	typing.Busy:     {http.StatusConflict, "busy typing another phrase"},
+	typing.BadMode: {http.StatusBadRequest, `mode must be "auto", "type" or "paste"`},
+	typing.TooLong: {http.StatusRequestEntityTooLarge, "text over 10,000 characters"},
+	typing.Busy:    {http.StatusConflict, "busy typing another phrase"},
 }
 
 // typeAnswer is the status and message for an outcome; err is Failed's cause.
@@ -25,6 +24,8 @@ func typeAnswer(outcome typing.Outcome, err error) (int, string) {
 	switch outcome {
 	case typing.Typed:
 		return http.StatusOK, ""
+	case typing.NotReady:
+		return http.StatusServiceUnavailable, "can't type yet: " + err.Error()
 	case typing.Failed:
 		return http.StatusInternalServerError, "typing failed: " + err.Error()
 	}

@@ -2,6 +2,7 @@ package typer
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -68,15 +69,19 @@ func (w *Wayland) Paste(text string) error {
 	return chordErr
 }
 
-// Ready reports whether a Wayland display is set and every tool Type and Paste use is
-// installed.
-func (w *Wayland) Ready() bool {
-	for _, tool := range []string{"wtype", "wl-copy", "wl-paste"} {
-		if _, err := w.lookPath(tool); err != nil {
-			return false
+// Problem names a tool Type or Paste needs that isn't installed, or a missing display.
+func (w *Wayland) Problem() string {
+	for _, tool := range []struct{ name, pkg string }{
+		{"wtype", "wtype"}, {"wl-copy", "wl-clipboard"}, {"wl-paste", "wl-clipboard"},
+	} {
+		if _, err := w.lookPath(tool.name); err != nil {
+			return fmt.Sprintf("%s isn't installed (package %s)", tool.name, tool.pkg)
 		}
 	}
-	return w.getenv("WAYLAND_DISPLAY") != ""
+	if w.getenv("WAYLAND_DISPLAY") == "" {
+		return "WAYLAND_DISPLAY isn't set; run phrased inside your Wayland session"
+	}
+	return ""
 }
 
 type execRunner struct{}

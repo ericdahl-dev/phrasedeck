@@ -160,8 +160,14 @@ func (Mac) Paste(text string) error {
 	return pasteVia(nil, text, func() { C.postKey(kVKANSIV, C.kCGEventFlagMaskCommand) }, pasteRestoreDelay)
 }
 
-// Ready reports whether macOS lets this binary post events. It never prompts.
-func (Mac) Ready() bool { return C.canPost() != 0 }
+// Problem says to grant Accessibility unless macOS lets this binary post events. It never
+// prompts.
+func (Mac) Problem() string {
+	if C.canPost() != 0 {
+		return ""
+	}
+	return "grant Accessibility to phrased (System Settings > Privacy & Security > Accessibility)"
+}
 
 // pasteboard is an NSPasteboard; nil is the general one.
 type pasteboard struct{ p unsafe.Pointer }

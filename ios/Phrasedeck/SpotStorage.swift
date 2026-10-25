@@ -95,6 +95,34 @@ extension Deck {
         return shifted
     }
 
+    /// A VoiceOver move action (spec section 11): one Square that way, as a drop there. Returns
+    /// where the Button ended up and how many others shifted, for the announcement.
+    static func nudge(_ phrase: Phrase, _ nudge: Arrangement.Nudge, on page: Page, width: LayoutWidth,
+                      columns: Int, in context: ModelContext) throws -> (to: Spot, shifted: Int) {
+        let shown = layout(of: page, width: width, columns: columns, in: context)
+        guard let from = shown.first(where: { $0.id == phrase.uid }) else { return (Spot(column: 0, row: 0), 0) }
+        let shifted = try move(phrase, to: nudge.target(from: from), on: page, width: width, columns: columns,
+                               in: context)
+        let to = layout(of: page, width: width, columns: columns, in: context).first { $0.id == phrase.uid }
+        return (to.map { Spot(column: $0.x, row: $0.y) } ?? nudge.target(from: from), shifted)
+    }
+
+    static func moveAnnouncement(to spot: Spot, shifted: Int) -> String {
+        let others = switch shifted {
+        case 0: ""
+        case 1: ". 1 Button moved"
+        default: ". \(shifted) Buttons moved"
+        }
+        return "Moved to row \(spot.row + 1), column \(spot.column + 1)\(others)"
+    }
+
+    /// Move to Page: the Button goes to the end of `page` (spec rule 8).
+    static func moveToPage(_ phrase: Phrase, _ page: Page) throws {
+        var draft = PhraseDraft(phrase)
+        draft.page = page
+        try save(draft, into: phrase)
+    }
+
     /// Deletes the Buttons' Spots on every Layout width. The caller saves.
     static func deleteSpots(of phrases: [Phrase], in context: ModelContext) {
         let uids = Set(phrases.map(\.uid))

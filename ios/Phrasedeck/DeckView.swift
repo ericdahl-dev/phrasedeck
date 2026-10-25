@@ -199,27 +199,20 @@ struct DeckView: View {
         PhraseButton.ArrangeRole(
             spot: Spot(column: shown.x, row: shown.y),
             nudges: Arrangement.nudges(for: shown, columns: columns),
-            otherPages: pages.filter { $0 !== page }.map(\.name),
+            otherPages: pages.filter { $0 !== page },
             nudge: { nudge in
-                let target = nudge.target(from: shown)
                 do {
-                    let shifted = try withAnimation(.snappy) {
-                        try Deck.move(phrase, to: target, on: page, width: layoutWidth, columns: columns, in: context)
+                    let result = try withAnimation(.snappy) {
+                        try Deck.nudge(phrase, nudge, on: page, width: layoutWidth, columns: columns, in: context)
                     }
-                    let to = Deck.layout(of: page, width: layoutWidth, columns: columns, in: context)
-                        .first { $0.id == phrase.uid }.map { Spot(column: $0.x, row: $0.y) } ?? target
-                    let others = shifted == 0 ? "" : shifted == 1 ? ". 1 Button moved" : ". \(shifted) Buttons moved"
                     AccessibilityNotification.Announcement(
-                        "Moved to row \(to.row + 1), column \(to.column + 1)\(others)").post()
+                        Deck.moveAnnouncement(to: result.to, shifted: result.shifted)).post()
                 } catch {
                     saveError = error.localizedDescription
                 }
             },
-            moveToPage: { name in
-                guard let target = pages.first(where: { $0.name == name && $0 !== page }) else { return }
-                var draft = PhraseDraft(phrase)
-                draft.page = target
-                do { try Deck.save(draft, into: phrase) } catch { saveError = error.localizedDescription }
+            moveToPage: { target in
+                do { try Deck.moveToPage(phrase, target) } catch { saveError = error.localizedDescription }
             })
     }
 

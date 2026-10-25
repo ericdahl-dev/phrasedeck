@@ -58,4 +58,48 @@ struct ArrangeDeckTests {
         #expect(shifted == 1)
         #expect(shown(page) == ["c": [0, 0], "b": [1, 0], "a": [2, 0]])
     }
+
+    // MARK: The VoiceOver move actions (spec section 11)
+
+    @Test func moveRightTakesTheNextSquareAndShiftsWhatWasThere() throws {
+        let (page, p) = try page(["a", "b", "c", "d"])
+
+        let result = try Deck.nudge(p[0], .right, on: page, width: .compact, columns: 3, in: context)
+
+        #expect(result.to == Spot(column: 1, row: 0))
+        #expect(result.shifted == 1)
+        #expect(shown(page) == ["a": [1, 0], "b": [1, 1], "c": [2, 0], "d": [0, 1]])
+    }
+
+    @Test func moveDownCanOpenANewRow() throws {
+        let (page, p) = try page(["a", "b"])
+
+        let result = try Deck.nudge(p[1], .down, on: page, width: .compact, columns: 3, in: context)
+
+        #expect(result.to == Spot(column: 1, row: 1))
+        #expect(result.shifted == 0)
+        #expect(shown(page) == ["a": [0, 0], "b": [1, 1]])
+    }
+
+    @Test func theAnnouncementSaysWhereItWentAndHowManyMoved() {
+        #expect(Deck.moveAnnouncement(to: Spot(column: 2, row: 1), shifted: 0) == "Moved to row 2, column 3")
+        #expect(Deck.moveAnnouncement(to: Spot(column: 0, row: 0), shifted: 1)
+            == "Moved to row 1, column 1. 1 Button moved")
+        #expect(Deck.moveAnnouncement(to: Spot(column: 0, row: 0), shifted: 2)
+            == "Moved to row 1, column 1. 2 Buttons moved")
+    }
+
+    /// Move to Page names the Page itself, so two Pages with the same name can't be mixed up. The
+    /// Button goes to the end of that Page (spec rule 8).
+    @Test func moveToPageGoesToThatPageEvenWhenTwoShareAName() throws {
+        let (page, p) = try page(["a"])
+        let twinA = try Deck.addPage(named: "Twin", in: context)
+        let twinB = try Deck.addPage(named: "Twin", in: context)
+        try Deck.addPhrase(PhraseDraft(label: "x", text: "x"), to: twinB, in: context)
+
+        try Deck.moveToPage(p[0], twinB)
+
+        #expect(twinB.sortedPhrases.map(\.label) == ["x", "a"])
+        #expect(twinA.sortedPhrases.isEmpty && page.sortedPhrases.isEmpty)
+    }
 }

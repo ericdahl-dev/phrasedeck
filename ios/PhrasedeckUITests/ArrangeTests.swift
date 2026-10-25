@@ -48,6 +48,25 @@ final class ArrangeTests: XCTestCase {
         button.tap()
         XCTAssertTrue(app.staticTexts["stub.sendCount"].waitForLabel("1"))
     }
+
+    /// Leaving the app ends Arrange mode, so coming back never finds Buttons that won't type.
+    @MainActor
+    func testLeavingTheAppEndsArrangeMode() {
+        let app = launch(arrange: true)
+        let button = app.buttons["phrase.agent-status"]
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+        button.press(forDuration: 1)
+        let editDeck = app.buttons["Edit Deck"]
+        XCTAssertTrue(editDeck.waitForExistence(timeout: 20))
+        editDeck.tap()
+        XCTAssertTrue(app.buttons["arrange.done"].waitForExistence(timeout: 20))
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+
+        XCTAssertTrue(app.buttons["deck.add"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["arrange.done"].exists)
+    }
 }
 
 private extension XCUIElement {

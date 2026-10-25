@@ -16,10 +16,10 @@ struct PhraseButton: View {
         /// Where it's shown, for VoiceOver's "Row r, column c".
         let spot: Spot
         let nudges: [Arrangement.Nudge]
-        /// The other Pages, by name, for Move to Page.
-        let otherPages: [String]
+        /// The other Pages, for Move to Page.
+        let otherPages: [Page]
         let nudge: (Arrangement.Nudge) -> Void
-        let moveToPage: (String) -> Void
+        let moveToPage: (Page) -> Void
     }
 
     @Environment(AppModel.self) private var model
@@ -72,8 +72,8 @@ struct PhraseButton: View {
                 ForEach(arrange.nudges, id: \.self) { nudge in
                     Button(nudge.actionName) { arrange.nudge(nudge) }
                 }
-                ForEach(arrange.otherPages, id: \.self) { page in
-                    Button("Move to \(page)") { arrange.moveToPage(page) }
+                ForEach(arrange.otherPages) { page in
+                    Button("Move to \(page.name)") { arrange.moveToPage(page) }
                 }
             }
         }

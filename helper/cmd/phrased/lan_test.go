@@ -112,3 +112,25 @@ func TestLANHostNames(t *testing.T) {
 		t.Fatalf("lanHosts = %v, want %v", got, want)
 	}
 }
+
+func TestBonjourAdvertisesOnlyLANInterfacesAndNoSecrets(t *testing.T) {
+	addrs := []lan.Addr{
+		{IP: []byte{192, 168, 1, 20}, Iface: "en0"},
+		{IP: []byte{192, 168, 1, 21}, Iface: "en0"},
+		{IP: []byte{10, 0, 0, 5}, Iface: "en7"},
+	}
+	cfg := bonjourConfig("Lib-2833.lan", "lib-2833.tail1234.ts.net", 47812, addrs)
+	if cfg.Type != "_phrasedeck._tcp" || cfg.Port != 47812 || cfg.Host != "phrased-lib-2833" || cfg.Name != "lib-2833" {
+		t.Fatalf("config %+v", cfg)
+	}
+	if !reflect.DeepEqual(cfg.Ifaces, []string{"en0", "en7"}) {
+		t.Fatalf("ifaces %v, want only the LAN interfaces, once each", cfg.Ifaces)
+	}
+	want := map[string]string{"v": "1", "ts": "lib-2833.tail1234.ts.net", "port": "47812"}
+	if !reflect.DeepEqual(cfg.Text, want) {
+		t.Fatalf("TXT %v, want exactly %v", cfg.Text, want)
+	}
+	if off := bonjourConfig("mac", "", 47812, addrs); off.Text["ts"] != "" || len(off.Text) != 2 {
+		t.Fatalf("with Tailscale off, TXT %v should leave out ts", off.Text)
+	}
+}

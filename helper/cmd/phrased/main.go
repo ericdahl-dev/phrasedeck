@@ -196,7 +196,7 @@ func run(o options) error {
 	go func() { errc <- servers[0].Serve(ln) }()
 	if lanLn != nil {
 		go func() { errc <- servers[1].ServeTLS(lanLn, "", "") }()
-		_ = tsName // advertised over Bonjour in the next commit
+		go advertise(ctx, bonjourConfig(hostname, tsName, o.lanPort, lanAddrs))
 	}
 	select {
 	case err := <-errc:

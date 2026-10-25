@@ -109,7 +109,8 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :Entitlements' "$RUNNER_TEMP/profile.plist"
           [ "$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:aps-environment' "$RUNNER_TEMP/profile.plist")" = production ] \
             || { echo "::error::The profile has no production aps-environment. Turn on Push Notifications for the App ID."; exit 1; }
-          /usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.icloud-services' "$RUNNER_TEMP/profile.plist" | grep -q CloudKit \
+          # Apple writes icloud-services as "*" (all services) or as an array naming CloudKit.
+          /usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.icloud-services' "$RUNNER_TEMP/profile.plist" | grep -qE '^\*$|CloudKit' \
             || { echo "::error::The profile has no CloudKit. Turn on iCloud (CloudKit) for the App ID, then re-run."; exit 1; }
 
       - name: Generate the project

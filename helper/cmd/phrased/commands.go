@@ -5,9 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/url"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -16,7 +14,7 @@ import (
 	"time"
 
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/auth"
-	"github.com/ericdahl-dev/phrasedeck/helper/internal/lan"
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/confdir"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/tailnet"
 	"rsc.io/qr"
 )
@@ -44,33 +42,6 @@ func pairURL(host string, port int, code, fp, lanIP string, lanPort int) string 
 		q.Set("lanPort", strconv.Itoa(lanPort))
 	}
 	return "phrasedeck://pair?" + q.Encode()
-}
-
-// lanAddr is the LAN address and port the running helper wrote to <config>/lan-addr, or
-// "" and 0.
-func lanAddr(config string) (string, int) {
-	b, err := os.ReadFile(filepath.Join(config, lanAddrFile))
-	if err != nil {
-		return "", 0
-	}
-	ip, p, err := net.SplitHostPort(strings.TrimSpace(string(b)))
-	port, perr := strconv.Atoi(p)
-	if err != nil || perr != nil || port <= 0 || port > 65535 {
-		return "", 0
-	}
-	return ip, port
-}
-
-// runningPort is the port the helper wrote to <config>/port when it started, or the default.
-func runningPort(config string) int {
-	b, err := os.ReadFile(filepath.Join(config, "port"))
-	if err != nil {
-		return defaultPort
-	}
-	if p, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && p > 0 && p < 65536 {
-		return p
-	}
-	return defaultPort
 }
 
 // writeQR prints text as a QR code using half-block characters, two modules per line, with a
@@ -137,14 +108,14 @@ func command(args []string, home string, out io.Writer) (bool, error) {
 	if err := fs.Parse(args[1:]); err != nil {
 		return true, err
 	}
-	tokens := filepath.Join(*config, "tokens.json")
+	dir := confdir.New(*config)
 
 	switch name {
 	case "pair":
 		if fs.NArg() != 0 {
 			return true, errors.New("usage: phrased pair [-config dir]")
 		}
-		code, err := auth.OpenWindow(filepath.Join(*config, "pairing.json"), time.Now())
+		code, err := dir.OpenPairingWindow(time.Now())
 		if err != nil {
 			return true, err
 		}
@@ -156,10 +127,13 @@ func command(args []string, home string, out io.Writer) (bool, error) {
 		if err == nil {
 			host, hostErr = tailnet.PairHost(status)
 		}
-		lanIP, lanPort := lanAddr(*config)
+		port, lanIP, lanPort := dir.Advertised()
+		if port == 0 {
+			port = defaultPort
+		}
 		fp := ""
 		if lanIP != "" {
-			fp, _ = lan.Fingerprint(*config)
+			fp, _ = dir.Fingerprint()
 		}
 		if hostErr != nil && lanIP != "" && fp != "" {
 			// Tailscale is off: the app pairs over the pinned LAN route alone.
@@ -169,9 +143,8 @@ func command(args []string, home string, out io.Writer) (bool, error) {
 			fmt.Fprintf(out, "No QR code: can't read this machine's tailnet name (%v). Type the name and code in the app.\n", hostErr)
 			return true, nil
 		}
-		port := 0
-		if host != "" {
-			port = runningPort(*config)
+		if host == "" {
+			port = 0
 		}
 		link := pairURL(host, port, code, fp, lanIP, lanPort)
 		fmt.Fprintln(out, "\nOr scan this in phrasedeck (Add a computer > Scan QR code):")
@@ -180,7 +153,7 @@ func command(args []string, home string, out io.Writer) (bool, error) {
 		}
 		fmt.Fprintln(out, link)
 	case "devices":
-		store, err := auth.NewStore(tokens)
+		store, err := dir.Store()
 		if err != nil {
 			return true, err
 		}
@@ -195,7 +168,7 @@ func command(args []string, home string, out io.Writer) (bool, error) {
 		if fs.NArg() != 1 {
 			return true, errors.New("usage: phrased revoke [-config dir] <name>")
 		}
-		store, err := auth.NewStore(tokens)
+		store, err := dir.Store()
 		if err != nil {
 			return true, err
 		}

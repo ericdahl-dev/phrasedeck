@@ -13,7 +13,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"net/netip"
 	"os"
@@ -21,13 +20,12 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
 
-	"github.com/ericdahl-dev/phrasedeck/helper/internal/auth"
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/confdir"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/lan"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/server"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/tailnet"
@@ -105,7 +103,8 @@ func main() {
 }
 
 func run(o options) error {
-	store, err := auth.NewStore(filepath.Join(o.config, "tokens.json"))
+	dir := confdir.New(o.config)
+	store, err := dir.Store()
 	if err != nil {
 		return err
 	}
@@ -123,7 +122,7 @@ func run(o options) error {
 
 	cfg := server.Config{
 		Store:    store,
-		Pairer:   auth.NewPairer(filepath.Join(o.config, "pairing.json"), store),
+		Pairer:   dir.Pairer(store),
 		Typer:    backend,
 		Hostname: hostname,
 		OS:       runtime.GOOS,
@@ -141,19 +140,13 @@ func run(o options) error {
 			log.Printf("warning: this machine has no address in %v, so no LAN device can reach it", prefixes)
 		}
 		lanAllow = append(lanHosts(hostname, lanAddrs), o.allowHosts...)
-		if tlsCert, cfg.CertSHA256, err = lan.LoadOrCreateCert(o.config); err != nil {
+		if tlsCert, cfg.CertSHA256, err = dir.Cert(); err != nil {
 			return fmt.Errorf("LAN certificate: %w", err)
 		}
 		cfg.LANPort = o.lanPort
-		if ip := pairAddr(lanAddrs); ip == "" {
-			os.Remove(filepath.Join(o.config, lanAddrFile))
-		} else if err := os.WriteFile(filepath.Join(o.config, lanAddrFile),
-			[]byte(net.JoinHostPort(ip, strconv.Itoa(o.lanPort))+"\n"), 0o600); err != nil {
-			log.Printf("can't record the LAN address for phrased pair: %v", err)
-		}
-	} else if err := os.Remove(filepath.Join(o.config, lanAddrFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		// A stale file would put a LAN route the helper no longer serves into the QR code.
-		log.Printf("can't remove %s: %v", lanAddrFile, err)
+	}
+	if err := dir.RecordLAN(pairAddr(lanAddrs), o.lanPort); err != nil {
+		log.Printf("can't record the LAN address for phrased pair: %v", err)
 	}
 	// Both listeners share one Helper, so rate limits, lockout and the typing lock are one set;
 	// each accepts only its own Host names.
@@ -165,7 +158,7 @@ func run(o options) error {
 		return err
 	}
 	// So `phrased pair` puts the port in use into its QR code.
-	if err := os.WriteFile(filepath.Join(o.config, "port"), []byte(strconv.Itoa(o.port)+"\n"), 0o600); err != nil {
+	if err := dir.RecordPort(o.port); err != nil {
 		log.Printf("can't record the port for phrased pair: %v", err)
 	}
 	// The tailnet allowlist is swapped in when Tailscale comes up after the helper started.

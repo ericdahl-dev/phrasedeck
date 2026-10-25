@@ -15,23 +15,16 @@ import (
 	"io/fs"
 	"math/big"
 	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/ericdahl-dev/phrasedeck/helper/internal/auth"
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/privfile"
 )
 
-const (
-	certFile = "lan-cert.pem"
-	keyFile  = "lan-key.pem"
-)
-
-// LoadOrCreateCert returns the LAN listener's certificate from dir, making a self-signed
+// LoadOrCreateCert returns the LAN listener's certificate from certPath and keyPath, making a self-signed
 // ECDSA P-256 one on first use, and its fingerprint: the lowercase hex SHA-256 of the leaf's
 // DER, which the app pins. The certificate is kept across restarts so pinned devices keep
 // working.
-func LoadOrCreateCert(dir string) (tls.Certificate, string, error) {
-	certPath, keyPath := filepath.Join(dir, certFile), filepath.Join(dir, keyFile)
+func LoadOrCreateCert(certPath, keyPath string) (tls.Certificate, string, error) {
 	if exists(certPath) && exists(keyPath) {
 		// Never replace a pair that exists: a new certificate breaks every device's pin.
 		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
@@ -47,10 +40,10 @@ func LoadOrCreateCert(dir string) (tls.Certificate, string, error) {
 	}
 	// The key goes first, so a crash between the two writes leaves a cert without its key,
 	// which the next start replaces.
-	if err := auth.WritePrivate(filepath.Join(dir, keyFile), keyPEM); err != nil {
+	if err := privfile.Write(keyPath, keyPEM); err != nil {
 		return tls.Certificate{}, "", err
 	}
-	if err := auth.WritePrivate(filepath.Join(dir, certFile), certPEM); err != nil {
+	if err := privfile.Write(certPath, certPEM); err != nil {
 		return tls.Certificate{}, "", err
 	}
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
@@ -69,14 +62,14 @@ func exists(path string) bool {
 
 // Fingerprint reads the stored certificate's fingerprint without creating one, for
 // `phrased pair`.
-func Fingerprint(dir string) (string, error) {
-	b, err := os.ReadFile(filepath.Join(dir, certFile))
+func Fingerprint(certPath string) (string, error) {
+	b, err := os.ReadFile(certPath)
 	if err != nil {
 		return "", err
 	}
 	block, _ := pem.Decode(b)
 	if block == nil || block.Type != "CERTIFICATE" {
-		return "", errors.New(certFile + ": no certificate")
+		return "", errors.New(certPath + ": no certificate")
 	}
 	return fingerprint(block.Bytes), nil
 }

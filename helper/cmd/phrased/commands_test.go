@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/auth"
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/confdir"
 )
 
 func runCmd(t *testing.T, args ...string) (string, error) {
@@ -103,7 +104,7 @@ func TestPairCommandPrintsAQRCodeForTheTailnetName(t *testing.T) {
 		return []byte(`{"Self":{"HostName":"mac","DNSName":"mac.tail1234.ts.net.","TailscaleIPs":["100.69.235.48"]}}`), nil
 	}
 	t.Cleanup(func() { notify = macNotify; tailscaleStatus = runTailscaleStatus })
-	os.WriteFile(filepath.Join(dir, "port"), []byte("47900\n"), 0o600)
+	confdir.New(dir).RecordPort(47900)
 
 	out, err := runCmd(t, "pair", "-config", dir)
 	if err != nil {

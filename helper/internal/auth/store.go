@@ -9,9 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/privfile"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -206,35 +206,9 @@ func (s *Store) save(devices []Device) error {
 	if err != nil {
 		return err
 	}
-	if err := WritePrivate(s.path, append(data, '\n')); err != nil {
+	if err := privfile.Write(s.path, append(data, '\n')); err != nil {
 		return err
 	}
 	s.load()
 	return s.err
-}
-
-// WritePrivate writes data to path with mode 0600, through a temp file and a rename, creating
-// the directory with mode 0700 if needed.
-func WritePrivate(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
 }

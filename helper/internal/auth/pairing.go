@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/privfile"
 	"math/big"
 	"os"
 	"sync"
@@ -59,7 +60,7 @@ func OpenWindow(path string, now time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return code, WritePrivate(path, data)
+	return code, privfile.Write(path, data)
 }
 
 // Pairer exchanges a code from an open window for a device token. It runs in the helper and

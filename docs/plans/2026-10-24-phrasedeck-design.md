@@ -28,7 +28,8 @@ the computer.
 - The helper listens on all addresses on port 47811, but drops any connection whose remote
   address is outside Tailscale (`100.64.0.0/10` and `fd7a:115c:a1e0::/48`) right after accept.
   That filter replaces picking addresses at startup. There is no LAN binding.
-- Computers are added in the app by tailnet name, for example `omarchy-laptop`.
+- Computers are added in the app by scanning the QR code from `phrased pair`, or by tailnet
+  name, for example `omarchy-laptop`.
 - **Bonjour is deferred**, both the helper's advertising and discovery in the app (issue #11). It
   only helps on a LAN, and the helper no longer serves the LAN.
 - **Host allowlist** against DNS rebinding: a request whose `Host` header (port stripped) isn't the
@@ -42,6 +43,19 @@ the computer.
   pairing window and prints a 6-digit code in the terminal; on the Mac it also shows a
   notification. The command writes the window (the code's hash and its expiry) to
   `~/.config/phrased/pairing.json` (mode 0600), and the running helper picks it up.
+- **QR code (#25):** under the text code, `phrased pair` prints a QR code for
+  `phrasedeck://pair?host=<host>&port=<port>&code=<6 digits>&v=1`. The host is the machine's
+  MagicDNS name from `tailscale status --json` (its tailnet IP when MagicDNS is off). The port is
+  the one the running helper recorded in `~/.config/phrased/port` at startup (47811 otherwise).
+  Without Tailscale it prints only the text code. Nothing is broadcast, so this keeps the
+  tailnet-only decision; Eric chose it over Bonjour on 2026-10-24.
+- **In the app**, "Add a computer" leads with **Scan QR code**, and typing the name and code still
+  works. The app registers the `phrasedeck` URL scheme, so scanning with the Camera app opens the
+  same flow. A link is checked before anything is contacted: the host must be a `*.ts.net` name
+  or a Tailscale address (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), the code 6 digits, and `v=1`.
+  A good link pairs after one confirm tap that shows the host. A computer that's already in the
+  list is paired again rather than added twice. A scanned code is the same code as a typed one,
+  so the window, single use and lockout below all apply.
 - `POST /pair` with `{code, device}` returns `{token}` while a window is open, 401 for a wrong
   code, and **404 when no window is open**. A code is single-use: success closes the window.
 - **Lockout:** after about 10 failed attempts in total, `/pair` stays locked (404) until

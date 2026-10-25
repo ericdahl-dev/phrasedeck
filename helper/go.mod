@@ -3,3 +3,5 @@ module github.com/ericdahl-dev/phrasedeck/helper
 go 1.25.0
 
 require golang.org/x/time v0.14.0
+
+require rsc.io/qr v0.2.0 // indirect

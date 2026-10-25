@@ -108,6 +108,35 @@ func ParseSelf(statusJSON []byte) ([]string, error) {
 	return names, nil
 }
 
+// PairHost picks the address a phone should use to reach this machine: its MagicDNS name, or
+// its tailnet IPv4 address (then any tailnet IP) when MagicDNS is off.
+func PairHost(statusJSON []byte) (string, error) {
+	var st struct {
+		Self *struct {
+			DNSName      string
+			TailscaleIPs []string
+		}
+	}
+	if err := json.Unmarshal(statusJSON, &st); err != nil {
+		return "", fmt.Errorf("tailscale status: %w", err)
+	}
+	if st.Self == nil {
+		return "", errors.New("tailscale status has no Self (is Tailscale running and logged in?)")
+	}
+	if dns := strings.ToLower(strings.TrimSuffix(st.Self.DNSName, ".")); dns != "" {
+		return dns, nil
+	}
+	for _, ip := range st.Self.TailscaleIPs {
+		if a, err := netip.ParseAddr(ip); err == nil && a.Is4() {
+			return ip, nil
+		}
+	}
+	if len(st.Self.TailscaleIPs) > 0 {
+		return st.Self.TailscaleIPs[0], nil
+	}
+	return "", errors.New("tailscale status has no name or address for this machine")
+}
+
 // SelfNames runs `tailscale status --json` and returns ParseSelf's names.
 func SelfNames(tailscalePath string) ([]string, error) {
 	out, err := exec.Command(tailscalePath, "status", "--json").Output()

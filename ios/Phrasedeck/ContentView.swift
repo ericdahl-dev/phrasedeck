@@ -8,6 +8,13 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showingComputers = false
     @State private var pairing: Helper?
+    @State private var incomingLink: IncomingLink?
+
+    /// A phrasedeck://pair link opened from the Camera app or a tap.
+    private struct IncomingLink: Identifiable {
+        let id = UUID()
+        let result: Result<PairLink, PairLink.Invalid>
+    }
 
     var body: some View {
         NavigationStack {
@@ -22,6 +29,13 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingComputers) { ComputersView() }
         .sheet(item: $pairing) { helper in AddHelperView(pairAgain: helper) }
+        .sheet(item: $incomingLink) { incoming in AddHelperView(link: incoming.result) }
+        .onOpenURL { url in
+            showingComputers = false
+            pairing = nil
+            incomingLink = IncomingLink(result: Result { try PairLink(url: url) }
+                .mapError { $0 as? PairLink.Invalid ?? .notAPairingLink })
+        }
         .task(id: PollKey(helperID: model.selectedHelperID, active: scenePhase == .active)) {
             await pollStatus()
         }

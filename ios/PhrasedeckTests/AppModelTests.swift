@@ -147,6 +147,31 @@ struct AppModelTests {
         #expect(api.paired.first?.device == "Eric's iPhone")
     }
 
+    @Test func aMagicDNSNameIsShownByItsShortName() async throws {
+        let model = try model(withMac: false)
+
+        let error = await model.addHelper(host: "lib-2833.tail1fdac.ts.net", port: 47900, code: "123456")
+
+        #expect(error == nil)
+        let added = try #require(model.helpers.first)
+        defer { try? tokens.delete(added.id) }
+        #expect(added.name == "lib-2833")
+        #expect(added.host == "lib-2833.tail1fdac.ts.net")
+        #expect(added.port == 47900)
+    }
+
+    @Test func addingAComputerThatIsAlreadyThereRepairsIt() async throws {
+        defer { try? tokens.delete(mac.id) }
+        let model = try model()
+
+        let error = await model.addHelper(host: mac.host, port: mac.port, code: "123456")
+
+        #expect(error == nil)
+        #expect(model.helpers == [mac])
+        #expect(model.selectedHelperID == mac.id)
+        #expect(try tokens.get(mac.id) == "new-token")
+    }
+
     @Test func aMissingPairingWindowSaysToRunPhrasedPairFirst() async throws {
         api.pairResult = .failure(.noPairingWindow)
         let model = try model(withMac: false)

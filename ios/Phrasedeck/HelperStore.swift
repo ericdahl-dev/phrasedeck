@@ -9,6 +9,12 @@ struct Helper: Codable, Hashable, Identifiable, Sendable {
     var name: String
     var host: String
     var port: Int = Helper.defaultPort
+
+    /// The machine name from a MagicDNS name ("lib-2833" for
+    /// lib-2833.tail1fdac.ts.net); other hosts as they are.
+    static func displayName(for host: String) -> String {
+        host.hasSuffix(".ts.net") ? String(host.prefix { $0 != "." }) : host
+    }
 }
 
 /// The computers on this device, in UserDefaults so they can never sync

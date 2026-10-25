@@ -22,4 +22,15 @@ struct InfoPlistTests {
     @Test func hasNoBonjourServices() {
         #expect(info["NSBonjourServices"] == nil)
     }
+
+    @Test func opensPhrasedeckLinks() throws {
+        let types = try #require(info["CFBundleURLTypes"] as? [[String: Any]])
+        let schemes = types.flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
+        #expect(schemes == ["phrasedeck"])
+    }
+
+    @Test func explainsTheCamera() throws {
+        let usage = try #require(info["NSCameraUsageDescription"] as? String)
+        #expect(usage.contains("QR"))
+    }
 }

@@ -129,3 +129,25 @@ func TestHostAllowed(t *testing.T) {
 		}
 	}
 }
+
+func TestPairHostPrefersMagicDNSName(t *testing.T) {
+	status := []byte(`{"Self":{"HostName":"LIB-2833","DNSName":"lib-2833.tail1234.ts.net.","TailscaleIPs":["100.69.235.48","fd7a:115c:a1e0::1"]}}`)
+	host, err := PairHost(status)
+	if err != nil || host != "lib-2833.tail1234.ts.net" {
+		t.Fatalf("PairHost = %q, %v", host, err)
+	}
+}
+
+func TestPairHostFallsBackToTheIPv4Address(t *testing.T) {
+	status := []byte(`{"Self":{"HostName":"box","DNSName":"","TailscaleIPs":["fd7a:115c:a1e0::1","100.69.235.48"]}}`)
+	host, err := PairHost(status)
+	if err != nil || host != "100.69.235.48" {
+		t.Fatalf("PairHost = %q, %v", host, err)
+	}
+}
+
+func TestPairHostFailsWithoutSelf(t *testing.T) {
+	if _, err := PairHost([]byte(`{}`)); err == nil {
+		t.Fatal("want an error when tailscale has no Self")
+	}
+}

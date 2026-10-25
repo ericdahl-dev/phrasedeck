@@ -20,6 +20,11 @@ pio device monitor -p /dev/ttyUSB0                     # serial log, 115200
 The first flash replaces Elecrow's partition table, so back up the factory image first:
 `esptool --port /dev/ttyUSB0 read-flash 0 0x1000000 crowpanel-factory.bin`.
 
+Eric's board (V1.4) was backed up on 2026-10-25 before its first flash, to Dropbox
+`omarchy/backups/esp32/crowpanel-factory-2026-10-25.bin` (16 MB, sha256
+`d113064cf5b0382a438feef4ce4f29343949d2f5d3b4d77283e786e2bbdfdb8b`). To restore Elecrow's demo:
+`esptool --port /dev/ttyUSB0 write-flash 0 crowpanel-factory-2026-10-25.bin`.
+
 ## Board revision
 
 The revision is printed on the back of the board (V1.x). Set it with `-DCROWPANEL_ADVANCE_REV` in

@@ -1,3 +1,4 @@
+import CoreData
 import Foundation
 import SwiftData
 
@@ -147,4 +148,26 @@ enum Seed {
         }
         if context.hasChanges { try context.save() }
     }
+}
+
+/// Merges duplicate starter rows after each CloudKit import. It lives next to the container
+/// (PhrasedeckApp), not in a view, so it runs whichever screen is showing.
+@MainActor
+final class SyncMerge {
+    private var observer: NSObjectProtocol?
+
+    init(container: ModelContainer) {
+        observer = NotificationCenter.default.addObserver(
+            forName: .NSPersistentStoreRemoteChange, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                do { try Seed.mergeDuplicates(container.mainContext) } catch {
+                    // Nothing the user can do; the next import or launch tries again.
+                    print("phrasedeck: merging synced duplicates failed: \(error)")
+                }
+            }
+        }
+    }
+
+    deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
 }

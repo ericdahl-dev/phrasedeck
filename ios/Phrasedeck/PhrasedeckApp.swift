@@ -6,6 +6,7 @@ import UIKit
 struct PhrasedeckApp: App {
     @State private var model: AppModel
     private let container: ModelContainer
+    private let syncMerge: SyncMerge
     private let stub: StubHelper?
     /// Bonjour discovery (#11); nil under UI tests, so no local-network prompt.
     @State private var browser: NearbyBrowser?
@@ -32,6 +33,8 @@ struct PhrasedeckApp: App {
         } catch {
             fatalError("Could not open the phrase store: \(error)")
         }
+        // The other device's starter deck can arrive after this one seeded its own.
+        syncMerge = SyncMerge(container: container)
         if let stub {
             _model = State(initialValue: stub.makeModel())
         } else {

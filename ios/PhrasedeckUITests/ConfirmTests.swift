@@ -16,10 +16,9 @@ final class ConfirmTests: XCTestCase {
         let yes = app.buttons["phrase.yes"]
         XCTAssertTrue(yes.waitForExistence(timeout: 5))
 
+        // Nothing is queried between the taps: on a slow simulator a query can outlast the
+        // 1.5-second window. testASecondTapAfterTheWindowDoesNotSend checks the armed state.
         yes.tap()
-        XCTAssertTrue(app.staticTexts["tap again"].waitForExistence(timeout: 2))
-        XCTAssertEqual(sendCount, "0")
-
         yes.tap()
         waitForSendCount("1")
     }
@@ -40,6 +39,8 @@ final class ConfirmTests: XCTestCase {
         XCTAssertTrue(yes.waitForExistence(timeout: 5))
 
         yes.tap()
+        XCTAssertTrue(app.staticTexts["tap again"].waitForExistence(timeout: 2))
+        XCTAssertEqual(sendCount, "0")
         Thread.sleep(forTimeInterval: 2)
         yes.tap()
         Thread.sleep(forTimeInterval: 1)

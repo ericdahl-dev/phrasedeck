@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Synchronization
 
 struct Health: Decodable, Equatable, Sendable {
@@ -69,11 +70,16 @@ struct HelperClient: Sendable {
     let token: String?
     var route: Route = .tailnet
     var session: URLSession = .shared
+    /// A host name's addresses, as strings. Tests stub it.
+    typealias Resolve = @Sendable (String) async -> [String]
+    var resolve: Resolve = HelperClient.systemResolve
 
-    init(helper: Helper, token: String?, route: Route = .tailnet, session: URLSession? = nil) {
+    init(helper: Helper, token: String?, route: Route = .tailnet, session: URLSession? = nil,
+         resolve: Resolve? = nil) {
         self.helper = helper
         self.token = token
         self.route = route
+        if let resolve { self.resolve = resolve }
         self.session = session ?? {
             if case let .lan(_, _, pin) = route { return Self.lanSession(for: pin) }
             return .shared
@@ -96,6 +102,48 @@ struct HelperClient: Sendable {
     /// fingerprint changes or it's deleted.
     static func forgetLANSession(pin: String) {
         lanSessions.withLock { $0.removeValue(forKey: pin) }?.invalidateAndCancel()
+    }
+
+    /// Plain HTTP goes only to a tailnet address. With Tailscale off, a bare name can resolve
+    /// through the router's DNS to a LAN machine, so a name's addresses must all be tailnet
+    /// ones, and the request goes to the checked address (IPv4 first) so a second lookup
+    /// can't swap it. The helper accepts its tailnet IPs as Host.
+    private func checkedTailnetURL(_ url: URL?) async throws -> URL? {
+        guard var components = url.map({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) ?? nil,
+              let host = components.host?.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        else { throw Failure.unreachable }
+        // An IP literal was already checked by request().
+        if IPv4Address(host) != nil && host.allSatisfy({ $0.isNumber || $0 == "." }) || IPv6Address(host) != nil {
+            return url
+        }
+        let addresses = await resolve(host)
+        guard !addresses.isEmpty else { throw Failure.unreachable }
+        guard addresses.allSatisfy({ PairLink.tailnetHost($0) != nil }) else { throw Failure.notTailnet }
+        let address = addresses.first { !$0.contains(":") } ?? addresses[0]
+        components.host = address.contains(":") ? "[\(address)]" : address
+        return components.url
+    }
+
+    /// getaddrinfo, off the main thread. No answer is an empty list.
+    static let systemResolve: Resolve = { name in
+        await Task.detached {
+            var hints = addrinfo(ai_flags: 0, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM,
+                                 ai_protocol: 0, ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
+            var list: UnsafeMutablePointer<addrinfo>?
+            guard getaddrinfo(name, nil, &hints, &list) == 0, let first = list else { return [] }
+            defer { freeaddrinfo(first) }
+            var out: [String] = []
+            for info in sequence(first: first, next: { $0.pointee.ai_next }) {
+                var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                if getnameinfo(info.pointee.ai_addr, info.pointee.ai_addrlen, &buffer, socklen_t(buffer.count),
+                               nil, 0, NI_NUMERICHOST) == 0 {
+                    // Drop an IPv6 zone like %en0; it's never a tailnet address anyway.
+                    let text = String(cString: buffer).split(separator: "%").first.map(String.init) ?? ""
+                    if !text.isEmpty, !out.contains(text) { out.append(text) }
+                }
+            }
+            return out
+        }.value
     }
 
     // One entry per paired computer's certificate; forgetLANSession removes stale ones.
@@ -163,6 +211,8 @@ struct HelperClient: Sendable {
     }
 
     private func send(_ request: URLRequest, notFound: Failure = .server(404)) async throws -> Data {
+        var request = request
+        if route == .tailnet { request.url = try await checkedTailnetURL(request.url) }
         let data: Data
         let response: URLResponse
         let pinning: PinningDelegate? = if case let .lan(_, _, pin) = route { PinningDelegate(pin: pin) } else { nil }

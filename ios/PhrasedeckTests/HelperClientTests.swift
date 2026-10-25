@@ -61,8 +61,9 @@ struct HelperClientTests {
         #expect(StubURLProtocol.requests.isEmpty)
     }
 
-    /// The request goes to the checked address itself, so a second lookup can't swap it.
-    @Test func aTailnetNameIsReachedAtItsCheckedAddressIPv4First() async throws {
+    /// The name is checked, then the request goes to the name: ATS refuses plain HTTP to a
+    /// bare 100.x address (error -1022), which broke pairing after #48.
+    @Test func aCheckedTailnetNameIsReachedByName() async throws {
         StubURLProtocol.reset(.status(204))
         let c = HelperClient(helper: helper, token: "tok", session: StubURLProtocol.session(),
                              resolve: { name in
@@ -73,7 +74,7 @@ struct HelperClientTests {
         try await c.type(text: "x", enter: false)
 
         let request = try #require(StubURLProtocol.requests.first?.request)
-        #expect(request.url?.absoluteString == "http://100.70.1.5:47811/type")
+        #expect(request.url?.absoluteString == "http://erics-mac:47811/type")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok")
     }
 
@@ -101,7 +102,7 @@ struct HelperClientTests {
 
         #expect(info == LANInfo(certSHA256: TestCerts.helperPin, lanPort: 47812))
         let request = try #require(StubURLProtocol.requests.first?.request)
-        #expect(request.url?.absoluteString == "http://100.101.102.103:47811/info")
+        #expect(request.url?.absoluteString == "http://erics-mac:47811/info")
         #expect(request.httpMethod == "GET")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
     }
@@ -147,7 +148,7 @@ struct HelperClientTests {
         #expect(sent.count == 1)
         let request = try #require(sent.first?.request)
         #expect(request.httpMethod == "POST")
-        #expect(request.url?.absoluteString == "http://100.101.102.103:47811/type")
+        #expect(request.url?.absoluteString == "http://erics-mac:47811/type")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
         #expect(request.timeoutInterval == 3)
@@ -180,6 +181,10 @@ struct HelperClientTests {
         (.cannotConnectToHost, .unreachable),
         (.cannotFindHost, .unreachable),
         (.dnsLookupFailed, .unreachable),
+        // Refused before anything was sent: never "may have typed".
+        (.appTransportSecurityRequiresSecureConnection, .notSent(-1022)),
+        (.unsupportedURL, .notSent(-1002)),
+        (.notConnectedToInternet, .unreachable),
     ])
     func typeMapsTransportErrorsWithoutRetrying(code: URLError.Code, expected: HelperClient.Failure) async {
         StubURLProtocol.reset(.failure(code))
@@ -199,7 +204,7 @@ struct HelperClientTests {
         let sent = StubURLProtocol.requests
         #expect(sent.count == 1)
         let request = try #require(sent.first?.request)
-        #expect(request.url?.absoluteString == "http://100.101.102.103:47811/pair")
+        #expect(request.url?.absoluteString == "http://erics-mac:47811/pair")
         #expect(request.httpMethod == "POST")
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
@@ -231,7 +236,7 @@ struct HelperClientTests {
         #expect(health == Health(hostname: "erics-mac", os: "darwin", accessibilityOK: false))
         let request = try #require(StubURLProtocol.requests.first?.request)
         #expect(request.httpMethod == "GET")
-        #expect(request.url?.absoluteString == "http://100.101.102.103:47811/health")
+        #expect(request.url?.absoluteString == "http://erics-mac:47811/health")
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
         #expect(StubURLProtocol.requests.count == 1)
     }

@@ -547,6 +547,25 @@ struct AppModelTests {
         #expect(model.helpers.isEmpty)
     }
 
+    /// Pairing never types, so a lost reply must not say "may have typed" (P0 2026-10-25).
+    @Test func noReplyWhilePairingSaysToTryAgainNotMayHaveTyped() async throws {
+        api.pairResult = .failure(.noReply)
+        let model = try model(withMac: false)
+
+        let error = await model.addHelper(host: "omarchy-laptop.tail1fdac.ts.net", port: nil, code: "123456")
+
+        #expect(error == "omarchy-laptop didn't answer. Run phrased pair again and retry.")
+    }
+
+    @Test func aBlockedConnectionWhilePairingSaysNothingWasSent() async throws {
+        api.pairResult = .failure(.notSent(-1022))
+        let model = try model(withMac: false)
+
+        let error = await model.addHelper(host: "omarchy-laptop.tail1fdac.ts.net", port: nil, code: "123456")
+
+        #expect(error == "omarchy-laptop: the connection was blocked before anything was sent (error -1022).")
+    }
+
     @Test func aWrongCodeSaysSo() async throws {
         api.pairResult = .failure(.unauthorized)
         let model = try model(withMac: false)

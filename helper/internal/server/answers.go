@@ -19,7 +19,7 @@ var typeAnswers = map[typing.Outcome]struct {
 	typing.Busy:    {http.StatusConflict, "busy typing another phrase"},
 }
 
-// typeAnswer is the status and message for an outcome; err is Failed's cause.
+// typeAnswer is the status and message for an outcome; err is NotReady's problem or Failed's cause.
 func typeAnswer(outcome typing.Outcome, err error) (int, string) {
 	switch outcome {
 	case typing.Typed:

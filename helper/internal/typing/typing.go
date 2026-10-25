@@ -45,7 +45,7 @@ func New(backend typer.Backend, lockWait time.Duration) *Typist {
 func (t *Typist) Ready() bool { return t.backend.Problem() == "" }
 
 // Type types text in mode ("" is auto), then Enter if enter is set. The error is set only
-// for Failed.
+// for NotReady (the backend's problem) and Failed (what went wrong).
 func (t *Typist) Type(text string, enter bool, mode plan.Mode) (Outcome, error) {
 	if !mode.Valid() {
 		return BadMode, nil

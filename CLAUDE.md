@@ -4,7 +4,7 @@ The README covers install, pairing, flags, the API and TestFlight setup; this fi
 work here. Read these first:
 - `CONTEXT.md`: the domain glossary.
 - `docs/plans/`: the design and the implementation plan, including "What each status means".
-- `docs/launch/lan-threat-checklist.md`: before changing the LAN route.
+- `docs/launch/lan-threat-checklist.md`: before changing the Home network route.
 
 ## Workflow
 
@@ -70,8 +70,8 @@ The required checks are `linux`, `macos`, `test` and `spelling`.
   (HTTPS, only the `-lan` private subnets and tailnet peers).
 - A token never goes over plain HTTP to a non-tailnet address. The app refuses this
   (`notTailnet`) before sending anything.
-- The LAN route is HTTPS with a pinned certificate: SHA-256 of the helper's self-signed cert. The
-  pin arrives only over a trusted channel (`/pair` or `/info` over the tailnet, or the QR code).
-  `/info` is never served on the LAN listener.
+- The Home network route is HTTPS checked against the Computer's Pin (the SHA-256 of the Helper's
+  self-signed certificate). The Pin arrives only over a trusted channel (`/pair` or `/info` over the tailnet, or the QR code).
+  `/info` is never served on the Home network listener (47812).
 - Each listener accepts only its own `Host` names. Tokens, limits and lockout are shared.
 - Never print or commit tokens, `.p8` keys, certificates or repository secrets.

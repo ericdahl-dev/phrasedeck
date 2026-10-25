@@ -46,4 +46,14 @@ struct DeckSizeTests {
     @Test func eachSizeClassHasItsOwnKey() {
         #expect(DeckSize.key(for: .compact) != DeckSize.key(for: .regular))
     }
+
+    /// A bigger button gets bigger text, limited by its shorter side (#51).
+    @Test func labelsGrowWithTheButtonsSmallerSide() {
+        let one = DeckSize.metrics(button: CGSize(width: 100, height: 86))
+        let wide = DeckSize.metrics(button: CGSize(width: 312, height: 86))
+        let square = DeckSize.metrics(button: CGSize(width: 212, height: 184))
+        #expect(wide.font == one.font)
+        #expect(square.font > one.font)
+        #expect(square.height == 184)
+    }
 }

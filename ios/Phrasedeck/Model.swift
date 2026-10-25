@@ -35,9 +35,14 @@ final class Phrase {
     var page: Page?
     var seedKey: String?
     var uid: String = ""
+    /// The button's size in grid cells, 1...3 each way (#51). Synced; defaults keep the
+    /// CloudKit schema change additive and old phrases 1×1.
+    var spanColumns: Int = 1
+    var spanRows: Int = 1
 
     init(label: String, text: String, pressEnter: Bool = false, confirm: Bool = false,
-         colorName: String = "blue", order: Int, page: Page? = nil, seedKey: String? = nil) {
+         colorName: String = "blue", order: Int, page: Page? = nil, seedKey: String? = nil,
+         spanColumns: Int = 1, spanRows: Int = 1) {
         self.label = label
         self.text = text
         self.pressEnter = pressEnter
@@ -47,6 +52,8 @@ final class Phrase {
         self.page = page
         self.seedKey = seedKey
         self.uid = UUID().uuidString
+        self.spanColumns = spanColumns
+        self.spanRows = spanRows
     }
 }
 

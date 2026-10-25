@@ -1,0 +1,31 @@
+import XCTest
+
+/// A button's size is set in its editor and shows on the deck right away (#51).
+final class SpanTests: XCTestCase {
+    @MainActor
+    func testAButtonSetToTwoByTwoDoublesInSizeAndStillSends() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestingStubHelper"]
+        app.launch()
+        let button = app.buttons["phrase.agent-status"]
+        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        let before = button.frame
+
+        button.press(forDuration: 1)
+        app.buttons["Edit"].tap()
+        XCTAssertTrue(app.buttons["editor.span.2x2"].waitForExistence(timeout: 5))
+        app.buttons["editor.span.2x2"].tap()
+        XCTAssertEqual(app.staticTexts["editor.span.value"].label, "2 × 2")
+        app.buttons["editor.save"].tap()
+
+        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        let after = button.frame
+        XCTAssertGreaterThan(after.width, before.width * 1.9)
+        XCTAssertGreaterThan(after.height, before.height * 1.9)
+
+        button.tap()
+        let count = app.staticTexts["stub.sendCount"]
+        XCTAssertTrue(count.waitForExistence(timeout: 5))
+        XCTAssertEqual(count.label, "1")
+    }
+}

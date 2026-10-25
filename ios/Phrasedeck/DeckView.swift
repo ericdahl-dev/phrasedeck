@@ -28,23 +28,15 @@ struct DeckView: View {
             } else {
                 GeometryReader { geo in
                     let columns = shownColumns(width: geo.size.width)
-                    let metrics = DeckSize.metrics(
-                        columnWidth: DeckSize.columnWidth(width: geo.size.width, columns: columns))
+                    let cell = CGSize(width: DeckSize.columnWidth(width: geo.size.width, columns: columns),
+                                      height: DeckSize.metrics(columnWidth: DeckSize.columnWidth(
+                                          width: geo.size.width, columns: columns)).height)
                     TabView {
                         ForEach(pages) { page in
                             ScrollView {
-                                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DeckSize.spacing),
-                                                         count: columns),
-                                          spacing: DeckSize.spacing) {
-                                    ForEach(page.sortedPhrases) { phrase in
-                                        PhraseButton(phrase: phrase, metrics: metrics, pinchGuard: pinchGuard,
-                                                     edit: { editing = .existing(phrase) },
-                                                     delete: { remove(phrase) })
-                                    }
-                                    addTile(page, height: metrics.height)
-                                }
-                                .padding(DeckSize.padding)
-                                .animation(.snappy, value: columns)
+                                grid(page, columns: columns, cell: cell)
+                                    .padding(DeckSize.padding)
+                                    .animation(.snappy, value: columns)
                             }
                             .accessibilityIdentifier("deck.grid")
                             .accessibilityValue("\(columns) columns")
@@ -107,11 +99,49 @@ struct DeckView: View {
             }
     }
 
-    private func addTile(_ page: Page, height: CGFloat) -> some View {
+    private enum Tile: Hashable {
+        case phrase(PersistentIdentifier)
+        case add
+    }
+
+    /// The page's buttons packed by span (#51), with the "+" tile as a trailing 1×1.
+    private func grid(_ page: Page, columns: Int, cell: CGSize) -> some View {
+        let phrases = Dictionary(uniqueKeysWithValues: page.sortedPhrases.map { ($0.persistentModelID, $0) })
+        let items = page.sortedPhrases.map {
+            Packing.Item(id: Tile.phrase($0.persistentModelID), columns: $0.spanColumns, rows: $0.spanRows)
+        } + [Packing.Item(id: Tile.add, columns: 1, rows: 1)]
+        let placed = Packing.pack(items, columns: columns)
+        let step = CGSize(width: cell.width + DeckSize.spacing, height: cell.height + DeckSize.spacing)
+        let rows = CGFloat(Packing.rows(of: placed))
+        return ZStack(alignment: .topLeading) {
+            ForEach(placed, id: \.id) { spot in
+                let size = CGSize(width: CGFloat(spot.columns) * step.width - DeckSize.spacing,
+                                  height: CGFloat(spot.rows) * step.height - DeckSize.spacing)
+                Group {
+                    switch spot.id {
+                    case .phrase(let id):
+                        if let phrase = phrases[id] {
+                            PhraseButton(phrase: phrase, metrics: DeckSize.metrics(button: size),
+                                         pinchGuard: pinchGuard,
+                                         edit: { editing = .existing(phrase) }, delete: { remove(phrase) })
+                        }
+                    case .add:
+                        addTile(page)
+                    }
+                }
+                .frame(width: size.width, height: size.height)
+                .offset(x: CGFloat(spot.x) * step.width, y: CGFloat(spot.y) * step.height)
+            }
+        }
+        .frame(width: CGFloat(columns) * step.width - DeckSize.spacing,
+               height: max(0, rows * step.height - DeckSize.spacing), alignment: .topLeading)
+    }
+
+    private func addTile(_ page: Page) -> some View {
         Button { editing = .new(page) } label: {
             Image(systemName: "plus")
                 .font(.title2.weight(.semibold))
-                .frame(maxWidth: .infinity, minHeight: height - 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(8)
                 .foregroundStyle(.secondary)
                 .background(.quaternary, in: .rect(cornerRadius: 16))
@@ -169,6 +199,12 @@ enum DeckSize {
     /// and labels grow with them.
     static func metrics(columnWidth: CGFloat) -> (height: CGFloat, font: CGFloat) {
         (max(56, columnWidth * 0.86), min(34, max(13, columnWidth * 0.17)))
+    }
+
+    /// Label size for a button of any span: it grows with the smaller side, so a wide button
+    /// doesn't get text taller than it is.
+    static func metrics(button size: CGSize) -> (height: CGFloat, font: CGFloat) {
+        (size.height, metrics(columnWidth: min(size.width, size.height / 0.86)).font)
     }
 
     static func columnWidth(width: CGFloat, columns: Int) -> CGFloat {

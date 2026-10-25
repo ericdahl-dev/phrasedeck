@@ -206,16 +206,16 @@ func (s *Store) save(devices []Device) error {
 	if err != nil {
 		return err
 	}
-	if err := writePrivate(s.path, append(data, '\n')); err != nil {
+	if err := WritePrivate(s.path, append(data, '\n')); err != nil {
 		return err
 	}
 	s.load()
 	return s.err
 }
 
-// writePrivate writes data to path with mode 0600, through a temp file and a rename, creating
+// WritePrivate writes data to path with mode 0600, through a temp file and a rename, creating
 // the directory with mode 0700 if needed.
-func writePrivate(path string, data []byte) error {
+func WritePrivate(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err

@@ -81,10 +81,20 @@ curl -s http://<tailnet-name>:47811/type \
   Mac, pasting isn't supported yet (#4), so those requests get 501.
 - `GET /health` needs no token and returns `hostname`, `os` and `accessibility_ok`.
 
-Status codes: 400 bad JSON or mode, 401 bad token or wrong pairing code, 403 Host not allowed, 409 busy typing another
-phrase for over a second, 413 body over 64 KB or text over 10,000 characters, 404 no pairing window open, 415 not
-`application/json`, 429 over 10 requests a second (or 1 a second on `/pair`), 501 paste not supported yet, 503 Accessibility
-not granted.
+Status codes:
+
+| Code | Meaning |
+|---|---|
+| 400 | bad JSON, mode or device name |
+| 401 | bad token, or a wrong pairing code |
+| 403 | `Host` not allowed |
+| 404 | no pairing window open, or pairing locked |
+| 409 | busy typing another phrase for over a second |
+| 413 | body over 64 KB, or text over 10,000 characters |
+| 415 | not `application/json` |
+| 429 | over 10 requests a second on `/type`, or about 1 a second on `/pair` |
+| 501 | paste not supported yet on this computer |
+| 503 | Accessibility not granted |
 
 ### Flags
 

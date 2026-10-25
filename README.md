@@ -208,6 +208,16 @@ Limits:
   changes.
 - On the Mac, the firewall must allow the binary (see above); on a managed Mac that means the
   already-allowed path.
+- On Linux, a firewall that blocks incoming connections (Omarchy turns `ufw` on) must allow the LAN
+  port from each `-lan` subnet (use yours, not the example's). Bonjour still resolves, but
+  connections time out. The firewalld rule is IPv4 only; for an `fc00::/7` subnet use
+  `family="ipv6"`.
+
+  ```sh
+  sudo ufw allow from 192.168.1.0/24 to any port 47812 proto tcp
+  # firewalld:
+  sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.1.0/24" port port="47812" protocol="tcp" accept' && sudo firewall-cmd --reload
+  ```
 
 ```sh
 curl -sk https://<lan-ip>:47812/health   # -k: the app pins the certificate instead

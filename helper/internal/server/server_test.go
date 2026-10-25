@@ -263,26 +263,6 @@ func TestBusyLock409(t *testing.T) {
 	}
 }
 
-func TestPasteUnsupported501(t *testing.T) {
-	e := newEnv(t, &typer.Fake{PasteErr: typer.ErrPasteUnsupported}, time.Second)
-	resp, err := func() (*http.Response, error) {
-		req, _ := http.NewRequest("POST", e.srv.URL+"/type", bytes.NewBufferString(`{"text":"hi","mode":"paste"}`))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+token)
-		return e.srv.Client().Do(req)
-	}()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	wantCode(t, resp.StatusCode, 501)
-	var body map[string]string
-	json.NewDecoder(resp.Body).Decode(&body)
-	if !strings.Contains(body["error"], "not supported yet") {
-		t.Fatalf("error %q doesn't say paste isn't supported yet", body["error"])
-	}
-}
-
 func TestTyperError500(t *testing.T) {
 	e := newEnv(t, &typer.Fake{FailOn: "type:hi"}, time.Second)
 	wantCode(t, e.typeJSON(`{"text":"hi"}`), 500)

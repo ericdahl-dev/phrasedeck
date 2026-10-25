@@ -3,7 +3,6 @@
 package typing
 
 import (
-	"errors"
 	"time"
 	"unicode/utf8"
 
@@ -26,8 +25,7 @@ const (
 	TooLong
 	NotReady // the backend can't type, e.g. macOS Accessibility not granted
 	Busy     // another phrase held the keyboard for the whole wait
-	PasteUnsupported
-	Failed // the backend failed partway; the error says how
+	Failed   // the backend failed partway; the error says how
 
 	// NumOutcomes counts the outcomes above; keep it last.
 	NumOutcomes
@@ -68,12 +66,8 @@ func (t *Typist) Type(text string, enter bool, mode plan.Mode) (Outcome, error) 
 	case <-timer.C:
 		return Busy, nil
 	}
-	switch err := typer.Run(t.backend, plan.Build(text, enter, mode)); {
-	case err == nil:
-		return Typed, nil
-	case errors.Is(err, typer.ErrPasteUnsupported):
-		return PasteUnsupported, nil
-	default:
+	if err := typer.Run(t.backend, plan.Build(text, enter, mode)); err != nil {
 		return Failed, err
 	}
+	return Typed, nil
 }

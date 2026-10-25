@@ -9,12 +9,11 @@ var ErrFake = errors.New("fake failure")
 
 // Fake records calls; used in tests. If Hold is set, Type blocks until it's closed,
 // which lets server tests keep the typing lock busy; Entered, if set, gets a value as each
-// Type starts. If PasteErr is set, Paste returns it.
+// Type starts.
 type Fake struct {
 	mu       sync.Mutex
 	log      []string
 	FailOn   string
-	PasteErr error
 	NotReady bool
 	Hold     chan struct{}
 	Entered  chan struct{}
@@ -48,9 +47,6 @@ func (f *Fake) Type(t string) error {
 }
 
 func (f *Fake) Paste(t string) error {
-	if f.PasteErr != nil {
-		return f.PasteErr
-	}
 	return f.rec("paste:" + t)
 }
 

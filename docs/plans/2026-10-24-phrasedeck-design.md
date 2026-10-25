@@ -121,7 +121,6 @@ the `{"error": "..."}` text when there is one. Every refusal has that body.
 | 415 | not `application/json` | no | red |
 | 429 | rate-limited | no | red |
 | 500 | typing failed partway | **maybe** | amber, "it may have typed" |
-| 501 | this computer can't paste | no | red |
 | 503 | can't type yet (Accessibility not granted) | no | red |
 
 A send that times out or drops after the request went out is also "it may have typed".
@@ -204,11 +203,11 @@ once sync is on, rows that share a `seedKey` are merged, so two devices don't do
     and gnome-terminal.
   - **`paste` mode** always pastes, newlines included.
   - The final Enter comes only from the `enter` flag. CRLF is normalized to LF.
-  - Typed text is chunked by rune (20 per chunk); a backend may re-chunk.
+  - Each line is one typing step; splitting it for the keyboard is the backend's job.
 - `typer` interface: `Type(text)`, `Paste(text)`, `ShiftEnter()`, `Enter()`, `Ready()`.
-  - **macOS:** CGEvent with `CGEventKeyboardSetUnicodeString`, through cgo. The backend re-chunks
-    into 20 or fewer UTF-16 units and never splits a surrogate pair. Paste saves every pasteboard
-    item and type, sets the text, sends Cmd+V, and restores after 500 ms or more, but only if the
+  - **macOS:** CGEvent with `CGEventKeyboardSetUnicodeString`, through cgo. The backend splits a
+    line into chunks of 20 or fewer UTF-16 units and never splits a surrogate pair. Wayland
+    types each line with one `wtype` call. Paste saves every pasteboard item and type, sets the text, sends Cmd+V, and restores after 500 ms or more, but only if the
     pasteboard `changeCount` hasn't moved since the paste. Ready uses `CGPreflightPostEventAccess`,
     and `/health` reports it rather than failing silently.
   - **Linux (Hyprland/Wayland):** `wtype -- <text>`, passed as an exec argument and never through a

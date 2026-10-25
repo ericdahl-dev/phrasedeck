@@ -161,7 +161,6 @@ Status codes:
 | 415 | not `application/json` |
 | 429 | over 10 requests a second on `/type`, or about 1 a second on `/pair` |
 | 500 | typing failed partway; some keys may have been typed |
-| 501 | this computer's backend can't paste |
 | 503 | Accessibility not granted |
 
 ### Flags

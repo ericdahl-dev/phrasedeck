@@ -1,10 +1,8 @@
 package server
 
 import (
-	"fmt"
 	"net/http"
 
-	"github.com/ericdahl-dev/phrasedeck/helper/internal/plan"
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/typing"
 )
 
@@ -20,9 +18,6 @@ var typeAnswers = map[typing.Outcome]struct {
 	typing.TooLong:  {http.StatusRequestEntityTooLarge, "text over 10,000 characters"},
 	typing.NotReady: {http.StatusServiceUnavailable, "can't type yet: " + typing.NotReadyHelp},
 	typing.Busy:     {http.StatusConflict, "busy typing another phrase"},
-	typing.PasteUnsupported: {http.StatusNotImplemented, fmt.Sprintf(
-		"paste is not supported yet on this computer; send single-line text under %d characters, or mode \"type\"",
-		plan.PasteThreshold)},
 }
 
 // typeAnswer is the status and message for an outcome; err is Failed's cause.

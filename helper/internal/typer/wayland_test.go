@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/plan"
 )
 
 // fakeRunner records every command as "name arg arg ... <stdin" so tests can check exact
@@ -128,11 +130,27 @@ func TestWaylandReady(t *testing.T) {
 	if w.Ready() {
 		t.Fatal("ready without WAYLAND_DISPLAY")
 	}
-	w = newTestWayland(&fakeRunner{})
-	w.lookPath = func(string) (string, error) { return "", errors.New("not found") }
-	if w.Ready() {
-		t.Fatal("ready without wtype")
+	for _, missing := range []string{"wtype", "wl-copy", "wl-paste"} {
+		w = newTestWayland(&fakeRunner{})
+		w.lookPath = func(name string) (string, error) {
+			if name == missing {
+				return "", errors.New("not found")
+			}
+			return "/usr/bin/" + name, nil
+		}
+		if w.Ready() {
+			t.Errorf("ready without %s", missing)
+		}
 	}
+}
+
+func TestWaylandTypesALongLineInOneCall(t *testing.T) {
+	f := &fakeRunner{}
+	line := strings.Repeat("x", 299)
+	if err := Run(newTestWayland(f), plan.Build(line, false, plan.ModeType)); err != nil {
+		t.Fatal(err)
+	}
+	wantCalls(t, f, "wtype -- "+line)
 }
 
 func TestExecRunnerStartWaitAndKill(t *testing.T) {

@@ -33,8 +33,7 @@ struct ContentView: View {
         .onOpenURL { url in
             showingComputers = false
             pairing = nil
-            incomingLink = IncomingLink(result: Result { try PairLink(url: url) }
-                .mapError { $0 as? PairLink.Invalid ?? .notAPairingLink })
+            incomingLink = IncomingLink(result: PairLink.parse(url.absoluteString))
         }
         .task(id: PollKey(helperID: model.selectedHelperID, active: scenePhase == .active)) {
             await pollStatus()

@@ -1,3 +1,4 @@
+import CoreData
 import Foundation
 import SwiftData
 import Testing
@@ -96,5 +97,20 @@ struct SeedMergeTests {
 
         #expect(try a.mainContext.fetch(FetchDescriptor<Phrase>()).allSatisfy { !$0.uid.isEmpty })
         #expect(try a.mainContext.fetchCount(FetchDescriptor<Phrase>()) == 5)
+    }
+
+    /// After a CloudKit import the merge runs on its own, not from a view.
+    @Test func aRemoteChangeMergesDuplicates() async throws {
+        let mine = try Self.seededStore()
+        let theirs = try Self.seededStore()
+        let pageCount = try mine.mainContext.fetchCount(FetchDescriptor<Page>())
+        let merge = SyncMerge(container: mine)
+        try Self.importRows(from: theirs.mainContext, into: mine.mainContext)
+
+        NotificationCenter.default.post(name: .NSPersistentStoreRemoteChange, object: nil)
+        await Task.yield()
+
+        #expect(try mine.mainContext.fetchCount(FetchDescriptor<Page>()) == pageCount)
+        withExtendedLifetime(merge) {}
     }
 }

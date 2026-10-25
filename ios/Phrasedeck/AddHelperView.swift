@@ -60,8 +60,7 @@ struct AddHelperView: View {
             .sheet(isPresented: $scanning) {
                 QRScannerView { text in
                     scanning = false
-                    accept(Result { try PairLink(url: URL(string: text) ?? URL(fileURLWithPath: "/")) }
-                        .mapError { $0 as? PairLink.Invalid ?? .notAPairingLink })
+                    accept(PairLink.parse(text))
                 }
                 .ignoresSafeArea()
             }

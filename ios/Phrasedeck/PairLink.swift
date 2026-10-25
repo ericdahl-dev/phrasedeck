@@ -30,6 +30,12 @@ struct PairLink: Equatable, Sendable {
         self.code = code
     }
 
+    /// A scanned QR code or an opened link, as the pairing sheet wants it.
+    static func parse(_ text: String) -> Result<PairLink, Invalid> {
+        guard let url = URL(string: text) else { return .failure(.notAPairingLink) }
+        return Result { () throws(Invalid) in try PairLink(url: url) }
+    }
+
     init(url: URL) throws(Invalid) {
         guard url.scheme?.lowercased() == "phrasedeck", url.host()?.lowercased() == "pair",
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems

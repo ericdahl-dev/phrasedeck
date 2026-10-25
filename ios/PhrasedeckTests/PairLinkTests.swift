@@ -50,6 +50,13 @@ struct PairLinkTests {
         #expect(throws: expected) { try PairLink(url: URL(string: url)!) }
     }
 
+    /// The Camera app's link and the in-app scanner's text go through the same step.
+    @Test func scannedTextParsesOrSaysWhy() throws {
+        #expect(try PairLink.parse("phrasedeck://pair?host=lib-2833.tail1fdac.ts.net&port=47811&code=123456&v=1").get().code == "123456")
+        #expect(throws: PairLink.Invalid.notAPairingLink) { try PairLink.parse("not a link").get() }
+        #expect(throws: PairLink.Invalid.notAPairingLink) { try PairLink.parse("").get() }
+    }
+
     @Test func everyRejectionHasAMessage() {
         for invalid in PairLink.Invalid.allCases {
             #expect(!invalid.message.isEmpty)

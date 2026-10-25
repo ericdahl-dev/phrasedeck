@@ -21,6 +21,7 @@ struct PhraseEditor: View {
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \Page.order) private var pages: [Page]
     @State private var draft = PhraseDraft()
+    @State private var saveError: String?
 
     var body: some View {
         NavigationStack {
@@ -94,12 +95,16 @@ struct PhraseEditor: View {
         }
     }
 
+    /// On a failed save the sheet stays open with the draft, so Save can be tried again.
     private func save() {
-        switch target {
-        case .new(let page): Deck.addPhrase(draft, to: draft.page ?? page, in: context)
-        case .existing(let phrase): Deck.save(draft, into: phrase)
+        do {
+            switch target {
+            case .new(let page): try Deck.addPhrase(draft, to: draft.page ?? page, in: context)
+            case .existing(let phrase): try Deck.save(draft, into: phrase)
+            }
+            dismiss()
+        } catch {
+            saveError = error.localizedDescription
         }
-        try? context.save()
-        dismiss()
     }
 }

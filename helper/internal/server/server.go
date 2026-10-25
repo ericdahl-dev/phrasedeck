@@ -1,4 +1,4 @@
-// Package server is phrased's HTTP API: GET /health, POST /type and POST /pair.
+// Package server is phrased's HTTP API: GET /health, GET /info, POST /type and POST /pair.
 package server
 
 import (
@@ -37,6 +37,9 @@ type Config struct {
 	AllowHosts []string
 	// LockWait is how long a request waits for the typing lock before 409. Default 1 second.
 	LockWait time.Duration
+	// CertSHA256 and LANPort describe the LAN listener; both are empty when LAN is off.
+	CertSHA256 string
+	LANPort    int
 }
 
 type server struct {
@@ -61,6 +64,7 @@ func New(cfg Config) http.Handler {
 	mux.HandleFunc("/health", s.health)
 	mux.HandleFunc("/type", s.typeText)
 	mux.HandleFunc("/pair", s.pair)
+	mux.HandleFunc("/info", s.info)
 	return s.hostGuard(mux)
 }
 
@@ -88,6 +92,39 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// authorized answers 401 unless r carries a paired device's bearer token.
+func (s *server) authorized(w http.ResponseWriter, r *http.Request) bool {
+	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || !s.cfg.Store.Check(tok) {
+		fail(w, http.StatusUnauthorized, "missing or invalid token")
+		return false
+	}
+	return true
+}
+
+// info tells a paired device the LAN listener's port and certificate fingerprint, so a
+// computer paired over the tailnet can pin it without pairing again.
+func (s *server) info(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		fail(w, http.StatusMethodNotAllowed, "use GET")
+		return
+	}
+	if !s.authorized(w, r) {
+		return
+	}
+	out := map[string]any{"hostname": s.cfg.Hostname}
+	s.addLAN(out)
+	reply(w, http.StatusOK, out)
+}
+
+// addLAN adds the LAN listener's fingerprint and port to a reply when LAN is on.
+func (s *server) addLAN(out map[string]any) {
+	if s.cfg.CertSHA256 != "" {
+		out["certSHA256"] = s.cfg.CertSHA256
+		out["lanPort"] = s.cfg.LANPort
+	}
+}
+
 type typeRequest struct {
 	Text  string    `json:"text"`
 	Enter bool      `json:"enter"`
@@ -98,9 +135,7 @@ func (s *server) typeText(w http.ResponseWriter, r *http.Request) {
 	if !postJSON(w, r) {
 		return
 	}
-	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || !s.cfg.Store.Check(tok) {
-		fail(w, http.StatusUnauthorized, "missing or invalid token")
+	if !s.authorized(w, r) {
 		return
 	}
 	if !s.limit.Allow() {
@@ -177,7 +212,9 @@ func (s *server) pair(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 		log.Printf("paired %q", device)
-		reply(w, http.StatusOK, map[string]string{"token": token})
+		out := map[string]any{"token": token}
+		s.addLAN(out)
+		reply(w, http.StatusOK, out)
 	case errors.Is(err, auth.ErrNoWindow):
 		fail(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, auth.ErrWrongCode):

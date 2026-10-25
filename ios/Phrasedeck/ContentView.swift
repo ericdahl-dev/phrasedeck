@@ -58,7 +58,8 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var banner: some View {
-        if let feedback = model.feedback, feedback.tone != .success, let message = feedback.message {
+        // A success only has a message when it took another route (#11).
+        if let feedback = model.feedback, let message = feedback.message {
             HStack {
                 Text(message)
                     .font(.callout.weight(.semibold))
@@ -72,7 +73,8 @@ struct ContentView: View {
             }
             .foregroundStyle(.white)
             .padding()
-            .background(feedback.tone == .amber ? Color.orange : Color.red, in: .rect(cornerRadius: 12))
+            .background(feedback.tone == .success ? Color.blue : feedback.tone == .amber ? Color.orange : Color.red,
+                        in: .rect(cornerRadius: 12))
             .padding(.horizontal)
             .onTapGesture { model.dismissFeedback() }
             .transition(.move(edge: .top).combined(with: .opacity))

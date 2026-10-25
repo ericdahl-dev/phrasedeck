@@ -9,11 +9,35 @@ struct Helper: Codable, Hashable, Identifiable, Sendable {
     var name: String
     var host: String
     var port: Int = Helper.defaultPort
+    /// The LAN certificate's fingerprint and port (#11), taken only from
+    /// /pair, the QR code or an authenticated /info; never from Bonjour.
+    var certSHA256: String?
+    var lanPort: Int?
+    /// The LAN address from a QR code made with Tailscale off; such a
+    /// computer has an empty `host` and is reached only this way.
+    var lanHost: String?
 
     /// The machine name from a MagicDNS name ("lib-2833" for
     /// lib-2833.tail1fdac.ts.net); other hosts as they are.
+    /// False for a computer paired with Tailscale off (#11).
+    var hasTailnetHost: Bool { !host.isEmpty }
+
     static func displayName(for host: String) -> String {
         host.hasSuffix(".ts.net") ? String(host.prefix { $0 != "." }) : host
+    }
+
+    /// Whether two hosts name the same computer: equal (ignoring case and a
+    /// trailing dot), or a bare short name and a MagicDNS name whose first
+    /// label is that name. Two different FQDNs never match on their first label.
+    static func sameMachine(_ a: String, _ b: String) -> Bool {
+        func clean(_ h: String) -> String { h.lowercased().hasSuffix(".") ? String(h.lowercased().dropLast()) : h.lowercased() }
+        let (a, b) = (clean(a), clean(b))
+        if a == b { return true }
+        func short(_ bare: String, matches fqdn: String) -> Bool {
+            !bare.contains(".") && !bare.contains(":") && fqdn.hasSuffix(".ts.net")
+                && fqdn.prefix { $0 != "." } == bare
+        }
+        return short(a, matches: b) || short(b, matches: a)
     }
 }
 
@@ -45,6 +69,11 @@ final class HelperStore {
 
     func add(_ helper: Helper) throws {
         try save(helpers + [helper])
+    }
+
+    /// Replaces the stored computer with the same id.
+    func update(_ helper: Helper) throws {
+        try save(helpers.map { $0.id == helper.id ? helper : $0 })
     }
 
     /// Removes the computer and clears its Keychain token.

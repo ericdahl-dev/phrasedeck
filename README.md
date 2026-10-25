@@ -146,6 +146,8 @@ curl -s http://<tailnet-name>:47811/type \
   later puts back everything that was on the clipboard before (images and rich text too). If you
   copy something in that half second, your new copy is kept instead.
 - `GET /health` needs no token and returns `hostname`, `os` and `accessibility_ok`.
+- `GET /info` needs the token and returns `hostname`, plus `certSHA256` and `lanPort` when the
+  LAN route is on. It's served over the tailnet only.
 
 Status codes:
 
@@ -169,9 +171,46 @@ Status codes:
 | `-config` | `~/.config/phrased` | directory holding `tokens.json` and `pairing.json` |
 | `-tailscale` | `tailscale` on PATH, else the Mac app's CLI | used once at startup for this machine's names |
 | `-allow-host` | none | another `Host` to accept; repeat for more |
+| `-lan` | none | a home subnet to also serve over HTTPS, like `192.168.1.0/24`; repeat for more |
+| `-lan-port` | `47812` | HTTPS port for the `-lan` subnets |
 
 If `tailscale status --json` fails, `phrased` exits: without the allowlist it would answer 403 to
-everything.
+everything. With `-lan` set it keeps running, serves only the LAN route, and checks again every 30 seconds;
+once Tailscale is up the tailnet route works too, without a restart.
+
+### Home network without Tailscale (optional)
+
+`-lan 192.168.1.0/24` (or one subnet per line in `~/.config/phrased/lan-subnets`; `#` starts a
+comment) adds a second listener:
+
+- **HTTPS on port 47812,** open only to those subnets and to tailnet peers. Each subnet must be
+  private (inside `10/8`, `172.16/12`, `192.168/16` or `fc00::/7`), so a typo can't expose the
+  helper to the internet.
+- **Its certificate** is self-signed ECDSA, made on first run as `lan-cert.pem` and `lan-key.pem`
+  (both mode 0600) in the config directory and reused after that. The app pins its SHA-256, which
+  `phrased` logs at startup, and gets it only over a trusted channel: `/pair` over the tailnet,
+  `GET /info` over the tailnet, or the QR code. If either file is unreadable or corrupt, `phrased`
+  stops with an error naming it rather than making a new one. Delete both files to make a new
+  one, and then re-pair every device.
+- **Bonjour** advertises `_phrasedeck._tcp` on the interfaces in those subnets, as
+  `phrased-<host>.local`, with TXT `v=1`, `ts=<tailnet name>`, `fp` (the certificate
+  fingerprint, for matching a paired computer) and `port`. TXT carries no token. If Tailscale
+  comes up after `phrased` starts, `ts` is added without a restart.
+- **`/pair`** adds `certSHA256` and `lanPort` to its reply, and the QR code from `phrased pair`
+  adds `fp`, `lan` (this machine's LAN address) and `lanPort`. With Tailscale off, the QR code
+  leaves out `host` and `port` and carries only the LAN route.
+- `/pair`, `/type`, tokens, limits and lockout are shared by both listeners. Each accepts only
+  its own `Host` names: tailnet names on 47811, LAN IPs and `.local` names on 47812.
+
+Limits:
+- The LAN addresses and interfaces are read at startup; restart `phrased` after the network
+  changes.
+- On the Mac, the firewall must allow the binary (see above); on a managed Mac that means the
+  already-allowed path.
+
+```sh
+curl -sk https://<lan-ip>:47812/health   # -k: the app pins the certificate instead
+```
 
 ## The iOS app on TestFlight
 
@@ -198,7 +237,36 @@ Beta App Review and no App Store release. Day-to-day development still runs stra
 The Apple Distribution certificate for team `5HR8E5CWR7` must be in the login keychain (check with
 `security find-identity -v -p codesigning`).
 
-### Upload a build
+### Release by tag (the usual way)
+
+Tag a version on `main` and push the tag; `.github/workflows/release.yml` builds it and uploads it
+to TestFlight:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+- **Version and build:** the tag sets the version (`v0.2.0` becomes `0.2.0`), and the build number
+  is the run number plus the attempt (for example `12.1`), so re-running a tag uploads a new, higher
+  build. Both go on the `xcodebuild` command line; no file changes.
+- **Only from `main`** or a `release/` branch: a tag on any other commit fails at "Check the tag".
+- **Signing** uses one fixed Apple Distribution certificate, and `ios/scripts/ci_profile.py` gets
+  (or makes) the App Store profile `Phrasedeck CI App Store` through the App Store Connect API. The
+  workflow checks that the profile has CloudKit and production push before it archives. Nothing
+  makes a new certificate, so Apple's certificate limit is never reached.
+- **Secrets** (repository secrets): `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` (the `.p8`
+  contents), `DEVELOPMENT_TEAM`, `DIST_CERT_P12_BASE64` (the certificate and its key as a `.p12`,
+  run through `base64`) and `DIST_CERT_PASSWORD`. The repository is public, but only a tag pushed
+  here runs the workflow, never a pull request or a fork, so the secrets never reach outside code.
+- **If it fails**, open the run's Archive or Upload step; the logs are also attached to the run as
+  `release-logs`.
+
+**Don't mix the two upload paths within one version.** A local upload's build number (for example
+`202610251430`) is higher than any CI build number, so after one local upload at `0.2.0`, every
+tagged `v0.2.0` run fails with `bundle version must be higher`. Use the local script for a version
+no tag will ship, or set `BUILD_NUMBER` to match.
+
+### Upload a build from this Mac
 
 ```sh
 ASC_KEY_ID=… ASC_ISSUER_ID=… ASC_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_….p8 \

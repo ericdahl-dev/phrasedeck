@@ -49,8 +49,10 @@ listener (47812) and the app's choice of route.
       a competing A/AAAA set that makes mDNSResponder or avahi rename the machine. If the name is
       taken, dnssd's probe renames it (`phrased-<host>-2`); the app uses the resolved IP, so nothing
       depends on the exact name.
-- [ ] TXT holds only `v`, `ts` and `port`, with no token, fingerprint or code. `ts` exposes the
-      MagicDNS name to the LAN, which is acceptable but worth knowing.
+- [ ] TXT holds only `v`, `port`, `fp` and (once Tailscale is up) `ts`, with no token or code.
+      `fp` is the certificate fingerprint, which is public anyway since it's sent in every TLS
+      handshake. It's there so the app can match a computer paired with Tailscale off. `ts` exposes
+      the MagicDNS name to the LAN, which is acceptable but worth knowing.
 
 **`/info` and `/pair`**
 - [ ] `GET /info` needs a valid token and is served **only on the tailnet listener**. On 47812 a
@@ -74,13 +76,18 @@ listener (47812) and the app's choice of route.
 - [ ] The token header is sent only on a session that has this pinning delegate.
 - [ ] The app never sends `http://` to a LAN IP or a `.local` name. `NSAllowsLocalNetworking` is on
       for the tailnet route, so ATS won't stop it; the code has to.
+- [ ] **Bare host names too.** With Tailscale off, a bare name like `omarchy-laptop` resolves
+      through the router's DNS to a LAN address. Before any plain-HTTP request, every resolved
+      address must be a tailnet address (100.64/10, fd7a:115c:a1e0::/48), or nothing is sent. The
+      request (token included) goes out right after the TCP handshake, before the helper's filter
+      can drop it, and `/info` over such a route could plant an attacker's pin.
 - [ ] A pin mismatch is shown to the user and never retried over another LAN route. Falling back to
       the tailnet route after a LAN timeout or pin failure is fine (it's authenticated by WireGuard),
       but it must keep the tailnet host and never move the token onto plain HTTP.
 
 **Spoofed Bonjour and `.local` names**
-- [ ] Nothing from Bonjour is trusted. TXT `ts` only decides "nearby", the fingerprint never comes
-      from TXT, and the address it resolves to is pinned like any other.
+- [ ] Nothing from Bonjour is trusted. TXT `ts` and `fp` only decide "nearby" (`fp` is compared
+      with stored pins, never stored), and the address it resolves to is pinned like any other.
 - [ ] A spoofer claiming `ts=<Eric's Mac>` gets a TLS handshake that fails the pin, and no token is
       sent. The cost is a denial of service, so prefer falling back to the tailnet route with a
       visible note over failing every send.

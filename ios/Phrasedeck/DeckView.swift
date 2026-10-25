@@ -28,23 +28,15 @@ struct DeckView: View {
             } else {
                 GeometryReader { geo in
                     let columns = shownColumns(width: geo.size.width)
-                    let metrics = DeckSize.metrics(
-                        columnWidth: DeckSize.columnWidth(width: geo.size.width, columns: columns))
+                    let cell = CGSize(width: DeckSize.columnWidth(width: geo.size.width, columns: columns),
+                                      height: DeckSize.metrics(columnWidth: DeckSize.columnWidth(
+                                          width: geo.size.width, columns: columns)).height)
                     TabView {
                         ForEach(pages) { page in
                             ScrollView {
-                                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DeckSize.spacing),
-                                                         count: columns),
-                                          spacing: DeckSize.spacing) {
-                                    ForEach(page.sortedPhrases) { phrase in
-                                        PhraseButton(phrase: phrase, metrics: metrics, pinchGuard: pinchGuard,
-                                                     edit: { editing = .existing(phrase) },
-                                                     delete: { remove(phrase) })
-                                    }
-                                    addTile(page, height: metrics.height)
-                                }
-                                .padding(DeckSize.padding)
-                                .animation(.snappy, value: columns)
+                                grid(page, columns: columns, cell: cell)
+                                    .padding(DeckSize.padding)
+                                    .animation(.snappy, value: columns)
                             }
                             .accessibilityIdentifier("deck.grid")
                             .accessibilityValue("\(columns) columns")
@@ -81,7 +73,7 @@ struct DeckView: View {
     private func savedColumns(width: CGFloat) -> Int {
         DeckSize.columns(stored: storedColumns,
                          default: DeckSize.defaultColumns(for: sizeClass, width: width),
-                         in: DeckSize.range(for: sizeClass))
+                         in: DeckSize.range(for: sizeClass, width: width))
     }
 
     private func shownColumns(width: CGFloat) -> Int {
@@ -97,7 +89,7 @@ struct DeckView: View {
                 let start = pinchStart ?? savedColumns(width: width)
                 pinchStart = start
                 pinchColumns = DeckSize.columns(pinch: value.magnification, from: start,
-                                                in: DeckSize.range(for: sizeClass))
+                                                in: DeckSize.range(for: sizeClass, width: width))
             }
             .onEnded { _ in
                 if let pinchColumns { storedColumns = pinchColumns }
@@ -107,11 +99,49 @@ struct DeckView: View {
             }
     }
 
-    private func addTile(_ page: Page, height: CGFloat) -> some View {
+    private enum Tile: Hashable {
+        case phrase(PersistentIdentifier)
+        case add
+    }
+
+    /// The page's buttons packed by span (#51), with the "+" tile as a trailing 1×1.
+    private func grid(_ page: Page, columns: Int, cell: CGSize) -> some View {
+        let phrases = Dictionary(uniqueKeysWithValues: page.sortedPhrases.map { ($0.persistentModelID, $0) })
+        let items = page.sortedPhrases.map {
+            Packing.Item(id: Tile.phrase($0.persistentModelID), columns: $0.spanColumns, rows: $0.spanRows)
+        } + [Packing.Item(id: Tile.add, columns: 1, rows: 1)]
+        let placed = Packing.pack(items, columns: columns)
+        let step = CGSize(width: cell.width + DeckSize.spacing, height: cell.height + DeckSize.spacing)
+        let rows = CGFloat(Packing.rows(of: placed))
+        return ZStack(alignment: .topLeading) {
+            ForEach(placed, id: \.id) { spot in
+                let size = CGSize(width: CGFloat(spot.columns) * step.width - DeckSize.spacing,
+                                  height: CGFloat(spot.rows) * step.height - DeckSize.spacing)
+                Group {
+                    switch spot.id {
+                    case .phrase(let id):
+                        if let phrase = phrases[id] {
+                            PhraseButton(phrase: phrase, metrics: DeckSize.metrics(button: size),
+                                         pinchGuard: pinchGuard,
+                                         edit: { editing = .existing(phrase) }, delete: { remove(phrase) })
+                        }
+                    case .add:
+                        addTile(page)
+                    }
+                }
+                .frame(width: size.width, height: size.height)
+                .offset(x: CGFloat(spot.x) * step.width, y: CGFloat(spot.y) * step.height)
+            }
+        }
+        .frame(width: CGFloat(columns) * step.width - DeckSize.spacing,
+               height: max(0, rows * step.height - DeckSize.spacing), alignment: .topLeading)
+    }
+
+    private func addTile(_ page: Page) -> some View {
         Button { editing = .new(page) } label: {
             Image(systemName: "plus")
                 .font(.title2.weight(.semibold))
-                .frame(maxWidth: .infinity, minHeight: height - 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(8)
                 .foregroundStyle(.secondary)
                 .background(.quaternary, in: .rect(cornerRadius: 16))
@@ -135,15 +165,20 @@ enum DeckSize {
     /// The old iPad grid fit as many columns of at least this width as it could.
     static let iPadDefaultWidth: CGFloat = 150
 
-    static func range(for sizeClass: UserInterfaceSizeClass?) -> ClosedRange<Int> {
-        sizeClass == .regular ? 3...8 : 2...5
+    /// On the iPhone, pinching in reaches 5 columns, or in landscape as many as fit at about
+    /// this width each. The iPad stays at 3 to 8.
+    static let narrowestColumn: CGFloat = 72
+
+    static func range(for sizeClass: UserInterfaceSizeClass?, width: CGFloat) -> ClosedRange<Int> {
+        guard sizeClass != .regular else { return 3...8 }
+        return 2...max(5, Int((width - 2 * padding + spacing) / (narrowestColumn + spacing)))
     }
 
     /// Today's layout: 3 columns on the iPhone, and on the iPad as many 150-point columns as fit.
     static func defaultColumns(for sizeClass: UserInterfaceSizeClass?, width: CGFloat) -> Int {
         guard sizeClass == .regular else { return 3 }
         let fit = Int((width - 2 * padding + spacing) / (iPadDefaultWidth + spacing))
-        return fit.clamped(to: range(for: sizeClass))
+        return fit.clamped(to: range(for: sizeClass, width: width))
     }
 
     /// The column count a pinch of `scale` snaps to, starting from `start`. Pinching out
@@ -153,9 +188,9 @@ enum DeckSize {
         return Int((CGFloat(start) / scale).rounded()).clamped(to: range)
     }
 
-    /// The stored count, or the default when nothing valid is stored (0 means "never set").
+    /// The stored count clamped to what fits now, or the default when never set (0).
     static func columns(stored: Int, default fallback: Int, in range: ClosedRange<Int>) -> Int {
-        range.contains(stored) ? stored : fallback
+        stored > 0 ? stored.clamped(to: range) : fallback
     }
 
     static let compactKey = "deck.columns.compact"
@@ -169,6 +204,12 @@ enum DeckSize {
     /// and labels grow with them.
     static func metrics(columnWidth: CGFloat) -> (height: CGFloat, font: CGFloat) {
         (max(56, columnWidth * 0.86), min(34, max(13, columnWidth * 0.17)))
+    }
+
+    /// Label size for a button of any span: it grows with the smaller side, so a wide button
+    /// doesn't get text taller than it is.
+    static func metrics(button size: CGSize) -> (height: CGFloat, font: CGFloat) {
+        (size.height, metrics(columnWidth: min(size.width, size.height / 0.86)).font)
     }
 
     static func columnWidth(width: CGFloat, columns: Int) -> CGFloat {

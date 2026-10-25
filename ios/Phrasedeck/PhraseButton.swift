@@ -21,7 +21,7 @@ struct PhraseButton: View {
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
                     .minimumScaleFactor(0.5)
-                    .frame(maxWidth: .infinity, minHeight: metrics.height - 16)
+                    .frame(maxWidth: .infinity, minHeight: metrics.height - 16, maxHeight: .infinity)
                     .padding(8)
                 if phrase.pressEnter {
                     Text("⏎")

@@ -82,3 +82,15 @@ func TestForcedPasteKeepsNewlines(t *testing.T) {
 func TestEmptyTextOnlyEnter(t *testing.T) {
 	check(t, Build("", true, ModeAuto), []Step{{Kind: Enter}})
 }
+
+func TestNoModeMeansAuto(t *testing.T) {
+	check(t, Build("a\nb", false, ""), Build("a\nb", false, ModeAuto))
+	for _, m := range []Mode{"", ModeAuto, ModeType, ModePaste} {
+		if !m.Valid() {
+			t.Errorf("%q not valid", m)
+		}
+	}
+	if Mode("shout").Valid() {
+		t.Error(`"shout" valid`)
+	}
+}

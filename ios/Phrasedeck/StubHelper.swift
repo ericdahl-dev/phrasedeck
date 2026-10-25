@@ -18,7 +18,9 @@ final class StubHelper {
             Health(hostname: "stub-mac", os: "darwin", accessibilityOK: true)
         }
 
-        func pair(code: String, device: String) async throws -> String { "stub-token" }
+        func pair(code: String, device: String) async throws -> Pairing { Pairing(token: "stub-token") }
+
+        func info() async throws -> LANInfo { LANInfo() }
 
         func type(text: String, enter: Bool) async throws {
             await MainActor.run { probe.sendCount += 1 }
@@ -41,6 +43,6 @@ final class StubHelper {
         try? store.add(mac)
         store.selectedHelperID = mac.id
         let api = API(probe: probe)
-        return AppModel(store: store, tokens: tokens, device: "UI test") { _, _ in api }
+        return AppModel(store: store, tokens: tokens, device: "UI test") { _, _, _ in api }
     }
 }

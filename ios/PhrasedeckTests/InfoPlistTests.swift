@@ -19,8 +19,11 @@ struct InfoPlistTests {
         #expect(info["ITSAppUsesNonExemptEncryption"] as? Bool == false)
     }
 
-    @Test func hasNoBonjourServices() {
-        #expect(info["NSBonjourServices"] == nil)
+    /// Browsing for helpers on the home network (#11); advertising nothing.
+    @Test func browsesOnlyForPhrasedeckHelpers() throws {
+        #expect(info["NSBonjourServices"] as? [String] == ["_phrasedeck._tcp"])
+        let usage = try #require(info["NSLocalNetworkUsageDescription"] as? String)
+        #expect(usage.contains("home network"))
     }
 
     @Test func opensPhrasedeckLinks() throws {

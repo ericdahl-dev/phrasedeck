@@ -8,13 +8,123 @@ import Testing
 struct HelperClientTests {
     let helper = Helper(name: "Mac", host: "erics-mac", port: 47811)
 
+    /// erics-mac resolves to a tailnet address, as it does with Tailscale up.
     func client(token: String? = "tok-123") -> HelperClient {
-        HelperClient(helper: helper, token: token, session: StubURLProtocol.session())
+        HelperClient(helper: helper, token: token, session: StubURLProtocol.session(),
+                     resolve: { _ in ["100.101.102.103"] })
     }
 
     func json(_ data: Data?) throws -> [String: Any] {
         let data = try #require(data)
         return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    // MARK: routes
+
+    @Test func theLANRouteUsesHTTPSToTheLANAddress() async throws {
+        StubURLProtocol.reset(.status(200))
+        let lan = HelperClient(helper: helper, token: "tok-123",
+                               route: .lan(host: "192.168.1.20", port: 47812, pin: TestCerts.helperPin),
+                               session: StubURLProtocol.session())
+
+        try await lan.type(text: "yes", enter: true)
+
+        let request = try #require(StubURLProtocol.requests.first?.request)
+        #expect(request.url?.absoluteString == "https://192.168.1.20:47812/type")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
+    }
+
+    /// With Tailscale off, a bare name can resolve through the router's DNS to a LAN address.
+    /// Every address must be a tailnet one, or nothing (no token) is sent (#48 review).
+    @Test(arguments: [["192.168.1.29"], ["100.101.102.103", "192.168.1.29"], ["fd00::29"], ["8.8.8.8"]])
+    func aNameThatResolvesOffTheTailnetIsRefused(addresses: [String]) async {
+        StubURLProtocol.reset(.status(200))
+        let c = HelperClient(helper: helper, token: "tok", session: StubURLProtocol.session(),
+                             resolve: { _ in addresses })
+
+        await #expect(throws: HelperClient.Failure.notTailnet) { try await c.type(text: "x", enter: false) }
+        await #expect(throws: HelperClient.Failure.notTailnet) { try await c.info() }
+        #expect(StubURLProtocol.requests.isEmpty)
+    }
+
+    @Test func theSystemResolverReturnsNumericAddresses() async {
+        let addresses = await HelperClient.systemResolve("localhost")
+        #expect(addresses.contains("127.0.0.1"))
+        #expect(await HelperClient.systemResolve("no-such-host.invalid").isEmpty)
+    }
+
+    @Test func aNameThatDoesNotResolveIsUnreachableAndSendsNothing() async {
+        StubURLProtocol.reset(.status(200))
+        let c = HelperClient(helper: helper, token: "tok", session: StubURLProtocol.session(), resolve: { _ in [] })
+
+        await #expect(throws: HelperClient.Failure.unreachable) { try await c.health() }
+        #expect(StubURLProtocol.requests.isEmpty)
+    }
+
+    /// The request goes to the checked address itself, so a second lookup can't swap it.
+    @Test func aTailnetNameIsReachedAtItsCheckedAddressIPv4First() async throws {
+        StubURLProtocol.reset(.status(204))
+        let c = HelperClient(helper: helper, token: "tok", session: StubURLProtocol.session(),
+                             resolve: { name in
+                                 #expect(name == "erics-mac")
+                                 return ["fd7a:115c:a1e0::5", "100.70.1.5"]
+                             })
+
+        try await c.type(text: "x", enter: false)
+
+        let request = try #require(StubURLProtocol.requests.first?.request)
+        #expect(request.url?.absoluteString == "http://100.70.1.5:47811/type")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok")
+    }
+
+    @Test(arguments: ["192.168.1.20", "fe80::1", "mac.local"])
+    func theTailnetRouteNeverSendsPlainHTTPToALANHost(host: String) async {
+        StubURLProtocol.reset(.status(200))
+        let c = HelperClient(helper: Helper(name: "m", host: host), token: "tok", session: StubURLProtocol.session())
+
+        await #expect(throws: HelperClient.Failure.notTailnet) { try await c.type(text: "x", enter: false) }
+        #expect(StubURLProtocol.requests.isEmpty)
+    }
+
+    @Test func aPinMismatchIsItsOwnFailureNotNoReply() {
+        #expect(HelperClient.failure(for: .cancelled, pinMismatched: true) == .pinMismatch) // spelling: ok (URLError.Code API)
+        #expect(HelperClient.failure(for: .serverCertificateUntrusted, pinMismatched: true) == .pinMismatch)
+        #expect(HelperClient.failure(for: .cancelled, pinMismatched: false) == .noReply) // spelling: ok (URLError.Code API)
+    }
+
+    // MARK: info and pairing fields
+
+    @Test func infoReadsTheFingerprintAndLANPortWithAuth() async throws {
+        StubURLProtocol.reset(.status(200, body: Data(#"{"certSHA256":"\#(TestCerts.helperPin)","lanPort":47812}"#.utf8)))
+
+        let info = try await client().info()
+
+        #expect(info == LANInfo(certSHA256: TestCerts.helperPin, lanPort: 47812))
+        let request = try #require(StubURLProtocol.requests.first?.request)
+        #expect(request.url?.absoluteString == "http://100.101.102.103:47811/info")
+        #expect(request.httpMethod == "GET")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
+    }
+
+    @Test func infoFromAnOldHelperIsEmpty() async throws {
+        StubURLProtocol.reset(.status(404))
+        #expect(try await client().info() == LANInfo(certSHA256: nil, lanPort: nil))
+    }
+
+    @Test func pairReturnsTheLANFieldsWhenTheHelperSendsThem() async throws {
+        StubURLProtocol.reset(.status(200, body: Data(#"{"token":"t","certSHA256":"\#(TestCerts.helperPin.uppercased())","lanPort":47812}"#.utf8)))
+
+        let pairing = try await client(token: nil).pair(code: "123456", device: "iPhone")
+
+        #expect(pairing == Pairing(token: "t", certSHA256: TestCerts.helperPin, lanPort: 47812))
+    }
+
+    @Test func aBadFingerprintFromTheHelperIsDropped() async throws {
+        StubURLProtocol.reset(.status(200, body: Data(#"{"token":"t","certSHA256":"nope","lanPort":0}"#.utf8)))
+
+        let pairing = try await client(token: nil).pair(code: "123456", device: "iPhone")
+
+        #expect(pairing == Pairing(token: "t", certSHA256: nil, lanPort: nil))
     }
 
     // MARK: type
@@ -37,7 +147,7 @@ struct HelperClientTests {
         #expect(sent.count == 1)
         let request = try #require(sent.first?.request)
         #expect(request.httpMethod == "POST")
-        #expect(request.url?.absoluteString == "http://erics-mac:47811/type")
+        #expect(request.url?.absoluteString == "http://100.101.102.103:47811/type")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
         #expect(request.timeoutInterval == 3)
@@ -83,13 +193,13 @@ struct HelperClientTests {
     @Test func pairPostsCodeAndDeviceWithoutAuthAndReturnsTheToken() async throws {
         StubURLProtocol.reset(.status(200, body: Data(#"{"token":"long-lived"}"#.utf8)))
 
-        let token = try await client(token: nil).pair(code: "123456", device: "Eric's iPhone")
+        let pairing = try await client(token: nil).pair(code: "123456", device: "Eric's iPhone")
 
-        #expect(token == "long-lived")
+        #expect(pairing == Pairing(token: "long-lived", certSHA256: nil, lanPort: nil))
         let sent = StubURLProtocol.requests
         #expect(sent.count == 1)
         let request = try #require(sent.first?.request)
-        #expect(request.url?.absoluteString == "http://erics-mac:47811/pair")
+        #expect(request.url?.absoluteString == "http://100.101.102.103:47811/pair")
         #expect(request.httpMethod == "POST")
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
@@ -121,7 +231,7 @@ struct HelperClientTests {
         #expect(health == Health(hostname: "erics-mac", os: "darwin", accessibilityOK: false))
         let request = try #require(StubURLProtocol.requests.first?.request)
         #expect(request.httpMethod == "GET")
-        #expect(request.url?.absoluteString == "http://erics-mac:47811/health")
+        #expect(request.url?.absoluteString == "http://100.101.102.103:47811/health")
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
         #expect(StubURLProtocol.requests.count == 1)
     }

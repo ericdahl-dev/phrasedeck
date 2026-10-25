@@ -23,6 +23,15 @@ const (
 	ModePaste Mode = "paste"
 )
 
+// Valid reports whether m is a mode Build understands; "" means auto.
+func (m Mode) Valid() bool {
+	switch m {
+	case "", ModeAuto, ModeType, ModePaste:
+		return true
+	}
+	return false
+}
+
 // PasteThreshold is the length (in runes) above which auto mode pastes instead of typing.
 const PasteThreshold = 300
 
@@ -31,8 +40,11 @@ type Step struct {
 	Text string
 }
 
-// Build plans text in the given mode. The final Enter comes only from enter.
+// Build plans text in the given mode ("" is auto). The final Enter comes only from enter.
 func Build(text string, enter bool, mode Mode) []Step {
+	if mode == "" {
+		mode = ModeAuto
+	}
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	var steps []Step
 	paste := mode == ModePaste || (mode == ModeAuto &&

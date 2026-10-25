@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ericdahl-dev/phrasedeck/helper/internal/auth"
+	"github.com/ericdahl-dev/phrasedeck/helper/internal/confdir"
 )
 
 func runCmd(t *testing.T, args ...string) (string, error) {
@@ -86,12 +87,12 @@ func TestServerFlagsAreNotACommand(t *testing.T) {
 }
 
 func TestPairURLEscapesItsFields(t *testing.T) {
-	got := pairURL("lib-2833.tail1234.ts.net", 47811, "012345")
+	got := pairURL("lib-2833.tail1234.ts.net", 47811, "012345", "", "", 0)
 	want := "phrasedeck://pair?code=012345&host=lib-2833.tail1234.ts.net&port=47811&v=1"
 	if got != want {
 		t.Fatalf("pairURL = %q, want %q", got, want)
 	}
-	if got := pairURL("a&b=c", 1, "1"); !strings.Contains(got, "host=a%26b%3Dc") {
+	if got := pairURL("a&b=c", 1, "1", "", "", 0); !strings.Contains(got, "host=a%26b%3Dc") {
 		t.Fatalf("host not escaped: %q", got)
 	}
 }
@@ -103,14 +104,14 @@ func TestPairCommandPrintsAQRCodeForTheTailnetName(t *testing.T) {
 		return []byte(`{"Self":{"HostName":"mac","DNSName":"mac.tail1234.ts.net.","TailscaleIPs":["100.69.235.48"]}}`), nil
 	}
 	t.Cleanup(func() { notify = macNotify; tailscaleStatus = runTailscaleStatus })
-	os.WriteFile(filepath.Join(dir, "port"), []byte("47900\n"), 0o600)
+	confdir.New(dir).RecordPort(47900)
 
 	out, err := runCmd(t, "pair", "-config", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	code := regexp.MustCompile(`\b\d{6}\b`).FindString(out)
-	if !strings.Contains(out, pairURL("mac.tail1234.ts.net", 47900, code)) {
+	if !strings.Contains(out, pairURL("mac.tail1234.ts.net", 47900, code, "", "", 0)) {
 		t.Fatalf("no pair URL with the running port in %q", out)
 	}
 	if !strings.Contains(out, "█") || strings.Index(out, "█") < strings.Index(out, code) {

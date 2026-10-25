@@ -48,7 +48,7 @@ struct PhraseEditor: View {
                     Toggle("Double-tap to send", isOn: $draft.confirm)
                 }
                 Section {
-                    SpanPicker(columns: $draft.spanColumns, rows: $draft.spanRows)
+                    SizePicker(columns: $draft.sizeColumns, rows: $draft.sizeRows)
                 } header: {
                     Text("Size")
                 } footer: {
@@ -117,8 +117,8 @@ struct PhraseEditor: View {
     }
 }
 
-/// Picks a button's span from 1×1 to 3×3: tap the square where the button should end.
-struct SpanPicker: View {
+/// Picks a Button's Size from 1×1 to 3×3: tap the Square where the Button should end.
+struct SizePicker: View {
     @Binding var columns: Int
     @Binding var rows: Int
 
@@ -139,7 +139,7 @@ struct SpanPicker: View {
                             .buttonStyle(.plain)
                             .accessibilityLabel("\(column) by \(row)")
                             .accessibilityAddTraits(column == columns && row == rows ? .isSelected : [])
-                            .accessibilityIdentifier("editor.span.\(column)x\(row)")
+                            .accessibilityIdentifier("editor.size.\(column)x\(row)")
                         }
                     }
                 }
@@ -147,7 +147,7 @@ struct SpanPicker: View {
             Text("\(columns) × \(rows)")
                 .font(.title3.monospacedDigit())
                 .foregroundStyle(.secondary)
-                .accessibilityIdentifier("editor.span.value")
+                .accessibilityIdentifier("editor.size.value")
         }
         .padding(.vertical, 4)
     }

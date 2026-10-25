@@ -15,25 +15,25 @@ struct PhraseDraft {
     var confirm = false
     var colorName = "blue"
     var page: Page?
-    var spanColumns = 1
-    var spanRows = 1
+    var sizeColumns = 1
+    var sizeRows = 1
 
     init(label: String = "", text: String = "", pressEnter: Bool = false, confirm: Bool = false,
-         colorName: String = "blue", page: Page? = nil, spanColumns: Int = 1, spanRows: Int = 1) {
+         colorName: String = "blue", page: Page? = nil, sizeColumns: Int = 1, sizeRows: Int = 1) {
         self.label = label
         self.text = text
         self.pressEnter = pressEnter
         self.confirm = confirm
         self.colorName = colorName
         self.page = page
-        self.spanColumns = spanColumns
-        self.spanRows = spanRows
+        self.sizeColumns = sizeColumns
+        self.sizeRows = sizeRows
     }
 
     init(_ phrase: Phrase) {
         self.init(label: phrase.label, text: phrase.text, pressEnter: phrase.pressEnter,
                   confirm: phrase.confirm, colorName: phrase.colorName, page: phrase.page,
-                  spanColumns: phrase.spanColumns, spanRows: phrase.spanRows)
+                  sizeColumns: phrase.sizeColumns, sizeRows: phrase.sizeRows)
     }
 
     var isValid: Bool { !label.trimmingCharacters(in: .whitespaces).isEmpty && !text.isEmpty }
@@ -84,7 +84,7 @@ enum Deck {
         let phrase = Phrase(label: draft.label.trimmingCharacters(in: .whitespaces), text: draft.text,
                             pressEnter: draft.pressEnter, confirm: draft.confirm,
                             colorName: draft.colorName, order: page.sortedPhrases.count, page: page,
-                            spanColumns: draft.spanColumns, spanRows: draft.spanRows)
+                            sizeColumns: draft.sizeColumns, sizeRows: draft.sizeRows)
         context.insert(phrase)
         try saveInserted(phrase, in: context)
         return phrase
@@ -97,8 +97,8 @@ enum Deck {
         phrase.pressEnter = draft.pressEnter
         phrase.confirm = draft.confirm
         phrase.colorName = draft.colorName
-        phrase.spanColumns = draft.spanColumns
-        phrase.spanRows = draft.spanRows
+        phrase.sizeColumns = draft.sizeColumns
+        phrase.sizeRows = draft.sizeRows
         if let target = draft.page, target !== phrase.page {
             let old = phrase.page
             phrase.order = target.sortedPhrases.count

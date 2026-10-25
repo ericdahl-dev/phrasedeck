@@ -36,14 +36,25 @@ final class Phrase {
     var page: Page?
     var seedKey: String?
     var uid: String = ""
-    /// The button's size in grid cells, 1...3 each way (#51). Synced; defaults keep the
-    /// CloudKit schema change additive and old phrases 1×1.
-    var spanColumns: Int = 1
-    var spanRows: Int = 1
+    // Stored as span for CloudKit: these sync as CD_spanColumns and CD_spanRows (#77), and
+    // renaming them would add new fields that existing Buttons don't have. The defaults keep
+    // old phrases 1x1.
+    private var spanColumns: Int = 1
+    private var spanRows: Int = 1
+
+    /// The Button's Size: how many Squares it covers, 1...3 each way (#51).
+    var sizeColumns: Int {
+        get { spanColumns }
+        set { spanColumns = newValue }
+    }
+    var sizeRows: Int {
+        get { spanRows }
+        set { spanRows = newValue }
+    }
 
     init(label: String, text: String, pressEnter: Bool = false, confirm: Bool = false,
          colorName: String = "blue", order: Int, page: Page? = nil, seedKey: String? = nil,
-         spanColumns: Int = 1, spanRows: Int = 1) {
+         sizeColumns: Int = 1, sizeRows: Int = 1) {
         self.label = label
         self.text = text
         self.pressEnter = pressEnter
@@ -53,8 +64,8 @@ final class Phrase {
         self.page = page
         self.seedKey = seedKey
         self.uid = UUID().uuidString
-        self.spanColumns = spanColumns
-        self.spanRows = spanRows
+        self.spanColumns = sizeColumns
+        self.spanRows = sizeRows
     }
 }
 

@@ -98,20 +98,20 @@ struct DeckEditTests {
         #expect(try context.fetch(FetchDescriptor<Phrase>()).map(\.label) == ["a"])
     }
 
-    @Test func theSpanIsSavedAndNewPhrasesAreOneByOne() throws {
+    @Test func theSizeIsSavedAndNewPhrasesAreOneByOne() throws {
         let page = try Deck.addPage(named: "Agents", in: context)
         let phrase = try Deck.addPhrase(PhraseDraft(label: "a", text: "a"), to: page, in: context)
-        #expect(phrase.spanColumns == 1 && phrase.spanRows == 1)
+        #expect(phrase.sizeColumns == 1 && phrase.sizeRows == 1)
 
         var draft = PhraseDraft(phrase)
-        draft.spanColumns = 2
-        draft.spanRows = 3
+        draft.sizeColumns = 2
+        draft.sizeRows = 3
         try Deck.save(draft, into: phrase)
-        #expect(phrase.spanColumns == 2 && phrase.spanRows == 3)
-        #expect(PhraseDraft(phrase).spanColumns == 2)
+        #expect(phrase.sizeColumns == 2 && phrase.sizeRows == 3)
+        #expect(PhraseDraft(phrase).sizeColumns == 2)
 
-        let big = try Deck.addPhrase(PhraseDraft(label: "b", text: "b", spanColumns: 3, spanRows: 1), to: page, in: context)
-        #expect(big.spanColumns == 3 && big.spanRows == 1)
+        let big = try Deck.addPhrase(PhraseDraft(label: "b", text: "b", sizeColumns: 3, sizeRows: 1), to: page, in: context)
+        #expect(big.sizeColumns == 3 && big.sizeRows == 1)
     }
 
     /// Every edit is saved by Deck itself, so no view has to remember to.

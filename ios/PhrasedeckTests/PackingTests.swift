@@ -1,12 +1,12 @@
 import Testing
 @testable import Phrasedeck
 
-/// Dense packing of buttons with spans into a page `columns` cells wide that grows down (#51).
+/// Dense packing of Buttons of any Size into a page `columns` Squares wide that grows down (#51).
 struct PackingTests {
     typealias Item = Packing.Item<Int>
 
-    static func items(_ spans: [(Int, Int)]) -> [Item] {
-        spans.enumerated().map { Item(id: $0.offset, columns: $0.element.0, rows: $0.element.1) }
+    static func items(_ sizes: [(Int, Int)]) -> [Item] {
+        sizes.enumerated().map { Item(id: $0.offset, columns: $0.element.0, rows: $0.element.1) }
     }
 
     /// (x, y, columns, rows) per id, for compact expectations.
@@ -54,7 +54,7 @@ struct PackingTests {
         #expect(s[1] == [1, 0, 1, 1])
     }
 
-    @Test func spansWiderThanThePageAreClampedForDisplayOnly() {
+    @Test func sizesWiderThanThePageAreClampedForDisplayOnly() {
         let input = Self.items([(3, 2), (1, 1)])
         let s = Self.spots(Packing.pack(input, columns: 2))
         #expect(s[0] == [0, 0, 2, 2])

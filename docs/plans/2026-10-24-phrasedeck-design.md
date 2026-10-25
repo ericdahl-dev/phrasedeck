@@ -121,7 +121,8 @@ Helper { id, name, host, port }   // local to each device; token in the Keychain
 | Yes | yes | yes | yes |
 | Merge it | Merge it | yes | yes |
 
-Each seeded row carries a fixed `seedKey`. Seeding inserts only the keys that are missing, and
+Each seeded row carries a fixed `seedKey`. Seeding runs once per device and inserts only the keys
+that are missing, and
 once sync is on, rows that share a `seedKey` are merged, so two devices don't double the deck.
 
 ## `phrased` helper (Go)

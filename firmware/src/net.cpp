@@ -22,7 +22,7 @@ namespace {
 
 struct Request {
     enum Kind { Pair, Type } kind;
-    size_t index = 0;
+    Helper helper;
     std::string code, shortPin, text;
 };
 
@@ -50,6 +50,9 @@ void loadPairing() {
 bool savePairing(const Pairing& pr) {
     Preferences p;
     if (!p.begin("pairing", false, panel_store::kPartition)) return false;
+    // Clear first and write the Token last, so a save that fails partway can't pair one
+    // Computer's Pin with another's Token: without a Token the pairing doesn't load.
+    p.clear();
     const bool ok = p.putString("name", pr.name.c_str()) && p.putString("address", pr.address.c_str()) &&
                     p.putInt("port", pr.port) && p.putString("pin", pr.pin.c_str()) &&
                     p.putString("token", pr.token.c_str());
@@ -86,7 +89,8 @@ std::vector<Helper> browse() {
             if (MDNS.hasTxt(i, key)) txt[key] = MDNS.txt(i, key).c_str();
         }
         Helper h;
-        if (!nearby::parse(txt, h.txt)) continue;
+        // An answer without an A record yet comes back as 0.0.0.0: not Nearby until it resolves.
+        if (!nearby::parse(txt, h.txt) || MDNS.address(i) == IPAddress()) continue;
         h.name = MDNS.hostname(i).c_str();
         h.address = MDNS.address(i).toString().c_str();
         out.push_back(h);
@@ -95,11 +99,7 @@ std::vector<Helper> browse() {
 }
 
 void handlePair(const Request& req, Snapshot& s) {
-    if (req.index >= s.nearby.size()) {
-        s.message = "Pairing: that Computer isn't Nearby any more";
-        return;
-    }
-    const Helper& h = s.nearby[req.index];
+    const Helper& h = req.helper;
     JsonDocument doc;
     doc["code"] = req.code;
     doc["device"] = "Phrasedeck panel";
@@ -115,13 +115,11 @@ void handlePair(const Request& req, Snapshot& s) {
         s.message = "Can't reach " + h.name;
     } else if (pairing::readPairReply(r.status, r.body, r.certSha256, token)) {
         Pairing pr{h.name, h.address, r.certSha256, token, h.txt.port};
-        if (savePairing(pr)) {
-            g_pairing = pr;
-            s.paired = pr.name;
-            s.message = "Paired with " + pr.name;
-        } else {
-            s.message = "Paired, but couldn't save it";
-        }
+        // The Helper has used up its pairing window either way, so keep the pairing in RAM.
+        g_pairing = pr;
+        s.paired = pr.name;
+        s.message = savePairing(pr) ? "Paired with " + pr.name
+                                    : "Paired with " + pr.name + ", but not saved: pair again after a restart";
     } else if (r.status == 401) {
         s.message = "Wrong Pairing code";
     } else if (r.status == 404) {
@@ -129,7 +127,6 @@ void handlePair(const Request& req, Snapshot& s) {
     } else {
         s.message = "Pairing failed (" + std::to_string(r.status) + ")";
     }
-    Serial.printf("net: pair %s: %s\n", h.name.c_str(), s.message.c_str());
 }
 
 void handleType(const Request& req, Snapshot& s) {
@@ -150,9 +147,13 @@ void handleType(const Request& req, Snapshot& s) {
     doc["text"] = req.text;
     std::string json;
     serializeJson(doc, json);
-    const helper_client::Reply r = helper_client::post(
-        address, port, "/type", json, g_pairing.token,
-        [](const std::string& cert) { return pairing::matchesPin(g_pairing.pin, cert); });
+    const auto pinned = [](const std::string& cert) { return pairing::matchesPin(g_pairing.pin, cert); };
+    helper_client::Reply r = helper_client::post(address, port, "/type", json, g_pairing.token, pinned);
+    // A Bonjour spoofer can claim the paired Computer's fp; the Pin stops it, then try the
+    // address from pairing once, so a spoofer can't block every Send (checklist, Spoofed Bonjour).
+    if (r.pinMismatch && (address != g_pairing.address || port != g_pairing.port)) {
+        r = helper_client::post(g_pairing.address, g_pairing.port, "/type", json, g_pairing.token, pinned);
+    }
     switch (send::outcome(r.sent, r.status)) {
         case send::Outcome::Typed:
             s.message = "Typed";
@@ -167,7 +168,6 @@ void handleType(const Request& req, Snapshot& s) {
             break;
         }
     }
-    Serial.printf("net: type: %s\n", s.message.c_str());
 }
 
 void handleRequests(Snapshot& s, TickType_t wait) {
@@ -175,7 +175,9 @@ void handleRequests(Snapshot& s, TickType_t wait) {
     while (xQueueReceive(g_requests, &req, wait) == pdTRUE) {
         if (req->kind == Request::Pair) handlePair(*req, s);
         else handleType(*req, s);
+        Serial.printf("net: %s: %s\n", req->kind == Request::Pair ? "pair" : "type", s.message.c_str());
         delete req;
+        ++s.messageSeq;
         publish(s);
         wait = 0;
     }
@@ -245,16 +247,18 @@ Snapshot snapshot() {
 
 namespace {
 
-void enqueue(Request* req) {
-    if (g_requests == nullptr || xQueueSend(g_requests, &req, 0) != pdTRUE) delete req;  // full: drop
+bool enqueue(Request* req) {
+    if (g_requests != nullptr && xQueueSend(g_requests, &req, 0) == pdTRUE) return true;
+    delete req;
+    return false;
 }
 
 }  // namespace
 
-void pair(size_t index, const std::string& code, const std::string& shortPin) {
-    enqueue(new Request{Request::Pair, index, code, shortPin, ""});
+bool pair(const Helper& h, const std::string& code, const std::string& shortPin) {
+    return enqueue(new Request{Request::Pair, h, code, shortPin, ""});
 }
 
-void type(const std::string& text) { enqueue(new Request{Request::Type, 0, "", "", text}); }
+bool type(const std::string& text) { return enqueue(new Request{Request::Type, Helper{}, "", "", text}); }
 
 }  // namespace net

@@ -18,6 +18,7 @@ struct Helper {
 struct Snapshot {
     std::string paired;   // the paired Computer's name, empty when not paired
     std::string message;  // the last pairing or Send result, for the status line
+    unsigned messageSeq = 0;  // bumps once per handled request, even when message repeats
     bool wifiConfigured = false;
     bool wifiUp = false;
     std::string ip;
@@ -34,11 +35,12 @@ unsigned version();
 
 Snapshot snapshot();
 
-// Pairs with Nearby Helper `index` (as of the last snapshot) using the Pairing code and the short
-// Pin from `phrased pair`. The code is sent only if that Helper's cert matches the short Pin.
-void pair(size_t index, const std::string& code, const std::string& shortPin);
+// Pairs with Helper h (from a snapshot) using the Pairing code and the short Pin from
+// `phrased pair`. The code is sent only if that Helper's cert matches the short Pin.
+// False if the request couldn't be queued.
+bool pair(const Helper& h, const std::string& code, const std::string& shortPin);
 
-// Types text on the paired Computer, checked against its whole Pin.
-void type(const std::string& text);
+// Types text on the paired Computer, checked against its whole Pin. False if not queued.
+bool type(const std::string& text);
 
 }  // namespace net

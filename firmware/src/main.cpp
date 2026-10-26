@@ -27,7 +27,8 @@ const char* const kPhrases[] = {
 lv_obj_t* g_status = nullptr;
 lv_obj_t* g_net = nullptr;
 unsigned g_net_version = 0;
-std::string g_last_message;
+unsigned g_message_seq = 0;
+bool g_busy = false;  // a pair or Send is queued or running: further taps are refused, not queued
 
 // The Pair screen: which Nearby Computer, the Pairing code and the short Pin from `phrased pair`.
 lv_obj_t* g_pair = nullptr;
@@ -36,7 +37,7 @@ lv_obj_t* g_code = nullptr;
 lv_obj_t* g_pin = nullptr;
 lv_obj_t* g_keyboard = nullptr;
 size_t g_pair_index = 0;
-std::vector<std::string> g_nearby_names;  // as of the last snapshot, for the Pair screen
+std::vector<net::Helper> g_pair_helpers;  // copied when the Pair screen opens, so it can't shift
 
 // Shows Wi-Fi and the Nearby Helpers; runs on the LVGL loop, reading the net task's snapshot.
 void showNet() {
@@ -57,25 +58,35 @@ void showNet() {
     }
     if (!s.paired.empty()) text += "  |  Paired: " + s.paired;
     lv_label_set_text(g_net, text.c_str());
-    g_nearby_names.clear();
-    for (const auto& h : s.nearby) g_nearby_names.push_back(h.name);
-    if (s.message != g_last_message) {
-        g_last_message = s.message;
+    if (s.messageSeq != g_message_seq) {
+        g_message_seq = s.messageSeq;
+        g_busy = false;
         lv_label_set_text(g_status, s.message.c_str());
     }
 }
 
 void closePair(lv_event_t*) {
-    lv_obj_delete(g_pair);
+    lv_obj_delete_async(g_pair);  // not during its own event
     g_pair = nullptr;
+}
+
+// Queues a request unless one is already in flight; says so either way.
+bool startRequest(bool queued, const std::string& sending) {
+    if (!queued) {
+        lv_label_set_text(g_status, "Busy: try again in a moment");
+        return false;
+    }
+    g_busy = true;
+    lv_label_set_text(g_status, sending.c_str());
+    return true;
 }
 
 void submitPair(lv_event_t*) {
     const std::string code = lv_textarea_get_text(g_code);
     const std::string pin = lv_textarea_get_text(g_pin);
-    if (code.size() != 6 || g_nearby_names.empty()) return;
-    net::pair(g_pair_index, code, pin);
-    lv_label_set_text_fmt(g_status, "Pairing with %s...", g_nearby_names[g_pair_index].c_str());
+    if (code.size() != 6 || g_pair_index >= g_pair_helpers.size() || g_busy) return;
+    const net::Helper& h = g_pair_helpers[g_pair_index];
+    startRequest(net::pair(h, code, pin), "Pairing with " + h.name + "...");
     closePair(nullptr);
 }
 
@@ -125,7 +136,8 @@ void openPair(lv_event_t*) {
 
     lv_obj_t* title = lv_label_create(g_pair);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
-    lv_label_set_text(title, g_nearby_names.empty()
+    g_pair_helpers = net::snapshot().nearby;
+    lv_label_set_text(title, g_pair_helpers.empty()
                                  ? "No Computer is Nearby. Start phrased with -lan, then try again."
                                  : "Run `phrased pair` on the Computer, then enter its code and Pin for a panel.");
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -135,8 +147,8 @@ void openPair(lv_event_t*) {
     lv_obj_align(g_pair_list, LV_ALIGN_TOP_LEFT, 0, 36);
     lv_obj_set_flex_flow(g_pair_list, LV_FLEX_FLOW_COLUMN);
     g_pair_index = 0;
-    for (size_t i = 0; i < g_nearby_names.size(); ++i) {
-        lv_obj_t* b = textButton(g_pair_list, g_nearby_names[i].c_str(), pickComputer, reinterpret_cast<void*>(i));
+    for (size_t i = 0; i < g_pair_helpers.size(); ++i) {
+        lv_obj_t* b = textButton(g_pair_list, g_pair_helpers[i].name.c_str(), pickComputer, reinterpret_cast<void*>(i));
         lv_obj_add_flag(b, LV_OBJ_FLAG_CHECKABLE);
         lv_obj_set_width(b, lv_pct(100));
         if (i == 0) lv_obj_add_state(b, LV_STATE_CHECKED);
@@ -161,8 +173,11 @@ void openPair(lv_event_t*) {
 
 void onTap(lv_event_t* e) {
     const char* phrase = static_cast<const char*>(lv_event_get_user_data(e));
-    lv_label_set_text_fmt(g_status, "Sending: %s", phrase);
-    net::type(phrase);
+    if (g_busy) {
+        lv_label_set_text(g_status, "Still sending the last one: wait for it");
+        return;
+    }
+    startRequest(net::type(phrase), std::string("Sending: ") + phrase);
     Serial.printf("tap: \"%s\" at %d,%d\n", phrase, touch_x(), touch_y());
 }
 
@@ -251,7 +266,10 @@ void serialCommands() {
         if (line.rfind("pair ", 0) == 0) {
             char code[8] = {}, pin[24] = {};
             unsigned index = 0;
-            if (sscanf(line.c_str() + 5, "%u %7s %23[0-9a-fA-F ]", &index, code, pin) == 3) net::pair(index, code, pin);
+            const auto nearby = net::snapshot().nearby;
+            if (sscanf(line.c_str() + 5, "%u %7s %23[0-9a-fA-F ]", &index, code, pin) == 3 && index < nearby.size()) {
+                net::pair(nearby[index], code, pin);
+            }
         } else if (line.rfind("type ", 0) == 0) {
             net::type(line.substr(5));
         }

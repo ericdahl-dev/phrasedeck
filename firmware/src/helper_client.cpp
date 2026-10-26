@@ -14,7 +14,7 @@ constexpr size_t kMaxBody = 4096;
 // Reads one line (without CR LF), or returns false on timeout or close.
 bool readLine(NetworkClientSecure& c, std::string& line, uint32_t deadline) {
     line.clear();
-    while (millis() < deadline) {
+    while (static_cast<int32_t>(millis() - deadline) < 0) {  // safe across the 49-day wrap
         if (!c.available()) {
             if (!c.connected()) return false;
             delay(5);
@@ -38,7 +38,13 @@ Reply post(const std::string& ip, int port, const char* path, const std::string&
     NetworkClientSecure c;
     c.setInsecure();  // no CA here: the Pin check below is the trust decision, before any write
     c.setHandshakeTimeout(kTimeoutMs / 1000);
-    if (!c.connect(ip.c_str(), port, kTimeoutMs)) return r;
+    if (!c.connect(ip.c_str(), port, kTimeoutMs)) {
+        char why[96] = {};
+        c.lastError(why, sizeof why);
+        Serial.printf("helper_client: can't connect to %s:%d: %s (heap %u)\n", ip.c_str(), port, why,
+                      static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)));
+        return r;
+    }
 
     uint8_t digest[32];
     if (!c.getFingerprintSHA256(digest)) {
@@ -77,7 +83,9 @@ Reply post(const std::string& ip, int port, const char* path, const std::string&
             length = std::min(kMaxBody, static_cast<size_t>(strtoul(line.c_str() + 15, nullptr, 10)));
         }
     }
-    while (r.body.size() < length && millis() < deadline) {
+    // Go's net/http sends Content-Length for these small one-write replies; a chunked reply would
+    // fail the JSON parse, which is safe (Not typed, or no pairing).
+    while (r.body.size() < length && static_cast<int32_t>(millis() - deadline) < 0) {
         if (c.available()) {
             r.body += static_cast<char>(c.read());
         } else if (!c.connected()) {

@@ -63,6 +63,7 @@ std::atomic<int> g_pairing{kNone};      // the connection showing a passkey now
 std::atomic<bool> g_unmatched{false};   // a passkey went to a connection we couldn't tell apart
 std::atomic<int> g_subscribed{kNone};   // the connection that turned on input report notifies
 std::atomic<int32_t> g_passkey{kNone};
+std::atomic<int> g_canceled{kNone};     // a pairing Cancel ended: it mustn't replace the Computer
 std::atomic<unsigned> g_disconnects{0};
 std::atomic<unsigned> g_version{0};
 
@@ -191,6 +192,8 @@ class ServerCallbacks : public BLEServerCallbacks {
         if (g_pairing.compare_exchange_strong(expected, kNone)) g_passkey.store(kNone);
         expected = handle;
         g_subscribed.compare_exchange_strong(expected, kNone);
+        expected = handle;
+        g_canceled.compare_exchange_strong(expected, kNone);
         g_notifying.erase(d->conn_handle);
         g_grace.erase(d->conn_handle);
         g_doomed.erase(d->conn_handle);
@@ -265,6 +268,12 @@ class SecurityCallbacks : public BLESecurityCallbacks {
             reject(*d);
             return;
         }
+        // Canceled while its passkey showed, but finished before the disconnect landed.
+        expected = d->conn_handle;
+        if (pairedNow && g_canceled.compare_exchange_strong(expected, kNone)) {
+            reject(*d);
+            return;
+        }
         const bool known = !pairedNow && isComputer(d->peer_id_addr);
         // A pairing onPassKeyNotify ended or couldn't place. Its keys go unless it's the Computer,
         // which can be reconnecting with its own key just then.
@@ -280,11 +289,12 @@ class SecurityCallbacks : public BLESecurityCallbacks {
                 // NimBLE stores the keys before this callback; a full store can refuse them, and then
                 // the Computer couldn't reconnect. Saved first: after a power cut in between, the
                 // next start forgets the old bonds.
-                if (!storedLtk(d->peer_id_addr, g_computerLtk) || !saveComputer(d->peer_id_addr)) {
-                    g_hasLtk = false;
+                uint8_t ltk[16];
+                if (!storedLtk(d->peer_id_addr, ltk) || !saveComputer(d->peer_id_addr)) {
                     reject(*d);
                     return;
                 }
+                memcpy(g_computerLtk, ltk, sizeof(ltk));
                 g_hasLtk = true;
                 forgetAllBut(&d->peer_id_addr);
                 closePairing();
@@ -410,7 +420,10 @@ void closePairing() {
     g_window.close();
     portEXIT_CRITICAL(&g_windowLock);
     const int pairing = g_pairing.load();
-    if (g_started.load() && pairing != kNone) ble_gap_terminate(static_cast<uint16_t>(pairing), BLE_ERR_REM_USER_CONN_TERM);
+    if (g_started.load() && pairing != kNone) {
+        g_canceled.store(pairing);
+        ble_gap_terminate(static_cast<uint16_t>(pairing), BLE_ERR_REM_USER_CONN_TERM);
+    }
     pairingClosed();
 }
 

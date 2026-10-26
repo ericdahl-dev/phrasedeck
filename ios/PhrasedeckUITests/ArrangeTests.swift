@@ -55,7 +55,7 @@ final class ArrangeTests: XCTestCase {
     /// The toolbar "+" adds a Button to the Page shown, in normal mode too.
     @MainActor
     func testTheToolbarPlusAddsAButton() {
-        let app = launch(arrange: false)
+        let app = launch()
         XCTAssertTrue(app.buttons["phrase.agent-status"].waitForExistence(timeout: 20))
         XCTAssertFalse(app.buttons["deck.add"].exists, "no + tile in normal mode")
 
@@ -173,7 +173,7 @@ final class ArrangeTests: XCTestCase {
     /// first row goes off the top.
     @MainActor
     func testHoldingNearTheBottomScrollsThePage() {
-        let app = launch(arrange: true)
+        let app = launch()
         let button = app.buttons["phrase.agent-status"]
         let first = app.buttons["phrase.status-table"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))

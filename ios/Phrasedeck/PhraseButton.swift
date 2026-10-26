@@ -34,7 +34,13 @@ struct PhraseButton: View {
     var body: some View {
         Button(action: tapped) {
             ZStack(alignment: .topTrailing) {
-                Text(armed ? "tap again" : phrase.label)
+                Group {
+                    if let flash {
+                        Label(flash.word, systemImage: flash.symbol)
+                    } else {
+                        Text(armed ? "tap again" : phrase.label)
+                    }
+                }
                     .font(.system(size: metrics.font, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
@@ -128,12 +134,15 @@ struct PhraseButton: View {
         }
     }
 
-    /// One send per call: the result flashes, and nothing is retried.
+    /// One send per call: the Button shows the result in words for a moment, VoiceOver says it, and
+    /// nothing is retried.
     private func send() {
         Task {
             let feedback = await model.send(text: phrase.text, enter: phrase.pressEnter)
             withAnimation(.easeOut(duration: 0.15)) { flash = feedback.tone }
-            try? await Task.sleep(for: .milliseconds(700))
+            AccessibilityNotification.Announcement(feedback.message ?? feedback.tone.word).post()
+            // Long enough to read a couple of words.
+            try? await Task.sleep(for: .milliseconds(1500))
             withAnimation { flash = nil }
         }
     }

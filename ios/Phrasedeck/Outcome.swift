@@ -6,24 +6,26 @@ enum Outcome {
     typealias Feedback = AppModel.Feedback
 
     static func send(_ failure: HelperClient.Failure, on helper: Helper) -> Feedback {
+        let (tone, why) = reason(failure, on: helper)
+        return Feedback(tone: tone, message: "\(tone.word): \(why)", pairAgain: failure == .unauthorized ? helper : nil)
+    }
+
+    /// Why a send failed, without the leading word, so pairing can reuse it.
+    private static func reason(_ failure: HelperClient.Failure, on helper: Helper) -> (Feedback.Tone, String) {
         let name = helper.name
         switch failure {
-        case .noReply: return Feedback(tone: .amber, message: "no reply, it may have typed")
-        case .busy: return Feedback(tone: .red, message: "\(name) is busy, nothing was typed. Tap again.")
-        case .failedPartway: return Feedback(tone: .amber, message: "\(name) failed partway, it may have typed")
-        case .unreachable: return Feedback(tone: .red, message: "\(name) unreachable")
-        case .unauthorized:
-            return Feedback(tone: .red, message: "\(name) refused this device. Pair again.", pairAgain: helper)
-        case .notReady: return Feedback(tone: .red, message: "\(name) can't type yet: grant Accessibility to phrased")
-        case .rateLimited: return Feedback(tone: .red, message: "Too many sends. Wait a moment.")
-        case .notFound: return Feedback(tone: .red, message: "\(name) failed (error 404)")
-        case let .server(code): return Feedback(tone: .red, message: "\(name) failed (error \(code))")
-        case .notTailnet:
-            return Feedback(tone: .red, message: "\(name) isn't a tailnet name, so nothing was sent. Pair it again by scanning its QR code.")
-        case let .notSent(code):
-            return Feedback(tone: .red, message: "\(name): the connection was blocked before anything was sent (error \(code)).")
-        case .pinMismatch:
-            return Feedback(tone: .red, message: "\(name)'s certificate didn't match, so nothing was sent. Scan its QR code to pair again.")
+        case .noReply: return (.amber, "no reply from \(name).")
+        case .busy: return (.red, "\(name) is busy. Tap again.")
+        case .failedPartway: return (.amber, "\(name) failed partway.")
+        case .unreachable: return (.red, "\(name) unreachable")
+        case .unauthorized: return (.red, "\(name) refused this device. Pair again.")
+        case .notReady: return (.red, "\(name) can't type yet: grant Accessibility to phrased")
+        case .rateLimited: return (.red, "too many sends. Wait a moment.")
+        case .notFound: return (.red, "\(name) failed (error 404)")
+        case let .server(code): return (.red, "\(name) failed (error \(code))")
+        case .notTailnet: return (.red, "\(name) isn't a tailnet name. Pair it again by scanning its QR code.")
+        case let .notSent(code): return (.red, "the connection to \(name) was blocked (error \(code)).")
+        case .pinMismatch: return (.red, "\(name)'s certificate didn't match. Scan its QR code to pair again.")
         }
     }
 
@@ -36,7 +38,8 @@ enum Outcome {
         case .noReply: "\(helper.name) didn't answer. Run phrased pair again and retry."
         case .failedPartway: "Pairing with \(helper.name) failed. Run phrased pair again."
         case .rateLimited: "Too many pairing attempts. Run phrased pair on \(helper.name) again."
-        default: send(failure, on: helper).message ?? "Couldn't pair with \(helper.name)."
+        case let .notSent(code): "\(helper.name): the connection was blocked before anything was sent (error \(code))."
+        default: reason(failure, on: helper).1
         }
     }
 

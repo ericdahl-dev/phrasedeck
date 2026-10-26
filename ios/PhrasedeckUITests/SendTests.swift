@@ -22,4 +22,20 @@ final class SendTests: XCTestCase {
         Thread.sleep(forTimeInterval: 1)
         XCTAssertEqual(sends.label, "1")
     }
+
+    /// After a send the Button says what happened, in words, not only a color (UX review).
+    @MainActor
+    func testTheButtonSaysTypedAfterASend() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestingStubHelper"]
+        app.launch()
+
+        let button = app.buttons["phrase.agent-status"]
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+        button.tap()
+
+        let typed = NSPredicate(format: "label CONTAINS %@", "Typed")
+        expectation(for: typed, evaluatedWith: button)
+        waitForExpectations(timeout: 5)
+    }
 }

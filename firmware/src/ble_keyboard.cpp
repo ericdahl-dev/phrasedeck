@@ -307,8 +307,8 @@ bool start() {
     ble_hs_cfg.sm_sc_only = 1;
     BLEDevice::setSecurityCallbacks(new SecurityCallbacks());
     // No stored Computer (first start, a factory reset, or bonds from #140): no bond is trusted, so
-    // forget them all. Otherwise forget any but the Computer's. The store takes no lock; this is safe
-    // only because nothing is connected or advertising yet.
+    // forget them all. Otherwise forget any but the Computer's. Safe from this task because nothing is
+    // connected or advertising yet.
     g_hasComputer = loadComputer();
     forgetAllBut(g_hasComputer ? &g_computer : nullptr);
 

@@ -36,20 +36,34 @@ final class ArrangeTests: XCTestCase {
 
         let done = app.buttons["arrange.done"]
         XCTAssertTrue(done.waitForExistence(timeout: 20))
-        XCTAssertFalse(app.buttons["deck.add"].exists, "the + tile is hidden in Arrange mode")
-        XCTAssertFalse(app.buttons["deck.pages"].exists, "only Done is in the toolbar")
+        XCTAssertTrue(app.buttons["deck.add"].exists, "the + tile shows only in Arrange mode")
+        XCTAssertTrue(app.buttons["deck.new"].exists, "the toolbar + is always there")
+        XCTAssertFalse(app.buttons["deck.pages"].exists, "Pages leaves the toolbar")
         XCTAssertEqual(button.value as? String, "Row 1, column 1")
 
         button.tap()
         XCTAssertEqual(app.staticTexts["stub.sendCount"].label, "0", "taps never type in Arrange mode")
 
         done.tap()
-        XCTAssertTrue(app.buttons["deck.add"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["deck.pages"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["deck.add"].exists, "no + tile in normal mode")
         button.tap()
         XCTAssertTrue(app.staticTexts["stub.sendCount"].waitForLabel("1"))
     }
 
     /// Leaving the app ends Arrange mode, so coming back never finds Buttons that won't type.
+    /// The toolbar "+" adds a Button to the Page shown, in normal mode too.
+    @MainActor
+    func testTheToolbarPlusAddsAButton() {
+        let app = launch(arrange: false)
+        XCTAssertTrue(app.buttons["phrase.agent-status"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["deck.add"].exists, "no + tile in normal mode")
+
+        app.buttons["deck.new"].tap()
+
+        XCTAssertTrue(app.navigationBars.buttons["Cancel"].waitForExistence(timeout: 20), "the add sheet opens")
+    }
+
     @MainActor
     func testLeavingTheAppEndsArrangeMode() {
         let app = launch(arrange: true)
@@ -60,7 +74,7 @@ final class ArrangeTests: XCTestCase {
         XCUIDevice.shared.press(.home)
         app.activate()
 
-        XCTAssertTrue(app.buttons["deck.add"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["deck.pages"].waitForExistence(timeout: 20))
         XCTAssertFalse(app.buttons["arrange.done"].exists)
     }
 

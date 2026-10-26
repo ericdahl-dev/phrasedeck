@@ -118,6 +118,7 @@ void handlePair(const Request& req, Snapshot& s) {
         // The Helper has used up its pairing window either way, so keep the pairing in RAM.
         g_pairing = pr;
         s.paired = pr.name;
+        s.ok = true;
         s.message = savePairing(pr) ? "Paired with " + pr.name
                                     : "Paired with " + pr.name + ", but not saved: pair again after a restart";
     } else if (r.status == 401) {
@@ -154,6 +155,7 @@ void handleType(const Request& req, Snapshot& s) {
     switch (send::outcome(r.sent, r.status)) {
         case send::Outcome::Typed:
             s.message = "Typed";
+            s.ok = true;
             break;
         case send::Outcome::MaybeTyped:
             s.message = "Maybe typed: check the Computer before tapping again";
@@ -170,6 +172,7 @@ void handleType(const Request& req, Snapshot& s) {
 void handleRequests(Snapshot& s, TickType_t wait) {
     Request* req = nullptr;
     while (xQueueReceive(g_requests, &req, wait) == pdTRUE) {
+        s.ok = false;
         if (req->kind == Request::Pair) handlePair(*req, s);
         else handleType(*req, s);
         Serial.printf("net: %s: %s\n", req->kind == Request::Pair ? "pair" : "type", s.message.c_str());

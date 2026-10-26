@@ -14,6 +14,7 @@
 #include "display_driver.h"
 #include "net.h"
 #include "panel_store.h"
+#include "pairing.h"
 #include "panel_mcu.h"
 #include "phrases.h"
 #include "touch.h"
@@ -44,8 +45,15 @@ lv_obj_t* g_pair_list = nullptr;
 lv_obj_t* g_code = nullptr;
 lv_obj_t* g_pin = nullptr;
 lv_obj_t* g_keyboard = nullptr;
+lv_obj_t* g_pin_count = nullptr;  // "Pin 12/16"
+lv_obj_t* g_pair_note = nullptr;  // progress and errors, shown in place
+lv_obj_t* g_pair_go = nullptr;
+bool g_pairing_now = false;       // a pair from this screen is in flight: it stays open for the result
 size_t g_pair_index = 0;
 std::vector<net::Helper> g_pair_helpers;  // copied when the Pair screen opens, so it can't shift
+
+void closePair(lv_event_t*);
+void pairResult(const net::Snapshot& s);
 
 // Shows Wi-Fi and the paired Computer; runs on the LVGL loop, reading the net task's snapshot.
 // Nearby Computers are listed on the Pair screen, not here.
@@ -65,11 +73,16 @@ void showNet() {
     if (s.messageSeq != g_message_seq) {
         g_message_seq = s.messageSeq;
         g_busy = false;
+        if (g_pairing_now) {  // also after Cancel and reopen, so a reopened screen still gets its result
+            g_pairing_now = false;
+            if (g_pair != nullptr) pairResult(s);
+        }
         lv_label_set_text(g_status, s.message.c_str());
     }
 }
 
 void closePair(lv_event_t*) {
+    if (g_pair == nullptr) return;
     lv_obj_delete_async(g_pair);  // not during its own event
     g_pair = nullptr;
 }
@@ -85,17 +98,55 @@ bool startRequest(bool queued, const std::string& sending) {
     return true;
 }
 
+void pairInputChanged(lv_event_t*);
+
+void focusOn(lv_obj_t* ta) {
+    lv_obj_t* other = ta == g_code ? g_pin : g_code;
+    lv_obj_remove_state(other, LV_STATE_FOCUSED);
+    lv_obj_add_state(ta, LV_STATE_FOCUSED);
+    lv_keyboard_set_textarea(g_keyboard, ta);
+    lv_keyboard_set_mode(g_keyboard, ta == g_code ? LV_KEYBOARD_MODE_USER_2 : LV_KEYBOARD_MODE_USER_1);
+}
+
 void submitPair(lv_event_t*) {
     const std::string code = lv_textarea_get_text(g_code);
     const std::string pin = lv_textarea_get_text(g_pin);
-    if (code.size() != 6 || g_pair_index >= g_pair_helpers.size()) return;
-    if (g_busy) {
-        lv_label_set_text(g_status, "Busy: try again in a moment");
+    if (!pairing::readyToPair(code, pin) || g_pair_index >= g_pair_helpers.size() || g_pairing_now) return;
+    const net::Helper& h = g_pair_helpers[g_pair_index];
+    if (g_busy || !net::pair(h, code, pin)) {
+        lv_label_set_text(g_pair_note, "Busy: try again in a moment");
         return;
     }
-    const net::Helper& h = g_pair_helpers[g_pair_index];
-    startRequest(net::pair(h, code, pin), "Pairing with " + h.name + "...");
-    closePair(nullptr);
+    g_busy = true;
+    g_pairing_now = true;
+    lv_obj_add_state(g_pair_go, LV_STATE_DISABLED);
+    lv_label_set_text(g_pair_note, ("Pairing with " + h.name + "...").c_str());
+}
+
+// Paired: close. Anything else stays on this screen, so the code and Pin can be fixed in place.
+void pairResult(const net::Snapshot& s) {
+    if (s.ok) {
+        closePair(nullptr);
+        return;
+    }
+    lv_label_set_text(g_pair_note, s.message.c_str());
+    pairInputChanged(nullptr);
+}
+
+// Keeps "Pin n/16" and Pair's enabled state current, and moves to the Pin after the 6th digit.
+void pairInputChanged(lv_event_t* e) {
+    const std::string code = lv_textarea_get_text(g_code);
+    const std::string pin = lv_textarea_get_text(g_pin);
+    lv_label_set_text_fmt(g_pin_count, "Pin %u/16", static_cast<unsigned>(pairing::pinDigits(pin)));
+    if (pairing::readyToPair(code, pin) && !g_pairing_now) lv_obj_remove_state(g_pair_go, LV_STATE_DISABLED);
+    else lv_obj_add_state(g_pair_go, LV_STATE_DISABLED);
+    if (e != nullptr && lv_event_get_target(e) == g_code && code.size() == 6) focusOn(g_pin);
+}
+
+// The keyboard's OK key: from the code, go to the Pin; from the Pin, Pair.
+void keyboardReady(lv_event_t*) {
+    if (lv_keyboard_get_textarea(g_keyboard) == g_code) focusOn(g_pin);
+    else submitPair(nullptr);
 }
 
 void pickComputer(lv_event_t* e) {
@@ -107,11 +158,7 @@ void pickComputer(lv_event_t* e) {
     }
 }
 
-void focusField(lv_event_t* e) {
-    lv_obj_t* ta = static_cast<lv_obj_t*>(lv_event_get_target(e));
-    lv_keyboard_set_textarea(g_keyboard, ta);
-    lv_keyboard_set_mode(g_keyboard, ta == g_code ? LV_KEYBOARD_MODE_NUMBER : LV_KEYBOARD_MODE_TEXT_LOWER);
-}
+void focusField(lv_event_t* e) { focusOn(static_cast<lv_obj_t*>(lv_event_get_target(e))); }
 
 lv_obj_t* field(lv_obj_t* parent, const char* placeholder, const char* accepted, uint32_t max) {
     lv_obj_t* ta = lv_textarea_create(parent);
@@ -120,8 +167,9 @@ lv_obj_t* field(lv_obj_t* parent, const char* placeholder, const char* accepted,
     lv_textarea_set_accepted_chars(ta, accepted);
     lv_textarea_set_max_length(ta, max);
     lv_obj_set_style_text_font(ta, &lv_font_montserrat_28, 0);
-    lv_obj_set_width(ta, 360);
-    lv_obj_add_event_cb(ta, focusField, LV_EVENT_FOCUSED, nullptr);
+    lv_obj_set_width(ta, 300);
+    lv_obj_add_event_cb(ta, focusField, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(ta, pairInputChanged, LV_EVENT_VALUE_CHANGED, nullptr);
     return ta;
 }
 
@@ -135,48 +183,77 @@ lv_obj_t* textButton(lv_obj_t* parent, const char* text, lv_event_cb_t cb, void*
     return b;
 }
 
+// The short Pin is hex, so its keyboard is a 4 x 4 hex pad with big keys.
+// Not const: LVGL 9.1 takes a non-const map.
+const char* kHexMap[] = {"1", "2", "3", "A", "\n", "4", "5", "6", "B", "\n", "7", "8", "9", "C", "\n",
+                               "0", "D", "E", "F", "\n", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""};
+// OK fires once, on release, as in LVGL's own maps: held down, it must not pair twice.
+constexpr lv_buttonmatrix_ctrl_t kOk = LV_BUTTONMATRIX_CTRL_NO_REPEAT | LV_BUTTONMATRIX_CTRL_CLICK_TRIG;
+const lv_buttonmatrix_ctrl_t kHexCtrl[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, kOk | 2};
+// The code is digits only: no +/-, dot or arrows.
+const char* kDigitMap[] = {"1", "2", "3", "\n", "4", "5", "6", "\n", "7", "8", "9", "\n",
+                           LV_SYMBOL_BACKSPACE, "0", LV_SYMBOL_OK, ""};
+const lv_buttonmatrix_ctrl_t kDigitCtrl[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, kOk | 1};
+
 void openPair(lv_event_t*) {
     if (g_pair != nullptr) return;
     g_pair = lv_obj_create(lv_screen_active());
     lv_obj_set_size(g_pair, board::LCD_WIDTH, board::LCD_HEIGHT);
-    lv_obj_set_style_bg_color(g_pair, lv_color_hex(0x111418), 0);
     lv_obj_set_style_radius(g_pair, 0, 0);
+    lv_obj_remove_flag(g_pair, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t* title = lv_label_create(g_pair);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
     g_pair_helpers = net::snapshot().nearby;
     lv_label_set_text(title, g_pair_helpers.empty()
-                                 ? "No Computer is Nearby. Start phrased with -lan, then try again."
-                                 : "Run `phrased pair` on the Computer, then enter its code and Pin for a panel.");
+                                 ? "No Computer nearby. Start phrased with -lan, then open this again."
+                                 : "Run phrased pair on the Computer, then enter the 6-digit code and the Pin.");
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     g_pair_list = lv_obj_create(g_pair);
-    lv_obj_set_size(g_pair_list, 380, 150);
-    lv_obj_align(g_pair_list, LV_ALIGN_TOP_LEFT, 0, 36);
+    lv_obj_set_size(g_pair_list, 340, 150);
+    lv_obj_align(g_pair_list, LV_ALIGN_TOP_LEFT, 0, 34);
     lv_obj_set_flex_flow(g_pair_list, LV_FLEX_FLOW_COLUMN);
     g_pair_index = 0;
     for (size_t i = 0; i < g_pair_helpers.size(); ++i) {
         lv_obj_t* b = textButton(g_pair_list, g_pair_helpers[i].name.c_str(), pickComputer, reinterpret_cast<void*>(i));
         lv_obj_add_flag(b, LV_OBJ_FLAG_CHECKABLE);
         lv_obj_set_width(b, lv_pct(100));
+        lv_obj_set_style_bg_color(b, lv_color_hex(0x3A3F47), 0);  // the theme's checked color is red
+        lv_obj_set_style_bg_color(b, lv_palette_main(LV_PALETTE_BLUE), LV_STATE_CHECKED);
         if (i == 0) lv_obj_add_state(b, LV_STATE_CHECKED);
     }
 
-    g_code = field(g_pair, "Pairing code", "0123456789", 6);
-    lv_obj_align(g_code, LV_ALIGN_TOP_RIGHT, 0, 36);
-    g_pin = field(g_pair, "Pin for a panel", "0123456789abcdefABCDEF ", 19);
-    lv_obj_align(g_pin, LV_ALIGN_TOP_RIGHT, 0, 100);
+    g_code = field(g_pair, "6-digit code", "0123456789", 6);
+    lv_obj_align(g_code, LV_ALIGN_TOP_RIGHT, 0, 34);
+    g_pin = field(g_pair, "Pin (16 characters)", "0123456789abcdefABCDEF ", 19);
+    lv_obj_align(g_pin, LV_ALIGN_TOP_RIGHT, 0, 96);
+
+    g_pin_count = lv_label_create(g_pair);
+    lv_obj_align(g_pin_count, LV_ALIGN_TOP_RIGHT, -(300 + 12), 112);  // left of the Pin field
 
     lv_obj_t* cancel = textButton(g_pair, "Cancel", closePair, nullptr);
-    lv_obj_align(cancel, LV_ALIGN_TOP_RIGHT, -130, 160);
-    lv_obj_t* go = textButton(g_pair, "Pair", submitPair, nullptr);
-    lv_obj_align(go, LV_ALIGN_TOP_RIGHT, 0, 160);
+    lv_obj_set_size(cancel, 140, 56);
+    lv_obj_align(cancel, LV_ALIGN_TOP_RIGHT, -156, 156);
+    g_pair_go = textButton(g_pair, "Pair", submitPair, nullptr);
+    lv_obj_set_size(g_pair_go, 140, 56);
+    lv_obj_align(g_pair_go, LV_ALIGN_TOP_RIGHT, 0, 156);
+
+    g_pair_note = lv_label_create(g_pair);
+    lv_obj_set_width(g_pair_note, 340);
+    lv_label_set_long_mode(g_pair_note, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(g_pair_note, g_pairing_now ? "Pairing..." : "");
+    lv_obj_set_style_text_color(g_pair_note, lv_palette_main(LV_PALETTE_ORANGE), 0);
+    lv_obj_align(g_pair_note, LV_ALIGN_TOP_LEFT, 0, 190);
 
     g_keyboard = lv_keyboard_create(g_pair);
-    lv_obj_set_size(g_keyboard, board::LCD_WIDTH - 32, 220);
+    lv_obj_set_size(g_keyboard, board::LCD_WIDTH - 32, 200);
+    lv_obj_set_style_text_font(g_keyboard, &lv_font_montserrat_28, 0);
     lv_obj_align(g_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_keyboard_set_textarea(g_keyboard, g_code);
-    lv_keyboard_set_mode(g_keyboard, LV_KEYBOARD_MODE_NUMBER);
+    lv_keyboard_set_map(g_keyboard, LV_KEYBOARD_MODE_USER_1, kHexMap, kHexCtrl);
+    lv_keyboard_set_map(g_keyboard, LV_KEYBOARD_MODE_USER_2, kDigitMap, kDigitCtrl);
+    lv_obj_add_event_cb(g_keyboard, keyboardReady, LV_EVENT_READY, nullptr);
+    focusOn(g_code);
+    pairInputChanged(nullptr);
 }
 
 // Written to a temporary file, then renamed over the old one, so a power cut never leaves half a list.
@@ -404,6 +481,12 @@ void serialCommands() {
                 out[len++] = '\n';
                 Serial.write(reinterpret_cast<const uint8_t*>(out), len);
             }
+        } else if (line == "pairscreen") {
+            openPair(nullptr);
+        } else if (line.rfind("key ", 0) == 0 && g_pair != nullptr) {  // as the on-screen keys would
+            for (char ch : line.substr(4)) lv_textarea_add_char(lv_keyboard_get_textarea(g_keyboard), ch);
+        } else if (line == "ok" && g_pair != nullptr) {
+            keyboardReady(nullptr);
         } else if (line == "send" && g_confirm != nullptr) {
             confirmSend(nullptr);
         }

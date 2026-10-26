@@ -98,23 +98,52 @@ final class ArrangeTests: XCTestCase {
         let app = launch(arrange: true)
         let button = app.buttons["phrase.agent-status"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))
-        app.buttons["deck.pages"].tap()
-        let name = app.textFields["pages.newName"]
-        XCTAssertTrue(name.waitForExistence(timeout: 20))
-        name.tap()
-        name.typeText("Other")
-        app.buttons["Add"].tap()
-        app.buttons["Done"].tap()
+        addPages(app, ["Other"])
         enterArrangeMode(app, from: button)
 
-        let from = button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        let edge = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-            .withOffset(CGVector(dx: app.windows.firstMatch.frame.width - 8, dy: button.frame.midY))
         // Long enough for one flip (0.6 s), short of a second (another 0.8 s).
-        from.press(forDuration: 0.1, thenDragTo: edge, withVelocity: .slow, thenHoldForDuration: 1.0)
+        dragToRightEdge(app, button, hold: 1.0)
 
         XCTAssertTrue(app.navigationBars["Other"].waitForExistence(timeout: 20))
         XCTAssertTrue(button.waitForValue("Row 1, column 3"))
+    }
+
+    /// Holding on flips again, two Pages away; the drag carries on after its own Page scrolls off.
+    @MainActor
+    func testHoldingOnAtTheEdgeFlipsTwice() {
+        let app = launch(arrange: true)
+        let button = app.buttons["phrase.agent-status"]
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+        addPages(app, ["Two", "Three"])
+        enterArrangeMode(app, from: button)
+
+        // Two flips (0.6 s, then 0.8 s), short of a third.
+        dragToRightEdge(app, button, hold: 1.9)
+
+        XCTAssertTrue(app.navigationBars["Three"].waitForExistence(timeout: 20))
+        XCTAssertTrue(button.waitForValue("Row 1, column 3"))
+    }
+
+    @MainActor
+    func addPages(_ app: XCUIApplication, _ names: [String]) {
+        app.buttons["deck.pages"].tap()
+        let field = app.textFields["pages.newName"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20))
+        for name in names {
+            field.tap()
+            field.typeText(name)
+            app.buttons["Add"].tap()
+        }
+        app.buttons["Done"].tap()
+    }
+
+    @MainActor
+    func dragToRightEdge(_ app: XCUIApplication, _ button: XCUIElement, hold: TimeInterval) {
+        let from = button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let window = app.windows.firstMatch
+        let edge = window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: window.frame.width - 8, dy: button.frame.midY))
+        from.press(forDuration: 0.1, thenDragTo: edge, withVelocity: .slow, thenHoldForDuration: hold)
     }
 }
 

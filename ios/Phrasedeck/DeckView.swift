@@ -261,7 +261,11 @@ struct DeckView: View {
             (c.dwell, c.target, c.preview) = (Dwell(), nil, [:])
             withAnimation { shownPage = c.page }
         }
-        let grid = gridOrigins[c.page] ?? .zero
+        // A Page just flipped to may not be laid out yet; aim once it is (the next tick).
+        guard let grid = gridOrigins[c.page] else {
+            carry = c
+            return
+        }
         let target = Arrangement.target(
             topLeft: (c.finger.x - c.grab.width - grid.x, c.finger.y - c.grab.height - grid.y),
             step: (c.step.width, c.step.height), columns: c.columnCount, width: c.columns)

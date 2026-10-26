@@ -1,19 +1,31 @@
 # phrasedeck
 
-A Stream Deck-style iOS app for Eric's own use. Each button types an often-used phrase into the
-focused window on his Mac or on omarchy-laptop, usually a Claude Code terminal.
+A Stream Deck-style iOS app for Eric's own use. Each Button types an often-used Phrase into the
+focused window on a Computer, usually a Claude Code terminal. The Helper runs on macOS, on
+Arch/Omarchy (Hyprland), and on Ubuntu with GNOME, KDE or X11.
 
-- `helper/`: `phrased`, the Go helper that receives a phrase over the tailnet and types it.
-- `ios/`: the SwiftUI app (in progress).
+- `helper/`: `phrased`, the Go Helper that receives a Phrase and types it.
+- `ios/`: the SwiftUI app, shipped to Eric's devices through internal TestFlight.
+- `firmware/`: the desk panel, an ESP32 CrowPanel that is also a Device.
+- `contract/`: `pairing.json`, the pairing contract that both the Go and Swift tests read.
+- `design/`: the app icon's source, `icon.svg`.
 - `docs/plans/`: the design and the implementation plan.
+- `docs/launch/`: the Home network route threat checklist and the product name shortlist.
+- `docs/adr/`: decisions, starting with ADR 0001 on how the Mac Helper is distributed.
+- `CONTEXT.md`: the glossary (Helper, Device, Phrase, Button, Page, Deck, Pin, Route and so on).
+- `CLAUDE.md`: the rules for agents working here.
 
 ## The helper (`phrased`)
 
 `phrased` listens on port 47811 but only answers Tailscale peers (`100.64.0.0/10` and
 `fd7a:115c:a1e0::/48`), and only for a `Host` that is this machine's tailnet name, MagicDNS name or
-tailnet IP. There is no LAN access.
+tailnet IP. It answers on the home network only when you turn that on with `-lan` (see
+[Home network without Tailscale](#home-network-without-tailscale-optional)).
 
 ### Build (Mac)
+
+The Mac Helper is planned to ship as a Developer ID, notarized direct download plus a Homebrew
+cask ([ADR 0001](docs/adr/0001-helper-distribution.md)). For now, build it from source:
 
 ```sh
 cd helper
@@ -202,7 +214,7 @@ phone with `phrased pair` (next section).
 
 ### Pair a device
 
-Each phone or tablet gets its own token. On the computer running `phrased`:
+Each Device (a phone, an iPad or the panel) gets its own token. On the computer running `phrased`:
 
 ```sh
 phrased pair   # ./phrased pair from a build directory
@@ -332,6 +344,35 @@ Limits:
 curl -sk https://<lan-ip>:47812/health   # -k: the app pins the certificate instead
 ```
 
+## Using the app
+
+- **Buttons on Pages.** Tap a Button to type its Phrase. Swipe between Pages; pinch to change how
+  big a Square is on this phone or iPad. "Pages" (top left) adds, renames, reorders and deletes
+  Pages.
+- **Choose a Computer** from the picker at the top. "Computers…" in it lists them, and its "+" pairs
+  a new one. A dot shows whether the Helper is Ready, and a label shows the Route it last took.
+- **Add a Button** with "+" in the top bar, at any time. Long-press a Button to edit or delete it.
+- **Arrange Buttons** with Edit Deck in the long-press menu. Buttons jiggle and taps don't type.
+  Drag a Button to a new Spot; hold it at a screen edge to flip to the next Page. "−" deletes a
+  Button, and a "+" tile after the Buttons adds one. Done, or a tap on empty space, ends it.
+  For now Edit Deck only shows in Debug builds launched with `-arrangeEnabled`, until PR #108
+  ships Arrange mode.
+
+## The panel (ESP32)
+
+The panel is an Elecrow CrowPanel Advance 7" (ESP32-S3, 800×480 touch screen), hardware V1.4. It's
+a Device: it pairs with a Helper over the Home network route, so the Helper needs `-lan`.
+
+- **To pair,** run `phrased pair`, open the panel's Pair screen, pick the Nearby Computer, and enter
+  the Pairing code and the `Pin for a panel:` line that `phrased pair` prints (the panel has no
+  camera for the QR code). The panel checks the Helper's certificate against the Pin before it
+  sends anything.
+- **Today** it shows a fixed Page of Buttons; a tap sends its Phrase.
+- **In progress (#98):** the panel's own Phrase list, edited from its web page.
+- **Planned (#94):** a Bluetooth keyboard mode.
+
+Build, flash, Wi-Fi and factory restore are in [firmware/README.md](firmware/README.md).
+
 ## The iOS app on TestFlight
 
 Installs on Eric's iPhone and iPad go through internal TestFlight only: no external testers, no
@@ -378,6 +419,9 @@ git tag v0.2.0 && git push origin v0.2.0
   contents), `DEVELOPMENT_TEAM`, `DIST_CERT_P12_BASE64` (the certificate and its key as a `.p12`,
   run through `base64`) and `DIST_CERT_PASSWORD`. The repository is public, but only a tag pushed
   here runs the workflow, never a pull request or a fork, so the secrets never reach outside code.
+- **The same tag** also runs `.github/workflows/helper-release.yml`, which builds the Linux Helper
+  packages (a .deb, a tarball per arch and the AUR `PKGBUILD`) and attaches them to the tag's
+  GitHub Release.
 - **If it fails**, open the run's Archive or Upload step; the logs are also attached to the run as
   `release-logs`.
 

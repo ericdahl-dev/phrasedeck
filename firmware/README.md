@@ -4,8 +4,13 @@ Firmware for a desk panel that types phrases through the Helper: an Elecrow Crow
 7.0-HMI (ESP32-S3, 800×480 IPS touch screen, 16 MB flash, 8 MB PSRAM). It's a Device on the Home
 network route.
 
-So far it shows a fixed Page of Buttons. A tap shows the phrase on screen and logs it to serial.
-Pairing and sending come next.
+So far it shows a fixed Page of Buttons. It pairs with a Nearby Helper (the Pairing code plus the
+`Pin for a panel:` line from `phrased pair`), and a tap sends the Button's phrase. Its own Phrase
+list, edited from a web page, is in progress (#98).
+
+Wi-Fi comes from `~/.config/phrasedeck/panel-wifi.ini` (or `PHRASEDECK_WIFI_INI`), a `[wifi]`
+section with `ssid` and `password`, read at build time by `wifi_secrets.py`. Without it the panel
+skips Wi-Fi.
 
 ## Build and flash
 

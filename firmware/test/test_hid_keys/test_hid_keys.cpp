@@ -203,6 +203,51 @@ void test_what_the_status_line_says_after_a_bluetooth_send() {
     TEST_ASSERT_FALSE(said.ok);
 }
 
+// A disconnect can't send a release, and the host drops held keys with the link anyway: drop()
+// ends at once (#130 review).
+void test_drop_ends_at_once_without_a_release() {
+    hid_keys::Sender s(hid_keys::plan("abc", false).keys, 20);
+    Stack stack;
+    run(s, stack, 40);  // b is down
+    s.drop();
+    run(s, stack, 200, 41);
+    TEST_ASSERT_EQUAL(3, stack.sent.size());
+    TEST_ASSERT_TRUE(s.done());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Stopped, s.result());
+}
+
+// notify can fail for good (no subscriber, link gone): after about a second of failures it gives up.
+void test_it_gives_up_after_a_second_of_failures() {
+    hid_keys::Sender s(hid_keys::plan("a", false).keys, 20);
+    Stack stack;
+    stack.fail = 1000000;
+    run(s, stack, 1100);
+    TEST_ASSERT_TRUE(s.done());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::NotSent, s.result());
+}
+
+// A release the stack refuses goes again on the next step, not a whole interval later, so a held
+// key can't reach the host's auto-repeat delay.
+void test_a_refused_release_is_retried_at_once() {
+    hid_keys::Sender s(hid_keys::plan("a", false).keys, 20);
+    Stack stack;
+    run(s, stack, 19);  // the press at 0
+    stack.fail = 3;
+    run(s, stack, 24, 20);  // the release fails at 20, 21, 22, goes at 23
+    TEST_ASSERT_EQUAL(2, stack.sent.size());
+    TEST_ASSERT_TRUE(s.done());
+}
+
+// An empty Phrase sends nothing, so it can't say Sent.
+void test_an_empty_plan_is_not_sent() {
+    hid_keys::Sender s({}, 20);
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::NotSent, s.result());
+}
+
+void test_while_running_the_status_line_says_sending() {
+    TEST_ASSERT_EQUAL_STRING("Sending", hid_keys::said(hid_keys::Sender::Result::Running).message.c_str());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_letters_and_digits);
@@ -217,5 +262,10 @@ int main() {
     RUN_TEST(test_cancel_releases_a_held_key_then_stops);
     RUN_TEST(test_cancel_before_the_first_key_sends_nothing);
     RUN_TEST(test_what_the_status_line_says_after_a_bluetooth_send);
+    RUN_TEST(test_drop_ends_at_once_without_a_release);
+    RUN_TEST(test_it_gives_up_after_a_second_of_failures);
+    RUN_TEST(test_a_refused_release_is_retried_at_once);
+    RUN_TEST(test_an_empty_plan_is_not_sent);
+    RUN_TEST(test_while_running_the_status_line_says_sending);
     return UNITY_END();
 }

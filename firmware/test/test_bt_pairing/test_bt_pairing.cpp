@@ -8,19 +8,16 @@ void tearDown() {}
 using bt_pairing::Bond;
 using bt_pairing::Window;
 
-// The stored Computer reconnects any time; a new pairing only while the window is open, and then it
-// replaces the old one, so the panel types to one Computer. A reconnect from any other bond is
-// rejected, such as one whose keys outlived a reset between its rejection and its disconnect (#141).
+// The stored Computer reconnects any time. A new pairing replaces it: a passkey is only ever shown
+// inside a window, so one entered after the window ran out still counts (#141). A reconnect from any
+// other bond is rejected, such as one whose keys outlived a reset between its rejection and its
+// disconnect.
 void test_who_may_pair() {
-    const bool known = true, window = true, newPairing = true;
-    TEST_ASSERT_EQUAL(Bond::Keep, bt_pairing::onPaired(!newPairing, known, !window));
-    TEST_ASSERT_EQUAL(Bond::Keep, bt_pairing::onPaired(!newPairing, known, window));
-    TEST_ASSERT_EQUAL(Bond::Reject, bt_pairing::onPaired(!newPairing, !known, !window));
-    TEST_ASSERT_EQUAL(Bond::Reject, bt_pairing::onPaired(!newPairing, !known, window));
-    TEST_ASSERT_EQUAL(Bond::Reject, bt_pairing::onPaired(newPairing, !known, !window));
-    TEST_ASSERT_EQUAL(Bond::Reject, bt_pairing::onPaired(newPairing, known, !window));
-    TEST_ASSERT_EQUAL(Bond::ReplaceOthers, bt_pairing::onPaired(newPairing, !known, window));
-    TEST_ASSERT_EQUAL(Bond::ReplaceOthers, bt_pairing::onPaired(newPairing, known, window));
+    const bool known = true, newPairing = true;
+    TEST_ASSERT_EQUAL(Bond::Keep, bt_pairing::onPaired(!newPairing, known));
+    TEST_ASSERT_EQUAL(Bond::Reject, bt_pairing::onPaired(!newPairing, !known));
+    TEST_ASSERT_EQUAL(Bond::ReplaceOthers, bt_pairing::onPaired(newPairing, !known));
+    TEST_ASSERT_EQUAL(Bond::ReplaceOthers, bt_pairing::onPaired(newPairing, known));
 }
 
 // Opened from Settings for two minutes, closed early by a pairing or Cancel; right across the

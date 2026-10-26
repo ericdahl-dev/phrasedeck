@@ -9,10 +9,11 @@ namespace bt_pairing {
 
 enum class Bond { Keep, Reject, ReplaceOthers };
 
-// After a link is encrypted. newPairing: a passkey was just shown for it. knownComputer: its
-// identity address is the one stored for the paired Computer.
-inline Bond onPaired(bool newPairing, bool knownComputer, bool windowOpen) {
-    if (newPairing) return windowOpen ? Bond::ReplaceOthers : Bond::Reject;
+// After a link is encrypted. newPairing: a passkey was just shown for it, which only happens inside
+// a window, so it stands even if the window ran out while the passkey was being typed.
+// knownComputer: its identity address is the one stored for the paired Computer.
+inline Bond onPaired(bool newPairing, bool knownComputer) {
+    if (newPairing) return Bond::ReplaceOthers;
     return knownComputer ? Bond::Keep : Bond::Reject;
 }
 

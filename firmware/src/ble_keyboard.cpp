@@ -115,6 +115,10 @@ std::map<uint16_t, bt_pairing::Window> g_grace;
 // Host task only (connect, security and disconnect callbacks all run there).
 std::map<uint16_t, ble_addr_t> g_forget;
 
+// Connections onPassKeyNotify ended (host task only). Pairing can go on until the disconnect lands,
+// so one of them must never be trusted, even if it finishes (#141).
+std::set<uint16_t> g_doomed;
+
 // Every connection with input notifies on, trusted or not (host task only). A host can turn them on
 // before pairing finishes, and NimBLE doesn't say so again once it's bonded: trust promotes it.
 std::set<uint16_t> g_notifying;
@@ -138,6 +142,14 @@ void forgetAllBut(const ble_addr_t* keep) {
     }
 }
 
+class DeviceCallbacks : public BLEDeviceCallbacks {
+    // The library's default makes room by unpairing the oldest bond, often the Computer's, so three
+    // strangers bonding by Just Works could push it out. Refuse the new bond instead (#141).
+    int onStoreStatus(ble_store_status_event* e, void*) override {
+        return e->event_code == BLE_STORE_EVENT_OVERFLOW ? BLE_HS_ESTORE_CAP : 0;
+    }
+};
+
 class ServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer*, ble_gap_conn_desc* d) override {
         g_grace[d->conn_handle].open(millis(), bt_pairing::kGraceMs);
@@ -156,6 +168,7 @@ class ServerCallbacks : public BLEServerCallbacks {
         g_subscribed.compare_exchange_strong(expected, kNone);
         g_notifying.erase(d->conn_handle);
         g_grace.erase(d->conn_handle);
+        g_doomed.erase(d->conn_handle);
         const auto forget = g_forget.find(d->conn_handle);
         if (forget != g_forget.end()) {
             ble_store_util_delete_peer(&forget->second);
@@ -209,7 +222,10 @@ class SecurityCallbacks : public BLESecurityCallbacks {
             return;
         }
         if (pending.empty()) g_unmatched.store(true);  // onAuthenticationComplete rejects it
-        for (uint16_t handle : pending) ble_gap_terminate(handle, BLE_ERR_REM_USER_CONN_TERM);
+        for (uint16_t handle : pending) {
+            g_doomed.insert(handle);
+            ble_gap_terminate(handle, BLE_ERR_REM_USER_CONN_TERM);
+        }
     }
 
     void onAuthenticationComplete(ble_gap_conn_desc* d) override {
@@ -221,12 +237,12 @@ class SecurityCallbacks : public BLESecurityCallbacks {
         if (!d->sec_state.encrypted) return;  // failed: the link stays unencrypted and never trusted
         // Just Works or no bond: never trusted, whatever the window says.
         if (!d->sec_state.authenticated || !d->sec_state.bonded || d->sec_state.key_size != 16 ||
-            (unmatched && !pairedNow)) {
+            (unmatched && !pairedNow) || g_doomed.count(d->conn_handle)) {
             reject(*d);
             return;
         }
         const bool known = g_hasComputer && ble_addr_cmp(&d->peer_id_addr, &g_computer) == 0;
-        switch (bt_pairing::onPaired(pairedNow, known, windowOpen())) {
+        switch (bt_pairing::onPaired(pairedNow, known)) {
             case bt_pairing::Bond::Reject:
                 reject(*d);
                 return;
@@ -280,6 +296,7 @@ void tick(ble_npl_event*) {
 }  // namespace
 
 bool start() {
+    BLEDevice::setDeviceCallbacks(new DeviceCallbacks());
     if (!BLEDevice::init("Phrasedeck panel")) return false;
     BLESecurity* sec = new BLESecurity();
     sec->setCapability(ESP_IO_CAP_OUT);               // the panel displays a passkey

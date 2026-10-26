@@ -119,4 +119,17 @@ struct ArrangeDeckTests {
         #expect(shown(to, width: .regular) == ["x": [0, 0], "y": [1, 0], "a": [2, 0]])
         #expect(shown(from) == ["b": [2, 0]])
     }
+
+    // MARK: Delete (spec section 9)
+
+    /// Deleting a Button leaves a gap: the others stay where they're shown, even on a Page that had
+    /// no Spots yet.
+    @Test func deletingAButtonLeavesAGap() throws {
+        let (page, p) = try page(["a", "b", "c", "d"])
+
+        try Deck.delete(p[0], keepingGapOn: page, width: .compact, columns: 3, in: context)
+
+        #expect(shown(page) == ["b": [1, 0], "c": [2, 0], "d": [0, 1]])
+        #expect(try context.fetch(FetchDescriptor<Phrase>()).map(\.label).sorted() == ["b", "c", "d"])
+    }
 }

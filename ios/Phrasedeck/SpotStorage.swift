@@ -131,6 +131,16 @@ extension Deck {
         try move(phrase, to: spot, on: page, width: width, columns: columns, in: context)
     }
 
+    /// Deletes a Button from Arrange mode (spec section 9): the others keep the Spots they're shown
+    /// at on this Layout width, so it leaves a gap.
+    static func delete(_ phrase: Phrase, keepingGapOn page: Page, width: LayoutWidth, columns: Int,
+                       in context: ModelContext) throws {
+        let shown = layout(of: page, width: width, columns: columns, in: context)
+        try saveSpots(Dictionary(uniqueKeysWithValues: shown.map { ($0.id, Spot(column: $0.x, row: $0.y)) }),
+                      width: width, in: context)
+        try delete(phrase, in: context)
+    }
+
     /// Deletes the Buttons' Spots on every Layout width. The caller saves.
     static func deleteSpots(of phrases: [Phrase], in context: ModelContext) {
         let uids = Set(phrases.map(\.uid))

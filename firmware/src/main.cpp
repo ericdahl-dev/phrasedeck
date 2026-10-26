@@ -6,8 +6,11 @@
 #include <esp_heap_caps.h>
 #include <lvgl.h>
 
+#include <string>
+
 #include "board_pins.h"
 #include "display_driver.h"
+#include "net.h"
 #include "panel_mcu.h"
 #include "touch.h"
 
@@ -20,6 +23,28 @@ const char* const kPhrases[] = {
 };
 
 lv_obj_t* g_status = nullptr;
+lv_obj_t* g_net = nullptr;
+unsigned g_net_version = 0;
+
+// Shows Wi-Fi and the Nearby Helpers; runs on the LVGL loop, reading the net task's snapshot.
+void showNet() {
+    const net::Snapshot s = net::snapshot();
+    if (s.version == g_net_version) return;
+    g_net_version = s.version;
+    std::string text;
+    if (!s.wifiConfigured) {
+        text = "Wi-Fi: not set up";
+    } else if (!s.wifiUp) {
+        text = "Wi-Fi: connecting";
+    } else {
+        text = "Wi-Fi " + s.ip + "  |  Nearby: ";
+        if (s.nearby.empty()) text += "none";
+        for (size_t i = 0; i < s.nearby.size(); ++i) {
+            text += (i ? ", " : "") + s.nearby[i].name;
+        }
+    }
+    lv_label_set_text(g_net, text.c_str());
+}
 
 void onTap(lv_event_t* e) {
     const char* phrase = static_cast<const char*>(lv_event_get_user_data(e));
@@ -35,7 +60,13 @@ void buildPage() {
     lv_obj_set_style_text_font(g_status, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(g_status, lv_color_hex(0xC8CDD4), 0);
     lv_label_set_text(g_status, "Phrasedeck panel: tap a Button");
-    lv_obj_align(g_status, LV_ALIGN_TOP_MID, 0, 12);
+    lv_obj_align(g_status, LV_ALIGN_TOP_LEFT, 16, 12);
+
+    g_net = lv_label_create(screen);
+    lv_obj_set_style_text_font(g_net, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(g_net, lv_color_hex(0x8A929C), 0);
+    lv_label_set_text(g_net, "");
+    lv_obj_align(g_net, LV_ALIGN_TOP_RIGHT, -16, 12);
 
     // 4 x 2 Buttons below the status line.
     static const int32_t cols[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
@@ -82,6 +113,7 @@ void setup() {
     }
     touch_init();
     buildPage();
+    net::start();
     lv_timer_handler();
     panel_mcu::backlightOn();  // last, so the screen doesn't flash on boot
     Serial.printf("phrasedeck panel: ready, internal heap free %u, PSRAM free %u\n",
@@ -90,6 +122,7 @@ void setup() {
 
 void loop() {
     touch_poll();
+    showNet();
     lv_timer_handler();
     delay(5);
 }

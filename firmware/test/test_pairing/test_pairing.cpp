@@ -35,9 +35,18 @@ void test_the_code_goes_only_to_a_cert_matching_the_short_pin() {
     TEST_ASSERT_FALSE(pairing::matchesShortPin("5597 416a 434c d222", ""));
 }
 
+// The cert's SHA-256 digest becomes the lowercase hex the Helper prints and the Pin compares with.
+void test_a_digest_is_lowercase_hex() {
+    uint8_t digest[32];
+    for (int i = 0; i < 32; ++i) digest[i] = static_cast<uint8_t>(i * 8 + 0x0A);
+    TEST_ASSERT_EQUAL_STRING("0a121a222a323a424a525a626a727a828a929aa2aab2bac2cad2dae2eaf2fa02",
+                             pairing::hexLower(digest).c_str());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_the_keypad_builds_a_six_digit_code);
     RUN_TEST(test_the_code_goes_only_to_a_cert_matching_the_short_pin);
+    RUN_TEST(test_a_digest_is_lowercase_hex);
     return UNITY_END();
 }

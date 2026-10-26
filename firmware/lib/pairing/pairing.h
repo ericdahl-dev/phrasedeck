@@ -2,6 +2,7 @@
 // (docs/launch/lan-threat-checklist.md, "Panel pairing").
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 namespace pairing {
@@ -27,5 +28,8 @@ class CodeEntry {
 // starts certSha256, the lowercase hex SHA-256 of the Helper's TLS certificate. Only then may the
 // Pairing code be sent.
 bool matchesShortPin(const std::string& typed, const std::string& certSha256);
+
+// A SHA-256 digest as 64 lowercase hex characters, the form the Helper prints and stores.
+std::string hexLower(const uint8_t digest[32]);
 
 }  // namespace pairing

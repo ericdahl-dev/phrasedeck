@@ -37,6 +37,9 @@ lv_obj_t* g_status = nullptr;
 lv_obj_t* g_net = nullptr;
 unsigned g_net_version = 0;
 unsigned g_message_seq = 0;
+lv_obj_t* g_grid = nullptr;
+lv_obj_t* g_sending = nullptr;  // the Button whose Send is in flight, dimmed until its result
+lv_obj_t* g_maybe = nullptr;    // a Maybe typed Button stays orange until the next tap
 bool g_busy = false;  // a pair or Send is queued or running: further taps are refused, not queued
 
 // The Pair screen: which Nearby Computer, the Pairing code and the short Pin from `phrased pair`.
@@ -54,6 +57,7 @@ std::vector<net::Helper> g_pair_helpers;  // copied when the Pair screen opens, 
 
 void closePair(lv_event_t*);
 void pairResult(const net::Snapshot& s);
+void sendResult(const net::Snapshot& s);
 
 // Shows Wi-Fi and the paired Computer; runs on the LVGL loop, reading the net task's snapshot.
 // Nearby Computers are listed on the Pair screen, not here.
@@ -77,6 +81,7 @@ void showNet() {
             g_pairing_now = false;
             if (g_pair != nullptr) pairResult(s);
         }
+        if (g_sending != nullptr) sendResult(s);
         lv_label_set_text(g_status, s.message.c_str());
     }
 }
@@ -292,9 +297,35 @@ std::string phraseKey(uint32_t id) {
     return key;
 }
 
+void clearColor(lv_obj_t* button) {
+    lv_obj_remove_local_style_prop(button, LV_STYLE_BG_COLOR, 0);
+    lv_obj_remove_local_style_prop(g_status, LV_STYLE_TEXT_COLOR, 0);
+}
+
+void endFlash(lv_timer_t* t) { clearColor(static_cast<lv_obj_t*>(lv_timer_get_user_data(t))); }
+
+// Like the iPhone: the Button flashes green (Typed), orange (Maybe typed) or red (Not typed) for
+// 700 ms, the status line in the same color. Maybe typed stays until the next tap.
+void sendResult(const net::Snapshot& s) {
+    lv_obj_t* b = g_sending;
+    g_sending = nullptr;
+    lv_obj_remove_state(b, LV_STATE_DISABLED);
+    const lv_color_t c = lv_palette_main(s.ok ? LV_PALETTE_GREEN : s.maybe ? LV_PALETTE_ORANGE : LV_PALETTE_RED);
+    lv_obj_set_style_bg_color(b, c, 0);
+    lv_obj_set_style_text_color(g_status, c, 0);
+    if (s.maybe) {
+        g_maybe = b;
+        return;
+    }
+    lv_timer_t* t = lv_timer_create(endFlash, 700, b);
+    lv_timer_set_repeat_count(t, 1);
+}
+
 void sendPhrase(size_t i) {
     const phrases::Button& b = g_phrases.at(i);
-    startRequest(net::type(b.text, phraseKey(b.id), b.edit), "Sending: " + b.label);
+    if (!startRequest(net::type(b.text, phraseKey(b.id), b.edit), "Sending: " + b.label)) return;
+    g_sending = lv_obj_get_child(g_grid, static_cast<int32_t>(i));
+    lv_obj_add_state(g_sending, LV_STATE_DISABLED);  // dimmed while it sends
     Serial.printf("tap: %u at %d,%d\n", static_cast<unsigned>(i), touch_x(), touch_y());  // never the text
 }
 
@@ -319,29 +350,58 @@ void confirmSend(lv_event_t* e) {
     sendPhrase(i);
 }
 
-// Eric (#98): a Phrase added or edited on the web page shows its text and asks first.
+// Eric (#98): a Phrase added or edited on the web page shows its text and asks first. Enter and
+// Tab are drawn as marks, so what will be typed is what's shown.
 void openConfirm(size_t i) {
-    g_confirm_id = g_phrases.at(i).id;
-    g_confirm_edit = g_phrases.at(i).edit;
+    const phrases::Button& b = g_phrases.at(i);
+    g_confirm_id = b.id;
+    g_confirm_edit = b.edit;
     g_confirm = lv_obj_create(lv_screen_active());
     lv_obj_set_size(g_confirm, board::LCD_WIDTH, board::LCD_HEIGHT);
-    lv_obj_center(g_confirm);
+    lv_obj_set_style_radius(g_confirm, 0, 0);
+    lv_obj_remove_flag(g_confirm, LV_OBJ_FLAG_SCROLLABLE);
+
+    const std::string computer = net::snapshot().paired;
     lv_obj_t* title = lv_label_create(g_confirm);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
-    lv_label_set_text(title, "This Button changed on the web page. Send it?");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
+    lv_label_set_text(title, computer.empty() ? "Send? No Computer is paired" : ("Send to " + computer + "?").c_str());
+    lv_obj_set_width(title, board::LCD_WIDTH - 48);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_obj_t* text = lv_label_create(g_confirm);
+
+    lv_obj_t* about = lv_label_create(g_confirm);
+    lv_obj_set_style_text_color(about, lv_color_hex(0x8A929C), 0);
+    const unsigned chars = phrases::characters(b.text), lines = phrases::lines(b.text);
+    lv_label_set_text_fmt(about, "Changed on the web page  |  %u character%s, %u line%s", chars, chars == 1 ? "" : "s",
+                          lines, lines == 1 ? "" : "s");
+    lv_obj_align(about, LV_ALIGN_TOP_LEFT, 0, 40);
+
+    lv_obj_t* box = lv_obj_create(g_confirm);
+    lv_obj_set_size(box, board::LCD_WIDTH - 48, board::LCD_HEIGHT - 48 - 72 - 84);
+    lv_obj_align(box, LV_ALIGN_TOP_LEFT, 0, 72);
+    lv_obj_set_scrollbar_mode(box, LV_SCROLLBAR_MODE_ON);
+    lv_obj_set_scroll_dir(box, LV_DIR_VER);
+    lv_obj_t* text = lv_label_create(box);
     lv_obj_set_style_text_font(text, &lv_font_montserrat_28, 0);
+    lv_obj_set_width(text, lv_pct(100));
     lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
-    lv_obj_set_size(text, board::LCD_WIDTH - 48, board::LCD_HEIGHT - 160);
-    lv_obj_add_flag(text, LV_OBJ_FLAG_SCROLLABLE);
-    lv_label_set_text(text, g_phrases.at(i).text.c_str());
-    lv_obj_align(text, LV_ALIGN_TOP_LEFT, 0, 40);
-    lv_obj_align(textButton(g_confirm, "Cancel", closeConfirm, nullptr), LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    lv_obj_align(textButton(g_confirm, "Send", confirmSend, nullptr), LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_label_set_text(text, phrases::visible(b.text, LV_SYMBOL_NEW_LINE, LV_SYMBOL_RIGHT " ").c_str());
+
+    // Send is the wide one, far from Cancel, so a slip doesn't pick the wrong one.
+    lv_obj_t* cancel = textButton(g_confirm, "Cancel", closeConfirm, nullptr);
+    lv_obj_set_size(cancel, 160, 64);
+    lv_obj_set_style_bg_color(cancel, lv_color_hex(0x3A3F47), 0);
+    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_t* send = textButton(g_confirm, "Send", confirmSend, nullptr);
+    lv_obj_set_size(send, 320, 64);
+    lv_obj_align(send, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
 }
 
 void tap(size_t i) {
+    if (g_maybe != nullptr) {
+        clearColor(g_maybe);
+        g_maybe = nullptr;
+    }
     if (g_busy) {
         lv_label_set_text(g_status, "Still sending the last one: wait for it");
         return;
@@ -385,7 +445,7 @@ void buildPage() {
     lv_obj_align(g_status, LV_ALIGN_TOP_LEFT, 16, 12);
 
     // Rows of 4 Buttons below the status line; two rows fit, more scroll.
-    lv_obj_t* grid = lv_obj_create(screen);
+    lv_obj_t* grid = g_grid = lv_obj_create(screen);
     lv_obj_set_size(grid, board::LCD_WIDTH, board::LCD_HEIGHT - 52);
     lv_obj_align(grid, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
@@ -462,14 +522,18 @@ void serialCommands() {
         } else if (line.rfind("edit ", 0) == 0) {  // stands in for the web page until it exists
             char* rest = nullptr;
             const size_t i = strtoul(line.c_str() + 5, &rest, 10);
-            if (i < g_phrases.size() && g_phrases.edit(i, g_phrases.at(i).label, rest + (*rest == ' '))) savePhrases();
+            std::string text = rest + (*rest == ' ');
+            for (size_t at; (at = text.find("\\n")) != std::string::npos;) text.replace(at, 2, "\n");
+            for (size_t at; (at = text.find("\\t")) != std::string::npos;) text.replace(at, 2, "\t");
+            if (i < g_phrases.size() && g_phrases.edit(i, g_phrases.at(i).label, text)) savePhrases();
         } else if (line == "shot") {
-            // The screen, one line per row: "R" then hex (count, RGB565) runs. One write per row, so
-            // the net task's log lines land between rows, never inside one.
-            static uint16_t row[board::LCD_WIDTH];
+            // The screen, one line per row: "R" then hex (count, RGB565) runs. Copied whole first, so
+            // the picture is one moment; one write per row, so log lines land between rows.
+            static uint16_t* frame = static_cast<uint16_t*>(ps_malloc(board::LCD_WIDTH * board::LCD_HEIGHT * 2));
             static char out[2 + board::LCD_WIDTH * 6 + 1];
-            for (int y = 0; y < board::LCD_HEIGHT; ++y) {
-                display_lcd.readRect(0, y, board::LCD_WIDTH, 1, row);
+            if (frame != nullptr) display_lcd.readRect(0, 0, board::LCD_WIDTH, board::LCD_HEIGHT, frame);
+            for (int y = 0; frame != nullptr && y < board::LCD_HEIGHT; ++y) {
+                const uint16_t* row = frame + y * board::LCD_WIDTH;
                 size_t len = 0;
                 out[len++] = 'R';
                 for (int x = 0; x < board::LCD_WIDTH;) {

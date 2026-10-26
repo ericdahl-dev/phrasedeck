@@ -317,6 +317,7 @@ void closeBtPair(lv_event_t*) {
 
 void btPairShow(const net::Snapshot& s) {
     const std::string key = bt_pairing::passkeyText(s.passkey);
+    lv_obj_set_style_text_letter_space(g_bt_passkey, key.empty() ? 0 : 12, 0);  // spaced digits only
     lv_label_set_text(g_bt_passkey, key.empty() ? "(appears when your Computer connects)" : key.c_str());
     lv_label_set_text(g_bt_note, s.blePairing ? "Pairing is open for 2 minutes."
                                  : s.bleReady  ? "A Computer is connected. If it isn't yours, pair again."
@@ -341,7 +342,6 @@ void openBtPair() {
                                  .c_str());
     g_bt_passkey = lv_label_create(g_bt_pair);
     lv_obj_set_style_text_font(g_bt_passkey, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_letter_space(g_bt_passkey, 12, 0);
     lv_obj_align(g_bt_passkey, LV_ALIGN_TOP_MID, 0, 120);
     g_bt_note = lv_label_create(g_bt_pair);
     lv_obj_align(g_bt_note, LV_ALIGN_TOP_LEFT, 0, 200);

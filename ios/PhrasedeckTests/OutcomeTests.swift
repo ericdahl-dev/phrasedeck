@@ -42,4 +42,11 @@ struct OutcomeTests {
     func eachPairFailureHasItsWording(failure: HelperClient.Failure, message: String) {
         #expect(Outcome.pair(failure, on: mac) == message)
     }
+
+    /// A banner closes itself after a few seconds unless it asks for something (UX review).
+    @Test func onlyBannersThatAskForSomethingStayUp() {
+        #expect(Outcome.send(.unreachable, on: mac).autoCloses)
+        #expect(Outcome.send(.noReply, on: mac).autoCloses)
+        #expect(!Outcome.send(.unauthorized, on: mac).autoCloses)
+    }
 }

@@ -27,6 +27,9 @@ final class AppModel {
         let message: String?
         /// Set after a 401, so the banner can offer "Pair again".
         var pairAgain: Helper?
+
+        /// The banner closes itself after a few seconds unless it asks for something.
+        var autoCloses: Bool { pairAgain == nil }
     }
 
     let computers: Computers
@@ -37,6 +40,8 @@ final class AppModel {
     /// Computers already asked for /info this run.
     private var infoAsked: Set<UUID> = []
     private(set) var feedback: Feedback?
+    /// Counts banners shown, so the same message twice restarts its auto-close.
+    private(set) var feedbackShown = 0
 
     var helpers: [Helper] { computers.all }
 
@@ -71,7 +76,7 @@ final class AppModel {
                 try await computers.connection(to: helper, via: .tailnet).type(text: text, enter: enter)
                 return show(Feedback(tone: .success, message: failure == .pinMismatch
                     ? "Sent over the tailnet: on the home network, \(helper.name) showed a different certificate. Scan its QR code to pair again."
-                    : nil))
+                    : nil, pairAgain: failure == .pinMismatch ? helper : nil))
             } catch let tailnetFailure as HelperClient.Failure {
                 return show(Outcome.send(failure == .pinMismatch ? failure : tailnetFailure, on: helper))
             } catch {
@@ -88,6 +93,7 @@ final class AppModel {
 
     private func show(_ feedback: Feedback) -> Feedback {
         self.feedback = feedback
+        feedbackShown += 1
         return feedback
     }
 

@@ -166,6 +166,9 @@ struct AppModelTests {
 
         #expect(feedback.tone == .success)
         #expect(feedback.message?.contains("certificate") == true)
+        // It asks to pair again, so it offers the button and stays up.
+        #expect(feedback.pairAgain?.id == model.selectedHelper?.id)
+        #expect(!feedback.autoCloses)
         #expect(lan.typed.count == 1 && api.typed.count == 1)
         #expect(routes.log == [Self.lanRoute, .tailnet])
     }

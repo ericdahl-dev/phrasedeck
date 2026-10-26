@@ -6,6 +6,7 @@ struct ContentView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @State private var showingComputers = false
     @State private var pairing: Helper?
     @State private var incomingLink: IncomingLink?
@@ -19,7 +20,8 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             DeckView()
-                .overlay(alignment: .top) { banner }
+                // An inset, not an overlay, so the banner pushes the grid down instead of covering row 1.
+                .safeAreaInset(edge: .top) { banner }
                 .toolbar {
                     ToolbarItem(placement: .principal) {
                         HelperPicker(showComputers: { showingComputers = true })
@@ -69,6 +71,13 @@ struct ContentView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(.white.opacity(0.25))
                 }
+                Button { model.dismissFeedback() } label: {
+                    Image(systemName: "xmark")
+                        .font(.callout.weight(.bold))
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
+                }
+                .accessibilityLabel("Close")
             }
             .foregroundStyle(.white)
             .padding()
@@ -77,6 +86,12 @@ struct ContentView: View {
             .padding(.horizontal)
             .onTapGesture { model.dismissFeedback() }
             .transition(.move(edge: .top).combined(with: .opacity))
+            // VoiceOver users close it themselves, so it can't vanish mid-read.
+            .task(id: model.feedbackShown) {
+                guard feedback.autoCloses, !voiceOver else { return }
+                try? await Task.sleep(for: .seconds(4))
+                if !Task.isCancelled { withAnimation { model.dismissFeedback() } }
+            }
         }
     }
 

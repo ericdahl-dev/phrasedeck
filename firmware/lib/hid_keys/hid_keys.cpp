@@ -26,17 +26,17 @@ Key key(char c) {
     return {0, 0};
 }
 
-// The character starting at text[i], for the panel to name: its whole UTF-8 sequence, or U+00XX
-// for an ASCII control.
+// The character starting at text[i], for the panel to name: its whole UTF-8 sequence, U+00XX for
+// an ASCII control, or 0xNN for a byte that doesn't start valid UTF-8, so it's always drawable.
 std::string named(const std::string& text, size_t i) {
+    static const char hex[] = "0123456789ABCDEF";
     auto b = static_cast<unsigned char>(text[i]);
-    if (b < 0x80) {
-        static const char hex[] = "0123456789ABCDEF";
-        return std::string("U+00") + hex[b >> 4] + hex[b & 0xF];
-    }
-    size_t end = i + 1;
-    while (end < text.size() && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80) end++;
-    return text.substr(i, end - i);
+    if (b < 0x80) return std::string("U+00") + hex[b >> 4] + hex[b & 0xF];
+    const size_t len = b >= 0xC2 && b <= 0xDF ? 2 : b >= 0xE0 && b <= 0xEF ? 3 : b >= 0xF0 && b <= 0xF4 ? 4 : 0;
+    bool valid = len != 0 && i + len <= text.size();
+    for (size_t k = 1; valid && k < len; k++) valid = (static_cast<unsigned char>(text[i + k]) & 0xC0) == 0x80;
+    if (!valid) return std::string("0x") + hex[b >> 4] + hex[b & 0xF];
+    return text.substr(i, len);
 }
 
 }  // namespace

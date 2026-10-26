@@ -10,6 +10,8 @@ namespace hid_keys {
 
 constexpr uint8_t kShift = 0x02;  // left Shift in the report's modifier byte
 
+// One key press. The sender sends a report with this key down, then an all-zero release report,
+// each paced, so a repeated key ("aa") reads as two presses. If a send fails, retry that report.
 struct Key {
     uint8_t mod;   // modifier byte
     uint8_t code;  // HID usage (keyboard page)

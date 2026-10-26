@@ -75,6 +75,38 @@ void test_pacing() {
     TEST_ASSERT_TRUE(wrap.due(4));  // 10 ms later, across the wrap
 }
 
+// The whole US table, from the keyboard's point of view: each usage from 0x04 with the character
+// it types unshifted, then shifted (0x28-0x2C are Enter, Escape, Backspace, Tab and Space).
+void test_every_printable_character_types_its_us_key() {
+    static const char* const keys[] = {
+        "aA", "bB", "cC", "dD", "eE", "fF", "gG", "hH", "iI", "jJ", "kK", "lL", "mM", "nN", "oO",
+        "pP", "qQ", "rR", "sS", "tT", "uU", "vV", "wW", "xX", "yY", "zZ", "1!", "2@", "3#", "4$",
+        "5%", "6^", "7&", "8*", "9(", "0)", "", "", "", "", "  ", "-_", "=+", "[{", "]}", "\\|",
+        "", ";:", "'\"", "`~", ",<", ".>", "/?"};
+    size_t seen = 0;
+    for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
+        const uint8_t code = uint8_t(0x04 + i);
+        const std::string k = keys[i];
+        for (size_t shift = 0; shift < k.size(); shift++) {
+            if (code == 0x2C && shift == 1) break;  // Space has no shifted character
+            hid_keys::Plan p = hid_keys::plan(k.substr(shift, 1), false);
+            TEST_ASSERT_TRUE_MESSAGE(p.ok, k.c_str());
+            TEST_ASSERT_EQUAL_HEX8_MESSAGE(code, p.keys[0].code, k.substr(shift, 1).c_str());
+            TEST_ASSERT_EQUAL_HEX8_MESSAGE(shift ? kShift : 0, p.keys[0].mod, k.substr(shift, 1).c_str());
+            seen++;
+        }
+    }
+    TEST_ASSERT_EQUAL(95, seen);  // every character from 0x20 to 0x7E
+}
+
+// A Phrase with broken UTF-8 still names something the panel can draw: the byte, as 0xNN.
+void test_broken_utf8_is_named_by_its_byte() {
+    TEST_ASSERT_EQUAL_STRING("0xC3", hid_keys::plan("ab\xc3", false).bad.c_str());
+    TEST_ASSERT_EQUAL_STRING("0xE2", hid_keys::plan("\xe2\x9c", false).bad.c_str());
+    TEST_ASSERT_EQUAL_STRING("0x80", hid_keys::plan("\x80", false).bad.c_str());
+    TEST_ASSERT_EQUAL_STRING("\xc3\xa9", hid_keys::plan("\xc3\xa9\xa9", false).bad.c_str());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_letters_and_digits);
@@ -82,5 +114,7 @@ int main() {
     RUN_TEST(test_newlines_tab_and_enter);
     RUN_TEST(test_what_a_us_keyboard_cant_type_refuses_the_send);
     RUN_TEST(test_pacing);
+    RUN_TEST(test_every_printable_character_types_its_us_key);
+    RUN_TEST(test_broken_utf8_is_named_by_its_byte);
     return UNITY_END();
 }

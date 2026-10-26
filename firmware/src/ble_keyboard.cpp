@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <map>
+#include <set>
 #include <vector>
 
 #include "bt_pairing.h"
@@ -79,6 +80,10 @@ void bump() { g_version.fetch_add(1); }
 // Host task only (connect, security and disconnect callbacks all run there).
 std::map<uint16_t, ble_addr_t> g_forget;
 
+// Every connection with input notifies on, trusted or not (host task only). A host can turn them on
+// before pairing finishes, and NimBLE doesn't say so again once it's bonded: trust promotes it.
+std::set<uint16_t> g_notifying;
+
 // Ends the connection and forgets its keys, so it has to pair again (inside a window) to return.
 void reject(const ble_gap_conn_desc& d) {
     g_forget[d.conn_handle] = d.peer_id_addr;
@@ -113,6 +118,7 @@ class ServerCallbacks : public BLEServerCallbacks {
         if (g_pairing.compare_exchange_strong(expected, kNone)) g_passkey.store(kNone);
         expected = handle;
         g_subscribed.compare_exchange_strong(expected, kNone);
+        g_notifying.erase(d->conn_handle);
         const auto forget = g_forget.find(d->conn_handle);
         if (forget != g_forget.end()) {
             ble_store_util_delete_peer(&forget->second);
@@ -128,12 +134,14 @@ class InputCallbacks : public BLECharacteristicCallbacks {
     // Also called when NimBLE restores a bonded Computer's subscription on reconnect.
     void onSubscribe(BLECharacteristic*, ble_gap_conn_desc* d, uint16_t subValue) override {
         if (subValue & 1) {
+            g_notifying.insert(d->conn_handle);
             // A stranger's subscription mustn't take the slot. NimBLE restores the Computer's after
             // encryption, so it still lands here.
             const auto& sec = d->sec_state;
             if (!sec.encrypted || !sec.authenticated || !sec.bonded) return;
             g_subscribed.store(d->conn_handle);
         } else {
+            g_notifying.erase(d->conn_handle);
             int expected = d->conn_handle;
             g_subscribed.compare_exchange_strong(expected, kNone);
         }
@@ -192,6 +200,7 @@ class SecurityCallbacks : public BLESecurityCallbacks {
                 break;
         }
         g_trusted.store(d->conn_handle);
+        if (g_notifying.count(d->conn_handle)) g_subscribed.store(d->conn_handle);
         if (!windowOpen()) BLEDevice::stopAdvertising();  // one Computer: nobody else needs to find it
         bump();
     }

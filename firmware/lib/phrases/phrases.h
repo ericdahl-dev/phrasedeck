@@ -37,6 +37,13 @@ class List {
     // Eric (#98): a Phrase added or edited on the web page is shown and confirmed on the panel
     // before its first send. True for an index out of range, so nothing sends unasked.
     bool needsConfirm(size_t i) const { return i >= buttons_.size() || buttons_[i].confirmedEdit != buttons_[i].edit; }
+    // The index of the Button with this id at this edit; size() if it's gone or changed since.
+    size_t find(uint32_t id, uint32_t edit) const {
+        for (size_t i = 0; i < buttons_.size(); ++i) {
+            if (buttons_[i].id == id) return buttons_[i].edit == edit ? i : buttons_.size();
+        }
+        return buttons_.size();
+    }
     void confirmed(size_t i) {
         if (i < buttons_.size()) buttons_[i].confirmedEdit = buttons_[i].edit;
     }

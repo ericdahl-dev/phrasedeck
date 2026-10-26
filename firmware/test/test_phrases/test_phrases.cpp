@@ -129,6 +129,22 @@ void test_counters_never_wrap() {
     TEST_ASSERT_EQUAL_STRING("x", list.at(0).text.c_str());
 }
 
+// "Send?" confirms the edit it showed: if the Phrase changed, moved or went while it was open,
+// the confirm finds nothing and nothing is sent.
+void test_a_confirm_finds_only_the_edit_it_showed() {
+    phrases::List list;
+    list.add("A", "a");
+    list.add("B", "b");
+    const phrases::Button shown = list.at(1);
+    TEST_ASSERT_EQUAL(1, list.find(shown.id, shown.edit));
+    list.move(1, 0);
+    TEST_ASSERT_EQUAL(0, list.find(shown.id, shown.edit));
+    list.edit(0, "B", "b2");
+    TEST_ASSERT_EQUAL(list.size(), list.find(shown.id, shown.edit));
+    list.remove(0);
+    TEST_ASSERT_EQUAL(list.size(), list.find(shown.id, shown.edit + 1));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_buttons_can_be_added_edited_moved_and_deleted);
@@ -138,5 +154,6 @@ int main() {
     RUN_TEST(test_ids_stay_put_and_edits_count);
     RUN_TEST(test_an_edited_phrase_needs_one_confirm);
     RUN_TEST(test_counters_never_wrap);
+    RUN_TEST(test_a_confirm_finds_only_the_edit_it_showed);
     return UNITY_END();
 }

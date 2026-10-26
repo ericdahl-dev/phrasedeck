@@ -91,7 +91,8 @@ struct PhraseButton: View {
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .offset(x: -16, y: -16)
+                // 44 pt to tap, reaching no further than the 12 pt gap to the neighbors.
+                .offset(x: -12, y: -12)
                 .accessibilityLabel("Delete \(phrase.label)")
                 .transition(.opacity)
             }

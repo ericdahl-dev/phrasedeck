@@ -121,10 +121,11 @@ struct DeckView: View {
         .sheet(item: $editing) { PhraseEditor(target: $0) }
         .sheet(isPresented: $editingPages) { PageEditor() }
         .alert(deleting.map { "Delete \u{201C}\($0.phrase.label)\u{201D}?" } ?? "",
-               isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
-            Button("Delete", role: .destructive) { confirmDelete() }
+               isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+               presenting: deleting) { d in
+            Button("Delete", role: .destructive) { confirmDelete(d.phrase, gapOn: d.gapOn) }
             Button("Cancel", role: .cancel) {}
-        } message: {
+        } message: { _ in
             Text("This removes the Button and its Phrase from your Deck on all your phones and iPads.")
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: deleted)
@@ -402,9 +403,7 @@ struct DeckView: View {
     }
 
     /// Deletes the confirmed Button. In Arrange mode the others stay where they are (spec section 9).
-    private func confirmDelete() {
-        guard let (phrase, gap) = deleting else { return }
-        deleting = nil
+    private func confirmDelete(_ phrase: Phrase, gapOn gap: (page: Page, columns: Int)?) {
         do {
             try withAnimation {
                 if let gap {

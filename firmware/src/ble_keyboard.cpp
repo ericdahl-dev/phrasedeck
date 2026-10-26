@@ -10,6 +10,7 @@
 #include <host/ble_hs.h>
 #include <host/ble_hs_mbuf.h>
 #include <host/ble_store.h>
+#include <host/ble_hs_pvcy.h>
 #include <nimble/nimble_port.h>
 
 #include <atomic>
@@ -188,10 +189,27 @@ void advertise(bool allowListOnly) {
     BLEAdvertising* adv = BLEDevice::getAdvertising();
     BLEDevice::stopAdvertising();
     // If the list can't be set, advertise to anyone: a locked-out Computer is worse than the wipe.
-    if (allowListOnly && ble_gap_wl_set(&g_computer, 1) != 0) allowListOnly = false;
+    if (allowListOnly && ble_gap_wl_set(&g_computer, 1) != 0) {
+        log_w("allow list not set: advertising to anyone");
+        allowListOnly = false;
+    }
     adv->setScanFilter(false, allowListOnly);
     g_allowListOnly.store(allowListOnly);
     BLEDevice::startAdvertising();
+}
+
+// With a real IRK, the Computer is let through the allow list only from private addresses made with
+// it; NimBLE puts every peer in device mode, which also lets its copyable identity address in. Host
+// task only, with advertising stopped.
+void protectComputer() {
+    ble_store_key_sec key{};
+    key.peer_addr = g_computer;
+    ble_store_value_sec value{};
+    if (!g_hasComputer || ble_store_read_peer_sec(&key, &value) != 0) return;
+    if (bt_pairing::networkPrivacy(value.irk_present, value.irk) &&
+        ble_gap_set_priv_mode(&g_computer, BLE_GAP_PRIVATE_MODE_NETWORK) != 0) {
+        log_w("Computer's privacy mode not set");
+    }
 }
 
 // Host task only.
@@ -228,7 +246,9 @@ class ServerCallbacks : public BLEServerCallbacks {
         g_doomed.erase(d->conn_handle);
         const auto forget = g_forget.find(d->conn_handle);
         if (forget != g_forget.end()) {
-            ble_store_util_delete_peer(&forget->second);
+            // A stranger claiming the Computer's address had its keys refused (#144): its rejection
+            // mustn't delete the Computer's. Checked now, as a pairing may have made it the Computer.
+            if (!isComputer(forget->second)) ble_store_util_delete_peer(&forget->second);
             g_forget.erase(forget);
         }
         // advertiseOnDisconnect is off by default: without this the Computer can't come back.
@@ -310,6 +330,7 @@ class SecurityCallbacks : public BLESecurityCallbacks {
             reject(*d);
             return;
         }
+        bool replaced = false;
         switch (bt_pairing::onPaired(pairedNow, known)) {
             case bt_pairing::Bond::Reject:
                 reject(*d);
@@ -325,6 +346,7 @@ class SecurityCallbacks : public BLESecurityCallbacks {
                 }
                 memcpy(g_computerLtk, ltk, sizeof(ltk));
                 g_hasLtk = true;
+                replaced = true;
                 forgetAllBut(&d->peer_id_addr);
                 closePairing();
                 break;
@@ -333,7 +355,10 @@ class SecurityCallbacks : public BLESecurityCallbacks {
         }
         g_trusted.store(d->conn_handle);
         if (g_notifying.count(d->conn_handle)) g_subscribed.store(d->conn_handle);
-        if (!windowOpen()) BLEDevice::stopAdvertising();  // one Computer: nobody else needs to find it
+        if (!windowOpen()) {
+            BLEDevice::stopAdvertising();  // one Computer: nobody else needs to find it
+            if (replaced) protectComputer();
+        }
         bump();
     }
 };
@@ -375,6 +400,10 @@ bool start() {
     if (!BLEDevice::init("Phrasedeck panel")) return false;
     g_storeWrite = ble_hs_cfg.store_write_cb;
     ble_hs_cfg.store_write_cb = gatedStoreWrite;
+    // NimBLE loads bonded peers' IRKs into the controller's resolving list but turns resolution on
+    // only for a panel using a private address itself, which this one doesn't. Without it a Mac
+    // reconnecting from a new private address is a stranger: no key, and blocked by the allow list.
+    if (ble_hs_pvcy_set_resolve_enabled(1) != 0) return false;
     BLESecurity* sec = new BLESecurity();
     sec->setCapability(ESP_IO_CAP_OUT);               // the panel displays a passkey
     sec->setAuthenticationMode(true, true, true);     // bond, MITM, Secure Connections
@@ -389,6 +418,7 @@ bool start() {
     g_hasComputer = loadComputer();
     g_hasLtk = g_hasComputer && storedLtk(g_computer, g_computerLtk);
     forgetAllBut(g_hasComputer ? &g_computer : nullptr);
+    protectComputer();
 
     g_server = BLEDevice::createServer();
     if (g_server == nullptr) return false;

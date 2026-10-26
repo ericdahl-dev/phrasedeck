@@ -33,6 +33,17 @@ inline bool dropIdle(bool encrypted, bool showingPasskey, bool windowOpen, bool 
 // window is open, so a new Computer can pair.
 inline bool allowListOnly(bool hasComputer, bool windowOpen) { return hasComputer && !windowOpen; }
 
+// Whether the stored Computer is matched only by the private addresses its IRK makes (network
+// privacy), not also by its identity address sent in the clear, which anyone can copy (#144). Needs
+// a real IRK: with none, or an all-zero one, its address is all there is to go by.
+inline bool networkPrivacy(bool irkPresent, const uint8_t irk[16]) {
+    if (!irkPresent) return false;
+    for (int i = 0; i < 16; ++i) {
+        if (irk[i] != 0) return true;
+    }
+    return false;
+}
+
 // Whether a store write goes ahead (#144). securityKeys: a pairing's keys. windowPairing: a passkey is
 // showing, which only happens in a window. Without this, a Just Works pairing that claims the
 // Computer's identity address overwrites its keys, and rejecting it then deletes them.

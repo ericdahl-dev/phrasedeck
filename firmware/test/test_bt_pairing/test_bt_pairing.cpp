@@ -56,6 +56,17 @@ void test_only_a_window_pairing_saves_keys() {
     TEST_ASSERT_TRUE(bt_pairing::saveToStore(!keys, !windowPairing));
 }
 
+// A Computer that sent a real IRK is matched by the private addresses made from it only, not by its
+// identity address sent in the clear, which anyone can copy (#144). One with no IRK, or an all-zero
+// one, can only be matched by its address.
+void test_a_computer_with_an_irk_is_matched_by_it_only() {
+    const uint8_t irk[16] = {0x5a, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    const uint8_t zero[16] = {};
+    TEST_ASSERT_TRUE(bt_pairing::networkPrivacy(true, irk));
+    TEST_ASSERT_FALSE(bt_pairing::networkPrivacy(true, zero));
+    TEST_ASSERT_FALSE(bt_pairing::networkPrivacy(false, irk));
+}
+
 // A window that runs out without a pairing or Cancel has lapsed, once, so the panel can stop
 // advertising (#141). Closing it ends that.
 void test_a_window_lapses_when_it_runs_out() {
@@ -101,5 +112,6 @@ int main() {
     RUN_TEST(test_what_the_panel_shows);
     RUN_TEST(test_only_the_computer_may_connect_outside_a_window);
     RUN_TEST(test_only_a_window_pairing_saves_keys);
+    RUN_TEST(test_a_computer_with_an_irk_is_matched_by_it_only);
     return UNITY_END();
 }

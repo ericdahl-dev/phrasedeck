@@ -13,6 +13,7 @@ section: utils
 recommends:
   - wl-clipboard
   - ydotool   # GNOME and KDE type through it (#84)
+  - libnotify-bin  # notify-send, for the panel's edited-Phrase notice (#98)
 suggests:
   - wtype
 contents:

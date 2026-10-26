@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -39,6 +40,8 @@ type Config struct {
 	// CertSHA256 and LANPort describe the LAN listener; both are empty when LAN is off.
 	CertSHA256 string
 	LANPort    int
+	// Notice shows a desktop notification; nil shows none.
+	Notice func(msg string)
 }
 
 type server struct {
@@ -46,6 +49,9 @@ type server struct {
 	limit     *rate.Limiter
 	pairLimit *rate.Limiter
 	typist    *typing.Typist
+
+	mu   sync.Mutex
+	seen map[string]uint32 // panel Phrase id -> last edit counter typed
 }
 
 // New returns the helper's handler for one listener, accepting cfg.AllowHosts.
@@ -146,6 +152,32 @@ type typeRequest struct {
 	Text  string    `json:"text"`
 	Enter bool      `json:"enter"`
 	Mode  plan.Mode `json:"mode"`
+	// A panel sends its Phrase's id and edit counter (#98), so an edited Phrase gets a notice.
+	Phrase string `json:"phrase"`
+	Edit   uint32 `json:"edit"`
+}
+
+// maxSeen caps the remembered Phrase ids; a panel holds at most 48.
+const maxSeen = 1024
+
+// noticeIfEdited shows a notice the first time a panel Phrase is typed at a new edit counter.
+// shortcut: remembered in memory only, so after a Helper restart each Phrase notices once more.
+func (s *server) noticeIfEdited(req typeRequest) {
+	if s.cfg.Notice == nil || req.Phrase == "" || req.Edit == 0 {
+		return
+	}
+	s.mu.Lock()
+	if s.seen == nil || len(s.seen) >= maxSeen {
+		s.seen = map[string]uint32{}
+	}
+	seen := s.seen[req.Phrase] == req.Edit
+	s.seen[req.Phrase] = req.Edit
+	s.mu.Unlock()
+	if seen {
+		return
+	}
+	// No Phrase text: notifications stay in the desktop's history (Eric, #98).
+	go s.cfg.Notice("Typed a Phrase that changed on a panel")
 }
 
 func (s *server) typeText(w http.ResponseWriter, r *http.Request) {
@@ -168,6 +200,7 @@ func (s *server) typeText(w http.ResponseWriter, r *http.Request) {
 	status, msg := typeAnswer(outcome, err)
 	switch {
 	case status == http.StatusOK:
+		s.noticeIfEdited(req)
 		reply(w, status, map[string]any{"ok": true})
 	case outcome == typing.Failed:
 		log.Printf("type: %v", err)

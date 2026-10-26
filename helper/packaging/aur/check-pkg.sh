@@ -23,7 +23,7 @@ for dep in wtype wl-clipboard; do
 done
 
 optdepends=$(pacman -Qip "$pkg" | sed -n '/^Optional Deps/,/^Required By/p')
-for dep in ydotool xdotool xclip; do
+for dep in ydotool xdotool xclip libnotify; do
 	echo "$optdepends" | grep -qw "$dep" || fail "doesn't list $dep as an optional dependency (GNOME/KDE, X11; #84)"
 done
 

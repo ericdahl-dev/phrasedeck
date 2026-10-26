@@ -33,6 +33,23 @@ jobs:
           packaging/build-linux.sh 0.0.0-ci amd64 "$RUNNER_TEMP/pkg"
           packaging/check-deb.sh "$RUNNER_TEMP/pkg/phrased_0.0.0-ci_amd64.deb"
 
+  aur:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: helper/go.mod
+          cache-dependency-path: helper/go.sum
+      - name: AUR phrased-bin builds with makepkg and passes its check (#78)
+        working-directory: helper
+        run: |
+          GOTOOLCHAIN=auto go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0
+          for arch in amd64 arm64; do packaging/build-linux.sh 0.0.0 "$arch" "$RUNNER_TEMP/pkg"; done
+          packaging/aur/render.sh 0.0.0 "$RUNNER_TEMP/pkg"
+          docker run --rm -v "$PWD:/w" -v "$RUNNER_TEMP/pkg:/pkg" archlinux:latest \
+            sh /w/packaging/aur/makepkg-check.sh /pkg 0.0.0
+
   macos:
     runs-on: macos-latest
     steps:

@@ -157,4 +157,25 @@ struct ArrangementTests {
         #expect(Arrangement.Nudge.allCases.map { $0.target(from: p) }
             == [Spot(column: 0, row: 1), Spot(column: 2, row: 1), Spot(column: 1, row: 0), Spot(column: 1, row: 2)])
     }
+
+    /// A pickup layout wider than the Page (taken before a pinch to fewer columns) used to hang:
+    /// a displaced 3-wide Button never fit 2 columns, so the search for a free Spot never ended.
+    @Test(.timeLimit(.minutes(1)))
+    func aButtonWiderThanThePageIsNarrowedWhenDisplaced() {
+        let pickup = Self.layout([(0, 0, 0, 3, 1), (1, 0, 1, 1, 1)])
+
+        let after = Arrangement.move(1, to: Spot(column: 0, row: 0), from: pickup, columns: 2)
+
+        #expect(Self.spots(after) == [1: [0, 0], 0: [0, 1]])
+    }
+
+    /// Likewise a pickup Spot past the right edge: it's pulled in, not written off the grid.
+    @Test(.timeLimit(.minutes(1)))
+    func aPickupSpotPastTheRightEdgeIsPulledIn() {
+        let pickup = Self.layout([(0, 2, 0, 1, 1), (1, 0, 1, 1, 1)])
+
+        let after = Arrangement.move(1, to: Spot(column: 1, row: 0), from: pickup, columns: 2)
+
+        #expect(Self.spots(after) == [1: [1, 0], 0: [0, 1]])
+    }
 }

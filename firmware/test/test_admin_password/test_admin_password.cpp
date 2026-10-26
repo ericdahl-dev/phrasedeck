@@ -46,6 +46,14 @@ void test_the_record_round_trips_as_a_blob_and_bad_blobs_dont_load() {
     TEST_ASSERT_FALSE(admin_password::fromBlob(blob, sizeof blob - 1, back));
     std::memset(blob + admin_password::kSaltLen, 0, 4);  // iterations = 0
     TEST_ASSERT_FALSE(admin_password::fromBlob(blob, sizeof blob, back));
+    std::memset(blob + admin_password::kSaltLen, 0xFF, 4);  // a corrupt count would hang check()
+    TEST_ASSERT_FALSE(admin_password::fromBlob(blob, sizeof blob, back));
+}
+
+void test_iteration_counts_are_capped() {
+    admin_password::Record r;
+    TEST_ASSERT_TRUE(admin_password::make("long enough", kSalt, admin_password::kMaxIterations, fakeKdf, r));
+    TEST_ASSERT_FALSE(admin_password::make("long enough", kSalt, admin_password::kMaxIterations + 1, fakeKdf, r));
 }
 
 int main() {
@@ -53,5 +61,6 @@ int main() {
     RUN_TEST(test_only_the_right_password_checks_out);
     RUN_TEST(test_short_passwords_and_low_iteration_counts_are_refused);
     RUN_TEST(test_the_record_round_trips_as_a_blob_and_bad_blobs_dont_load);
+    RUN_TEST(test_iteration_counts_are_capped);
     return UNITY_END();
 }

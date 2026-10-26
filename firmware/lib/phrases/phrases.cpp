@@ -1,6 +1,7 @@
 #include "phrases.h"
 
 #include <ArduinoJson.h>
+#include <utility>
 
 namespace phrases {
 namespace {
@@ -12,13 +13,13 @@ bool fits(const std::string& label, const std::string& text) {
 }  // namespace
 
 bool List::add(const std::string& label, const std::string& text) {
-    if (buttons_.size() >= kMaxButtons || !fits(label, text)) return false;
+    if (buttons_.size() >= kMaxButtons || nextId_ >= kMaxCounter || !fits(label, text)) return false;
     buttons_.push_back({nextId_++, 1, 0, label, text});
     return true;
 }
 
 bool List::edit(size_t i, const std::string& label, const std::string& text) {
-    if (i >= buttons_.size() || !fits(label, text)) return false;
+    if (i >= buttons_.size() || buttons_[i].edit >= kMaxCounter || !fits(label, text)) return false;
     buttons_[i].label = label;
     buttons_[i].text = text;
     ++buttons_[i].edit;
@@ -63,16 +64,17 @@ bool List::fromJson(const std::string& json) {
     if (arr.isNull()) return false;
     List next;
     next.nextId_ = doc["next"] | 1u;
+    if (next.nextId_ == 0 || next.nextId_ > kMaxCounter) return false;
     for (JsonObjectConst o : arr) {
         const Button b{o["id"] | 0u, o["edit"] | 0u, o["confirmed"] | 0u, o["label"] | "", o["text"] | ""};
-        if (b.id == 0 || b.edit == 0 || next.buttons_.size() >= kMaxButtons || !fits(b.label, b.text)) return false;
+        if (b.id == 0 || b.id >= kMaxCounter || b.edit == 0 || b.edit > kMaxCounter || next.buttons_.size() >= kMaxButtons || !fits(b.label, b.text)) return false;
         for (const Button& other : next.buttons_) {
             if (other.id == b.id) return false;
         }
         next.buttons_.push_back(b);
         if (b.id >= next.nextId_) next.nextId_ = b.id + 1;
     }
-    *this = next;
+    *this = std::move(next);
     return true;
 }
 

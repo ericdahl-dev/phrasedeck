@@ -112,6 +112,23 @@ void test_an_edited_phrase_needs_one_confirm() {
     TEST_ASSERT_TRUE(list.needsConfirm(9));  // out of range: never send without asking
 }
 
+// A saved count at its limit would wrap to 0 on the next add or edit: a reused id, or a web edit
+// that skips the confirm. Such a file is refused; the counters stop below the limit.
+void test_counters_never_wrap() {
+    phrases::List list;
+    const std::string top = std::to_string(phrases::kMaxCounter);
+    TEST_ASSERT_FALSE(list.fromJson("{\"next\":0,\"buttons\":[]}"));
+    TEST_ASSERT_FALSE(list.fromJson("{\"next\":" + std::to_string(phrases::kMaxCounter + 1u) + ",\"buttons\":[]}"));
+    TEST_ASSERT_FALSE(list.fromJson("{\"buttons\":[{\"id\":" + top + ",\"edit\":1,\"label\":\"a\",\"text\":\"x\"}]}"));
+    TEST_ASSERT_FALSE(list.fromJson("{\"buttons\":[{\"id\":1,\"edit\":" + std::to_string(phrases::kMaxCounter + 1u) + ",\"label\":\"a\",\"text\":\"x\"}]}"));
+    TEST_ASSERT_EQUAL(0, list.size());
+
+    TEST_ASSERT_TRUE(list.fromJson("{\"next\":" + top + ",\"buttons\":[{\"id\":1,\"edit\":" + top + ",\"label\":\"a\",\"text\":\"x\"}]}"));
+    TEST_ASSERT_FALSE(list.add("b", "y"));
+    TEST_ASSERT_FALSE(list.edit(0, "a", "z"));
+    TEST_ASSERT_EQUAL_STRING("x", list.at(0).text.c_str());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_buttons_can_be_added_edited_moved_and_deleted);
@@ -120,5 +137,6 @@ int main() {
     RUN_TEST(test_a_bad_file_is_refused_and_the_list_kept);
     RUN_TEST(test_ids_stay_put_and_edits_count);
     RUN_TEST(test_an_edited_phrase_needs_one_confirm);
+    RUN_TEST(test_counters_never_wrap);
     return UNITY_END();
 }

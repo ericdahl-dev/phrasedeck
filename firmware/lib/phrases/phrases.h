@@ -13,6 +13,7 @@ namespace phrases {
 constexpr size_t kMaxButtons = 48;
 constexpr size_t kMaxLabel = 40;   // bytes
 constexpr size_t kMaxText = 2000;  // bytes
+constexpr uint32_t kMaxCounter = 0x7FFFFFFF;  // ids and edit counts stop here, so they never wrap to 0
 
 struct Button {
     uint32_t id = 0;    // never changes and is never reused, so the Helper can tell Phrases apart

@@ -21,6 +21,8 @@ struct DeckView: View {
     @State private var arranging = false
     /// The Button being dragged, if any.
     @State private var carry: Carry?
+    /// True while a finger drags; SwiftUI resets it even when a drag is canceled without onEnded.
+    @GestureState private var dragging = false
     @Environment(\.scenePhase) private var scenePhase
 
     /// Arrange mode is reachable only in DEBUG builds launched with -arrangeEnabled until dragging
@@ -95,6 +97,9 @@ struct DeckView: View {
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { arranging = false } }
         .onChange(of: arranging) { _, now in if !now { carry = nil } }
+        // A canceled drag (a system edge swipe, a banner) skips onEnded: drop it without saving,
+        // so the next drag can't save this Button.
+        .onChange(of: dragging) { _, now in if !now { withAnimation(.snappy) { carry = nil } } }
         .sheet(item: $editing) { PhraseEditor(target: $0) }
         .sheet(isPresented: $editingPages) { PageEditor() }
         .saveFailureAlert($saveError)
@@ -201,14 +206,15 @@ struct DeckView: View {
     private func carryGesture(_ spot: Packing.Placement<Tile>, pickup: [Packing.Placement<Tile>], on page: Page,
                               step: CGSize, columns: Int) -> some Gesture {
         DragGesture(minimumDistance: 8, coordinateSpace: .named(Self.gridSpace))
+            .updating($dragging) { _, state, _ in state = true }
             .onChanged { value in
-                if carry == nil { carry = Carry(tile: spot.id, width: spot.columns, pickup: pickup) }
+                if carry?.tile != spot.id { carry = Carry(tile: spot.id, width: spot.columns, pickup: pickup) }
                 carry?.offset = value.translation
                 carry(to: CGPoint(x: CGFloat(spot.x) * step.width + value.translation.width,
                                   y: CGFloat(spot.y) * step.height + value.translation.height),
                       step: step, columns: columns)
             }
-            .onEnded { _ in _ = drop(on: page, columns: columns) }
+            .onEnded { _ in drop(on: page, columns: columns) }
     }
 
     /// Aims the carried Button with its top-left at `topLeft`; the Page reflows once the target has
@@ -243,10 +249,10 @@ struct DeckView: View {
     }
 
     /// Saves the carried Button where the finger let go.
-    private func drop(on page: Page, columns: Int) -> Bool {
+    private func drop(on page: Page, columns: Int) {
         defer { withAnimation(.snappy) { carry = nil } }
         guard let c = carry, let target = c.target, case .phrase(let id) = c.tile,
-              let phrase = page.sortedPhrases.first(where: { $0.persistentModelID == id }) else { return false }
+              let phrase = page.sortedPhrases.first(where: { $0.persistentModelID == id }) else { return }
         do {
             try withAnimation(.snappy) {
                 _ = try Deck.move(phrase, to: target, on: page, width: layoutWidth, columns: columns, in: context)
@@ -254,7 +260,6 @@ struct DeckView: View {
         } catch {
             saveError = error.localizedDescription
         }
-        return true
     }
 
     /// A Button being dragged in Arrange mode.

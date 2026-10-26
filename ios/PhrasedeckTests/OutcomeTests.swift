@@ -6,20 +6,21 @@ import Testing
 struct OutcomeTests {
     let mac = Helper(name: "lib-2833", host: "lib-2833")
 
+    /// Each message leads with what happened to the text, then why (UX review).
     @Test(arguments: [
-        (HelperClient.Failure.noReply, AppModel.Feedback.Tone.amber, "no reply, it may have typed"),
+        (HelperClient.Failure.noReply, AppModel.Feedback.Tone.amber, "Maybe typed: no reply from lib-2833."),
         // Agreed with the helper: 409 means nothing was typed, so it's safe to tap again.
-        (.busy, .red, "lib-2833 is busy, nothing was typed. Tap again."),
-        (.failedPartway, .amber, "lib-2833 failed partway, it may have typed"),
-        (.unreachable, .red, "lib-2833 unreachable"),
-        (.unauthorized, .red, "lib-2833 refused this device. Pair again."),
-        (.notReady, .red, "lib-2833 can't type yet: grant Accessibility to phrased"),
-        (.rateLimited, .red, "Too many sends. Wait a moment."),
-        (.notFound, .red, "lib-2833 failed (error 404)"),
-        (.server(415), .red, "lib-2833 failed (error 415)"),
-        (.notTailnet, .red, "lib-2833 isn't a tailnet name, so nothing was sent. Pair it again by scanning its QR code."),
-        (.notSent(-1022), .red, "lib-2833: the connection was blocked before anything was sent (error -1022)."),
-        (.pinMismatch, .red, "lib-2833's certificate didn't match, so nothing was sent. Scan its QR code to pair again."),
+        (.busy, .red, "Not typed: lib-2833 is busy. Tap again."),
+        (.failedPartway, .amber, "Maybe typed: lib-2833 failed partway."),
+        (.unreachable, .red, "Not typed: lib-2833 unreachable"),
+        (.unauthorized, .red, "Not typed: lib-2833 refused this device. Pair again."),
+        (.notReady, .red, "Not typed: lib-2833 can't type yet: grant Accessibility to phrased"),
+        (.rateLimited, .red, "Not typed: too many sends. Wait a moment."),
+        (.notFound, .red, "Not typed: lib-2833 failed (error 404)"),
+        (.server(415), .red, "Not typed: lib-2833 failed (error 415)"),
+        (.notTailnet, .red, "Not typed: lib-2833 isn't a tailnet name. Pair it again by scanning its QR code."),
+        (.notSent(-1022), .red, "Not typed: the connection to lib-2833 was blocked (error -1022)."),
+        (.pinMismatch, .red, "Not typed: lib-2833's certificate didn't match. Scan its QR code to pair again."),
     ])
     func eachSendFailureHasItsWording(failure: HelperClient.Failure, tone: AppModel.Feedback.Tone, message: String) {
         let feedback = Outcome.send(failure, on: mac)
@@ -48,5 +49,15 @@ struct OutcomeTests {
         #expect(Outcome.send(.unreachable, on: mac).autoCloses)
         #expect(Outcome.send(.noReply, on: mac).autoCloses)
         #expect(!Outcome.send(.unauthorized, on: mac).autoCloses)
+    }
+
+    /// What the Button shows for a moment after a send, and VoiceOver says.
+    @Test func eachToneHasAWordAndASymbol() {
+        #expect(AppModel.Feedback.Tone.success.word == "Typed")
+        #expect(AppModel.Feedback.Tone.red.word == "Not typed")
+        #expect(AppModel.Feedback.Tone.amber.word == "Maybe typed")
+        #expect(AppModel.Feedback.Tone.success.symbol == "checkmark")
+        #expect(AppModel.Feedback.Tone.red.symbol == "xmark")
+        #expect(AppModel.Feedback.Tone.amber.symbol == "questionmark")
     }
 }

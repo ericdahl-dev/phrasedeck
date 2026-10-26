@@ -145,6 +145,16 @@ void test_a_confirm_finds_only_the_edit_it_showed() {
     TEST_ASSERT_EQUAL(list.size(), list.find(shown.id, shown.edit + 1));
 }
 
+// "Send?" shows what will be typed: Enter and Tab as visible marks, plus how many characters
+// (not bytes) and lines it is.
+void test_the_preview_shows_enter_and_tab_and_counts() {
+    TEST_ASSERT_EQUAL_STRING("Hi<NL>\nthere<TAB>x", phrases::visible("Hi\nthere\tx", "<NL>", "<TAB>").c_str());
+    TEST_ASSERT_EQUAL(7, phrases::characters("caf\xc3\xa9\n!!"));
+    TEST_ASSERT_EQUAL(1, phrases::lines("one line"));
+    TEST_ASSERT_EQUAL(3, phrases::lines("a\nb\nc"));
+    TEST_ASSERT_EQUAL(2, phrases::lines("ends with Enter\n"));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_buttons_can_be_added_edited_moved_and_deleted);
@@ -155,5 +165,6 @@ int main() {
     RUN_TEST(test_an_edited_phrase_needs_one_confirm);
     RUN_TEST(test_counters_never_wrap);
     RUN_TEST(test_a_confirm_finds_only_the_edit_it_showed);
+    RUN_TEST(test_the_preview_shows_enter_and_tab_and_counts);
     return UNITY_END();
 }

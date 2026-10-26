@@ -56,11 +56,24 @@ void test_later_requests_need_the_whole_pin() {
     TEST_ASSERT_FALSE(pairing::matchesPin("", ""));
 }
 
+// The Pair screen counts the Pin's hex digits ("Pin 12/16") and enables Pair only with a 6-digit
+// code and all 16 digits; spaces don't count.
+void test_pair_is_ready_only_with_six_digits_and_sixteen_hex() {
+    TEST_ASSERT_EQUAL(0, pairing::pinDigits(""));
+    TEST_ASSERT_EQUAL(12, pairing::pinDigits("5597 416a 434c"));
+    TEST_ASSERT_TRUE(pairing::readyToPair("123456", "5597 416a 434c d222"));
+    TEST_ASSERT_FALSE(pairing::readyToPair("12345", "5597 416a 434c d222"));
+    TEST_ASSERT_FALSE(pairing::readyToPair("12345a", "5597 416a 434c d222"));
+    TEST_ASSERT_FALSE(pairing::readyToPair("123456", "5597 416a 434c d22"));
+    TEST_ASSERT_FALSE(pairing::readyToPair("123456", "5597 416a 434c d222 0"));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_the_code_goes_only_to_a_cert_matching_the_short_pin);
     RUN_TEST(test_a_digest_is_lowercase_hex);
     RUN_TEST(test_a_pair_reply_gives_the_token_for_the_checked_cert);
     RUN_TEST(test_later_requests_need_the_whole_pin);
+    RUN_TEST(test_pair_is_ready_only_with_six_digits_and_sixteen_hex);
     return UNITY_END();
 }

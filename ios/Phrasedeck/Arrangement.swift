@@ -144,12 +144,13 @@ private struct Grid {
 
 extension Arrangement {
     /// The Square a dragged Button is headed for: the one nearest its top-left corner, kept on the
-    /// Page and far enough left for its `width`. Below the last row is fine (spec section 5).
+    /// Page and far enough left for its `width`. Below the last row is fine (spec section 5), down to
+    /// `maxRow`.
     static func target(topLeft: (x: Double, y: Double), step: (width: Double, height: Double), columns: Int,
-                       width: Int) -> Spot {
+                       width: Int, maxRow: Int = .max) -> Spot {
         let column = Int((topLeft.x / step.width).rounded())
         let row = Int((topLeft.y / step.height).rounded())
-        return Spot(column: min(max(0, column), max(0, columns - width)), row: max(0, row))
+        return Spot(column: min(max(0, column), max(0, columns - width)), row: min(max(0, row), max(0, maxRow)))
     }
 }
 

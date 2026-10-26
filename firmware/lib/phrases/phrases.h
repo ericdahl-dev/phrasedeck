@@ -58,4 +58,11 @@ class List {
     uint32_t nextId_ = 1;
 };
 
+// For "Send?": text with each Enter shown as enterMark (before the line break) and each Tab as tabMark.
+std::string visible(const std::string& text, const char* enterMark, const char* tabMark);
+
+// Characters (UTF-8 code points, not bytes) and lines, an Enter starting a new one.
+size_t characters(const std::string& text);
+size_t lines(const std::string& text);
+
 }  // namespace phrases

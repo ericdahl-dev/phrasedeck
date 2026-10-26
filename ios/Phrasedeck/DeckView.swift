@@ -191,7 +191,8 @@ struct DeckView: View {
         }
         .scrollPosition(Binding(get: { scrollPositions[page.persistentModelID] ?? ScrollPosition() },
                                 set: { scrollPositions[page.persistentModelID] = $0 }))
-        .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { _, geometry in
+        // Only Arrange mode drags; outside it, scrolling writes no state.
+        .onScrollGeometryChange(for: ScrollGeometry?.self) { arranging ? $0 : nil } action: { _, geometry in
             scrollGeometries[page.persistentModelID] = geometry
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
@@ -317,7 +318,8 @@ struct DeckView: View {
         }
         let target = Arrangement.target(
             topLeft: (c.finger.x - c.grab.width - grid.x, c.finger.y - c.grab.height - grid.y),
-            step: (c.step.width, c.step.height), columns: c.columnCount, width: c.columns)
+            step: (c.step.width, c.step.height), columns: c.columnCount, width: c.columns,
+            maxRow: c.pickup.filter { $0.id != c.tile }.map { $0.y + $0.rows }.max() ?? 0)
         c.target = target
         let before = c.dwell.accepted
         c.dwell.update(target, at: .now)

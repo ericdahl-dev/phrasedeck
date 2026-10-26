@@ -22,7 +22,27 @@ final class AppModel {
     enum RouteKind: Equatable { case home, tailnet }
 
     struct Feedback: Equatable {
-        enum Tone: Equatable { case success, amber, red }
+        enum Tone: Equatable {
+            case success, amber, red
+
+            /// What happened to the text, shown on the Button and leading every message.
+            var word: String {
+                switch self {
+                case .success: "Typed"
+                case .amber: "Maybe typed"
+                case .red: "Not typed"
+                }
+            }
+
+            /// SF Symbol shown with `word`.
+            var symbol: String {
+                switch self {
+                case .success: "checkmark"
+                case .amber: "questionmark"
+                case .red: "xmark"
+                }
+            }
+        }
         let tone: Tone
         let message: String?
         /// Set after a 401, so the banner can offer "Pair again".
@@ -64,7 +84,7 @@ final class AppModel {
     @discardableResult
     func send(text: String, enter: Bool) async -> Feedback {
         guard let helper = selectedHelper else {
-            return show(Feedback(tone: .red, message: "Add a computer first.", addComputer: true))
+            return show(Feedback(tone: .red, message: "Not typed: add a computer first.", addComputer: true))
         }
         let route = computers.route(for: helper)
         do {
@@ -77,17 +97,17 @@ final class AppModel {
             do {
                 try await computers.connection(to: helper, via: .tailnet).type(text: text, enter: enter)
                 return show(Feedback(tone: .success, message: failure == .pinMismatch
-                    ? "Sent over the tailnet: on the home network, \(helper.name) showed a different certificate. Scan its QR code to pair again."
+                    ? "Typed: sent over the tailnet. On the home network, \(helper.name) showed a different certificate. Scan its QR code to pair again."
                     : nil, pairAgain: failure == .pinMismatch ? helper : nil))
             } catch let tailnetFailure as HelperClient.Failure {
                 return show(Outcome.send(failure == .pinMismatch ? failure : tailnetFailure, on: helper))
             } catch {
-                return show(Feedback(tone: .red, message: "\(helper.name): \(error.localizedDescription)"))
+                return show(Feedback(tone: .red, message: "Not typed: \(helper.name): \(error.localizedDescription)"))
             }
         } catch let failure as HelperClient.Failure {
             return show(Outcome.send(failure, on: helper))
         } catch {
-            return show(Feedback(tone: .red, message: "\(helper.name): \(error.localizedDescription)"))
+            return show(Feedback(tone: .red, message: "Not typed: \(helper.name): \(error.localizedDescription)"))
         }
     }
 

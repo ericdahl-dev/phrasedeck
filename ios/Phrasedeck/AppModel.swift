@@ -27,9 +27,11 @@ final class AppModel {
         let message: String?
         /// Set after a 401, so the banner can offer "Pair again".
         var pairAgain: Helper?
+        /// Set when there's no Computer yet, so the banner can offer "Add".
+        var addComputer = false
 
         /// The banner closes itself after a few seconds unless it asks for something.
-        var autoCloses: Bool { pairAgain == nil }
+        var autoCloses: Bool { pairAgain == nil && !addComputer }
     }
 
     let computers: Computers
@@ -62,7 +64,7 @@ final class AppModel {
     @discardableResult
     func send(text: String, enter: Bool) async -> Feedback {
         guard let helper = selectedHelper else {
-            return show(Feedback(tone: .red, message: "Add a computer first."))
+            return show(Feedback(tone: .red, message: "Add a computer first.", addComputer: true))
         }
         let route = computers.route(for: helper)
         do {

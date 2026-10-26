@@ -102,6 +102,17 @@ struct AppModelTests {
 
     // MARK: route choice (#11)
 
+    /// With no Computer, a send says so and the banner offers Add, so it stays up (UX review).
+    @Test func withNoComputerTheBannerOffersAdd() async throws {
+        let model = try model(withMac: false)
+
+        let feedback = await model.send(text: "yes", enter: true)
+
+        #expect(feedback.tone == .red)
+        #expect(feedback.addComputer)
+        #expect(!feedback.autoCloses)
+    }
+
     @Test func withNothingNearbyTheTailnetIsUsed() async throws {
         let model = try model()
         #expect(model.route(for: mac) == .tailnet)

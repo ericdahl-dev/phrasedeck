@@ -42,9 +42,12 @@ final class StubHelper {
     func makeModel() -> AppModel {
         let api = API(probe: probe)
         let computers = Computers(defaults: defaults, tokens: MemoryTokens()) { _, _, _ in api }
-        let mac = Helper(name: "stub-mac", host: "stub-mac")
-        try? computers.add(mac)
-        computers.selectedID = mac.id
+        // -uiTestingStubNoComputers: the first run, before any Computer is added.
+        if !ProcessInfo.processInfo.arguments.contains("-uiTestingStubNoComputers") {
+            let mac = Helper(name: "stub-mac", host: "stub-mac")
+            try? computers.add(mac)
+            computers.selectedID = mac.id
+        }
         return AppModel(computers: computers, device: "UI test")
     }
 }

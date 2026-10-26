@@ -21,7 +21,7 @@
 // V1.3 and later—the current stock). begin() logs which revision it is driving
 // and what to change if the screen stays dark.
 //
-// Once the revision is known, set CROWPANEL_ADVANCE_REV in board_pins.h.
+// Once the revision is known, set CROWPANEL_ADVANCE_REV in platformio.ini.
 //
 // The part is a black box. Elecrow publish no source and no register
 // specification, its behavior changed between revisions, and it is not

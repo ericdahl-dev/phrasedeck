@@ -42,6 +42,15 @@ uint32_t g_confirm_id = 0, g_confirm_edit = 0;  // the edit it shows, not an ind
 
 lv_obj_t* g_status = nullptr;
 lv_obj_t* g_stop = nullptr;  // stops a Bluetooth Send partway
+
+constexpr int32_t kStatusWidth = board::LCD_WIDTH - 16 - 112 - 240 - 16;  // the header's fixed widths
+
+// While shown, the status line ends short of it.
+void showStop(bool on) {
+    if (on) lv_obj_remove_flag(g_stop, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(g_stop, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_width(g_status, on ? kStatusWidth - 96 - 8 : kStatusWidth);
+}
 lv_obj_t* g_net = nullptr;
 unsigned g_net_version = 0;
 unsigned g_message_seq = 0;
@@ -87,10 +96,11 @@ void showNet() {
     static bool pairingShown = false;
     static uint32_t checkedMs = 0;
     const bool recheck = pairingShown && millis() - checkedMs >= 500;
-    if (net::version() == g_net_version && !recheck) return;
+    const unsigned v = net::version();  // includes Bluetooth changes, which s.version doesn't
+    if (v == g_net_version && !recheck) return;
     checkedMs = millis();
     const net::Snapshot s = net::snapshot();
-    g_net_version = s.version;
+    g_net_version = v;
     pairingShown = s.blePairing;
     std::string text = LV_SYMBOL_WIFI " ";
     if (s.bluetooth) {
@@ -107,7 +117,7 @@ void showNet() {
     if (s.messageSeq != g_message_seq) {
         g_message_seq = s.messageSeq;
         g_busy = false;
-        lv_obj_add_flag(g_stop, LV_OBJ_FLAG_HIDDEN);
+        showStop(false);
         lv_obj_remove_local_style_prop(g_status, LV_STYLE_TEXT_COLOR, 0);  // only Send results are colored
         if (g_pairing_now) {  // also after Cancel and reopen, so a reopened screen still gets its result
             g_pairing_now = false;
@@ -439,13 +449,13 @@ void sendPhrase(size_t i) {
     if (!startRequest(net::type(b.text, phraseKey(b.id), b.edit), "Sending: " + b.label)) return;
     g_sending = g_buttons[i];
     lv_obj_add_state(g_sending, LV_STATE_DISABLED);  // dimmed while it sends
-    if (net::snapshot().bluetooth) lv_obj_remove_flag(g_stop, LV_OBJ_FLAG_HIDDEN);  // a long one takes a while
+    if (net::snapshot().bluetooth) showStop(true);  // a long one takes a while
     Serial.printf("tap: %u at %d,%d\n", static_cast<unsigned>(i), touch_x(), touch_y());  // never the text
 }
 
 void stopSend(lv_event_t*) {
     net::cancelBluetoothSend();
-    lv_obj_add_flag(g_stop, LV_OBJ_FLAG_HIDDEN);
+    showStop(false);
     lv_label_set_text(g_status, "Stopping...");
 }
 
@@ -570,6 +580,10 @@ lv_obj_t* g_mode_note = nullptr;
 
 // Mode is read once at boot (net::start), so a switch restarts the panel.
 void switchMode(lv_event_t*) {
+    if (g_busy) {  // a restart would cut a Send or a pairing off partway
+        lv_label_set_text(g_mode_note, "Wait for the Send or pairing to finish");
+        return;
+    }
     if (!net::setBluetooth(!net::snapshot().bluetooth)) {
         lv_label_set_text(g_mode_note, "Couldn't save it: try again");
         return;
@@ -824,7 +838,7 @@ void buildPage() {
     lv_obj_align(g_net, LV_ALIGN_TOP_RIGHT, -112, 12);
 
     g_status = lv_label_create(screen);
-    lv_obj_set_width(g_status, board::LCD_WIDTH - 16 - 112 - 240 - 16);
+    lv_obj_set_width(g_status, kStatusWidth);
     lv_label_set_long_mode(g_status, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_color(g_status, lv_color_hex(0xC8CDD4), 0);
     lv_label_set_text(g_status, "Tap a Button");

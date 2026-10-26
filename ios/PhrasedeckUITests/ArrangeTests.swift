@@ -4,6 +4,8 @@ import XCTest
 final class ArrangeTests: XCTestCase {
     @MainActor
     func launch() -> XCUIApplication {
+        // A test that rotates (or a crashed run) can leave the Simulator in landscape.
+        XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestingStubHelper"]
         app.launch()
@@ -103,6 +105,28 @@ final class ArrangeTests: XCTestCase {
 
         XCTAssertTrue(button.waitForValue("Row 2, column 2"))
         XCTAssertTrue(app.buttons["arrange.done"].exists, "still in Arrange mode after the drop")
+    }
+
+    /// Portrait and landscape each keep their own layout: a move in landscape leaves portrait as it was.
+    @MainActor
+    func testLandscapeHasItsOwnLayout() {
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = launch()
+        let button = app.buttons["phrase.agent-status"]
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+        enterArrangeMode(app, from: button)
+        let portraitTarget = app.buttons.matching(NSPredicate(format: "value == %@", "Row 2, column 2")).firstMatch
+        button.press(forDuration: 0.1, thenDragTo: portraitTarget, withVelocity: .slow, thenHoldForDuration: 0.5)
+        XCTAssertTrue(button.waitForValue("Row 2, column 2"))
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let first = app.buttons.matching(NSPredicate(format: "value == %@", "Row 1, column 1")).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 20))
+        button.press(forDuration: 0.1, thenDragTo: first, withVelocity: .slow, thenHoldForDuration: 0.5)
+        XCTAssertTrue(button.waitForValue("Row 1, column 1"))
+
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(button.waitForValue("Row 2, column 2"), "portrait kept its own layout")
     }
 
     /// Held at the right screen edge, a dragged Button flips to the next Page and is dropped there

@@ -107,6 +107,188 @@ void test_broken_utf8_is_named_by_its_byte() {
     TEST_ASSERT_EQUAL_STRING("\xc3\xa9", hid_keys::plan("\xc3\xa9\xa9", false).bad.c_str());
 }
 
+// Records each report the Sender hands to the BLE stack; fail makes the next n of them fail.
+struct Stack {
+    std::vector<Key> sent;
+    int fail = 0;
+    bool notify(const Key& k) {
+        if (fail > 0) {
+            fail--;
+            return false;
+        }
+        sent.push_back(k);
+        return true;
+    }
+};
+
+static const Key kRelease{0, 0};
+
+// Steps the Sender every ms from 0 to `until`, as the BLE task's loop would.
+static void run(hid_keys::Sender& s, Stack& stack, uint32_t until, uint32_t from = 0) {
+    for (uint32_t t = from; t <= until; t++) s.step(t, [&](const Key& k) { return stack.notify(k); });
+}
+
+void test_each_key_is_a_press_then_a_release_one_report_per_interval() {
+    hid_keys::Sender s(hid_keys::plan("aa", false).keys, 20);
+    Stack stack;
+
+    run(s, stack, 59);
+    TEST_ASSERT_EQUAL(3, stack.sent.size());  // at 0, 20 and 40 ms
+    TEST_ASSERT_FALSE(s.done());
+
+    run(s, stack, 60, 60);
+    const std::vector<Key> want{{0, 0x04}, kRelease, {0, 0x04}, kRelease};
+    TEST_ASSERT_EQUAL(want.size(), stack.sent.size());
+    for (size_t i = 0; i < want.size(); i++) TEST_ASSERT_TRUE(want[i] == stack.sent[i]);
+    TEST_ASSERT_TRUE(s.done());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Sent, s.result());
+}
+
+// ENOMEM from the stack: the same report goes again next interval, so no key is lost or left down.
+void test_a_report_the_stack_refuses_is_sent_again() {
+    hid_keys::Sender s(hid_keys::plan("b", false).keys, 20);
+    Stack stack;
+    stack.fail = 2;
+
+    run(s, stack, 100);
+    const std::vector<Key> want{{0, 0x05}, kRelease};
+    TEST_ASSERT_EQUAL(want.size(), stack.sent.size());
+    for (size_t i = 0; i < want.size(); i++) TEST_ASSERT_TRUE(want[i] == stack.sent[i]);
+    TEST_ASSERT_TRUE(s.done());
+}
+
+// Cancel with a key down: its release still goes, so the Computer isn't left with a held key.
+void test_cancel_releases_a_held_key_then_stops() {
+    hid_keys::Sender s(hid_keys::plan("abc", false).keys, 20);
+    Stack stack;
+    run(s, stack, 40);  // press a, release, press b (at 0, 20, 40 ms): b is down
+    TEST_ASSERT_EQUAL(3, stack.sent.size());
+
+    s.cancel();
+    run(s, stack, 200, 41);
+    TEST_ASSERT_EQUAL(4, stack.sent.size());
+    TEST_ASSERT_TRUE(kRelease == stack.sent.back());
+    TEST_ASSERT_TRUE(s.done());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Stopped, s.result());
+}
+
+// Cancel before anything went: nothing was typed.
+void test_cancel_before_the_first_key_sends_nothing() {
+    hid_keys::Sender s(hid_keys::plan("abc", false).keys, 20);
+    Stack stack;
+    s.cancel();
+    run(s, stack, 200);
+    TEST_ASSERT_EQUAL(0, stack.sent.size());
+    TEST_ASSERT_TRUE(s.done());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::NotSent, s.result());
+}
+
+// The panel can't see what landed over Bluetooth, so it never says Typed (#98 UI review).
+void test_what_the_status_line_says_after_a_bluetooth_send() {
+    using R = hid_keys::Sender::Result;
+    hid_keys::Said said = hid_keys::said(R::Sent);
+    TEST_ASSERT_EQUAL_STRING("Sent as keystrokes", said.message.c_str());
+    TEST_ASSERT_TRUE(said.ok);
+
+    said = hid_keys::said(R::Stopped);
+    TEST_ASSERT_EQUAL_STRING("Stopped partway: some keystrokes were sent", said.message.c_str());
+    TEST_ASSERT_FALSE(said.ok);
+
+    said = hid_keys::said(R::NotSent);
+    TEST_ASSERT_EQUAL_STRING("Not sent", said.message.c_str());
+    TEST_ASSERT_FALSE(said.ok);
+
+    said = hid_keys::refused("\xc3\xa9");
+    TEST_ASSERT_EQUAL_STRING("Not sent: a US keyboard can't type \xc3\xa9", said.message.c_str());
+    TEST_ASSERT_FALSE(said.ok);
+}
+
+// A disconnect can't send a release, and the host drops held keys with the link anyway: drop()
+// ends at once (#130 review).
+void test_drop_ends_at_once_without_a_release() {
+    hid_keys::Sender s(hid_keys::plan("abc", false).keys, 20);
+    Stack stack;
+    run(s, stack, 40);  // b is down
+    s.drop();
+    run(s, stack, 200, 41);
+    TEST_ASSERT_EQUAL(3, stack.sent.size());
+    TEST_ASSERT_TRUE(s.done());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Stopped, s.result());
+}
+
+// notify can fail for good (no subscriber, link gone): after about a second of failures it gives up.
+void test_it_gives_up_after_a_second_of_failures() {
+    hid_keys::Sender s(hid_keys::plan("a", false).keys, 20);
+    Stack stack;
+    stack.fail = 1000000;
+    run(s, stack, 1100);
+    TEST_ASSERT_TRUE(s.done());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::NotSent, s.result());
+}
+
+// A release the stack refuses goes again on the next step, not a whole interval later, so a held
+// key can't reach the host's auto-repeat delay.
+void test_a_refused_release_is_retried_at_once() {
+    hid_keys::Sender s(hid_keys::plan("a", false).keys, 20);
+    Stack stack;
+    run(s, stack, 19);  // the press at 0
+    stack.fail = 3;
+    run(s, stack, 24, 20);  // the release fails at 20, 21, 22, goes at 23
+    TEST_ASSERT_EQUAL(2, stack.sent.size());
+    TEST_ASSERT_TRUE(s.done());
+}
+
+// An empty Phrase sends nothing, so it can't say Sent.
+void test_an_empty_plan_is_not_sent() {
+    hid_keys::Sender s({}, 20);
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::NotSent, s.result());
+}
+
+void test_while_running_the_status_line_says_sending() {
+    TEST_ASSERT_EQUAL_STRING("Sending", hid_keys::said(hid_keys::Sender::Result::Running).message.c_str());
+}
+
+// The give-up is a second of time, not a count: a refused release is retried every step, so a count
+// would give up in milliseconds with the key still down (#131 review).
+void test_a_refused_release_keeps_trying_for_a_second() {
+    hid_keys::Sender s(hid_keys::plan("a", false).keys, 20);
+    Stack stack;
+    run(s, stack, 19);  // the press at 0
+    stack.fail = 1000000;
+    run(s, stack, 100, 20);
+    TEST_ASSERT_FALSE(s.done());
+    run(s, stack, 1030, 101);
+    TEST_ASSERT_TRUE(s.done());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Stopped, s.result());
+}
+
+// A disconnect then a Cancel before the next step: the drop wins, so it doesn't wait on a release
+// that can't go.
+void test_drop_wins_over_a_later_cancel() {
+    hid_keys::Sender s(hid_keys::plan("abc", false).keys, 20);
+    Stack stack;
+    run(s, stack, 40);  // b is down
+    s.drop();
+    s.cancel();
+    run(s, stack, 200, 41);
+    TEST_ASSERT_EQUAL(3, stack.sent.size());
+    TEST_ASSERT_TRUE(s.done());
+}
+
+// After a retried release, the next press still waits a whole interval.
+void test_the_next_press_waits_a_whole_interval_after_a_retried_release() {
+    hid_keys::Sender s(hid_keys::plan("ab", false).keys, 20);
+    Stack stack;
+    run(s, stack, 19);  // press a at 0
+    stack.fail = 3;
+    run(s, stack, 23, 20);  // release fails at 20, 21, 22, goes at 23
+    TEST_ASSERT_EQUAL(2, stack.sent.size());
+    run(s, stack, 42, 24);
+    TEST_ASSERT_EQUAL_MESSAGE(2, stack.sent.size(), "b waits until 43");
+    run(s, stack, 43, 43);
+    TEST_ASSERT_EQUAL(3, stack.sent.size());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_letters_and_digits);
@@ -116,5 +298,18 @@ int main() {
     RUN_TEST(test_pacing);
     RUN_TEST(test_every_printable_character_types_its_us_key);
     RUN_TEST(test_broken_utf8_is_named_by_its_byte);
+    RUN_TEST(test_each_key_is_a_press_then_a_release_one_report_per_interval);
+    RUN_TEST(test_a_report_the_stack_refuses_is_sent_again);
+    RUN_TEST(test_cancel_releases_a_held_key_then_stops);
+    RUN_TEST(test_cancel_before_the_first_key_sends_nothing);
+    RUN_TEST(test_what_the_status_line_says_after_a_bluetooth_send);
+    RUN_TEST(test_drop_ends_at_once_without_a_release);
+    RUN_TEST(test_it_gives_up_after_a_second_of_failures);
+    RUN_TEST(test_a_refused_release_is_retried_at_once);
+    RUN_TEST(test_an_empty_plan_is_not_sent);
+    RUN_TEST(test_while_running_the_status_line_says_sending);
+    RUN_TEST(test_a_refused_release_keeps_trying_for_a_second);
+    RUN_TEST(test_drop_wins_over_a_later_cancel);
+    RUN_TEST(test_the_next_press_waits_a_whole_interval_after_a_retried_release);
     return UNITY_END();
 }

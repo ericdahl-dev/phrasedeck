@@ -1,9 +1,32 @@
 import Foundation
 import SwiftData
 
-/// The kind of screen an arrangement belongs to (#81): the horizontal size class.
+/// The kind of screen an arrangement belongs to (#81): the horizontal size class and the
+/// orientation, so portrait and landscape each keep their own. The portrait raw values are the ones
+/// rows had before orientation counted, so those rows read as the portrait layouts.
 enum LayoutWidth: String, CaseIterable, Sendable {
     case compact, regular
+    case compactLandscape = "compact-landscape"
+    case regularLandscape = "regular-landscape"
+
+    init(regular: Bool, landscape: Bool) {
+        self = switch (regular, landscape) {
+        case (false, false): .compact
+        case (true, false): .regular
+        case (false, true): .compactLandscape
+        case (true, true): .regularLandscape
+        }
+    }
+
+    /// The same size class in the other orientation.
+    var otherOrientation: LayoutWidth {
+        switch self {
+        case .compact: .compactLandscape
+        case .regular: .regularLandscape
+        case .compactLandscape: .compact
+        case .regularLandscape: .regular
+        }
+    }
 }
 
 /// One Button's Spot at one Layout width (#81). It syncs as its own CloudKit record type,
@@ -73,7 +96,24 @@ extension Deck {
     /// from order when the page has none there.
     static func layout(of page: Page, width: LayoutWidth, columns: Int,
                        in context: ModelContext) -> [Packing.Placement<String>] {
-        Arrangement.resolve(items(of: page, spots: spots(on: page, width: width, in: context)), columns: columns)
+        Arrangement.resolve(items(of: page, width: width, from: saved(width, in: context)
+                                      + saved(width.otherOrientation, in: context)),
+                            columns: columns)
+    }
+
+    /// The page's Buttons with their Spots at `width`. With none there yet, they come in the other
+    /// orientation's reading order and no Spots, so they pack to this layout's column count; the
+    /// first edit saves them, and from then on the two are independent.
+    static func items(of page: Page, width: LayoutWidth, from rows: [SavedSpot]) -> [Arrangement.Item<String>] {
+        let own = spots(on: page, width: width, from: rows)
+        guard own.isEmpty else { return items(of: page, spots: own) }
+        let other = spots(on: page, width: width.otherOrientation, from: rows)
+        let phrases = page.sortedPhrases.enumerated().sorted { a, b in
+            let x = other[a.element.uid].map { ($0.row, $0.column, a.offset) } ?? (.max, .max, a.offset)
+            let y = other[b.element.uid].map { ($0.row, $0.column, b.offset) } ?? (.max, .max, b.offset)
+            return x < y
+        }.map(\.element)
+        return phrases.map { Arrangement.Item(id: $0.uid, columns: $0.sizeColumns, rows: $0.sizeRows, spot: nil) }
     }
 
     /// The page's Buttons in order, with their Spots, for `Arrangement.resolve`.

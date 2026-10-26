@@ -3,12 +3,29 @@ import SwiftUI
 /// The computer picker at the top, with the selected computer's status dot.
 struct HelperPicker: View {
     let showComputers: () -> Void
+    let addComputer: () -> Void
 
     @Environment(AppModel.self) private var model
 
     var body: some View {
         @Bindable var model = model
-        Menu {
+        if model.helpers.isEmpty {
+            // Nothing to pick yet, so skip the menu and go straight to adding one.
+            Button(action: addComputer) {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Add a computer").font(.headline)
+                }
+            }
+            .accessibilityIdentifier("helperPicker")
+        } else {
+            picker
+        }
+    }
+
+    private var picker: some View {
+        @Bindable var model = model
+        return Menu {
             Picker("Computer", selection: $model.selectedHelperID) {
                 ForEach(model.helpers) { helper in
                     Text(helper.name).tag(Optional(helper.id))

@@ -49,7 +49,7 @@ Where a Button sits on its Page: the column and row of its top-left Square. Gaps
 _Avoid_: position, slot, cell, index
 
 **Layout width**:
-The kind of screen an arrangement belongs to: compact (iPhone) or regular (iPad). Each Layout width keeps its own Spots, while the Deck itself is the same everywhere.
+The kind of screen an arrangement belongs to: compact (iPhone) or regular (iPad), each in portrait or landscape, so four in all. Landscape means the Deck is wider than tall. Each Layout width keeps its own Spots, while the Deck itself is the same everywhere. One with no Spots yet starts from the other orientation's order, packed to its own column count.
 _Avoid_: size class, device width, breakpoint
 
 ## Reaching a Computer

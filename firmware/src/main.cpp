@@ -6,6 +6,7 @@
 #include <Preferences.h>
 #include <Wire.h>
 #include <esp_heap_caps.h>
+#include <esp_partition.h>
 #include <lvgl.h>
 
 #include <string>
@@ -856,15 +857,18 @@ void factoryResetIfHeld() {
         touch_poll();
     }
     if (hold == Hold::Reset) {
-        lv_label_set_text(label, "Erased. Lift your finger.");
+        lv_label_set_text(label, "Erasing...");
         lv_timer_handler();
         const bool nvs = panel_store::erase();
-        const bool fs = LittleFS.begin(true);
-        for (const char* f : {kPhrasesFile, "/phrases.tmp", "/phrases.bad"}) {
-            if (fs && LittleFS.exists(f)) LittleFS.remove(f);
-        }
-        Serial.printf("phrasedeck panel: factory reset, NVS %s, Buttons %s\n", nvs ? "erased" : "FAILED",
-                      fs ? "erased" : "FAILED");
+        const bool fs = LittleFS.format();  // erases the blocks too; Buttons are all that's on it
+        // A crash dump can hold a Token or password from RAM.
+        const esp_partition_t* dump =
+            esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);
+        const bool core = dump == nullptr || esp_partition_erase_range(dump, 0, dump->size) == ESP_OK;
+        Serial.printf("phrasedeck panel: factory reset, NVS %s, Buttons %s, core dump %s\n", nvs ? "erased" : "FAILED",
+                      fs ? "erased" : "FAILED", core ? "erased" : "FAILED");
+        lv_label_set_text(label, nvs && fs && core ? "Erased. Lift your finger." : "Erase FAILED. Lift your finger.");
+        lv_timer_handler();
         // So the finger doesn't land on the wizard; capped, so a bezel pressing the corner can't hang boot.
         for (const uint32_t t = millis(); touch_pressed() && millis() - t < 5000;) {
             delay(20);

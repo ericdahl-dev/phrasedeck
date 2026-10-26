@@ -198,7 +198,6 @@ void handleBluetoothType(const Request& req, Snapshot& s) {
         hid_keys::Sender sender(p.keys, kKeyIntervalMs);
         const unsigned disconnects = ble_keyboard::disconnects();
         const auto notify = [](const hid_keys::Key& k) { return ble_keyboard::send(k.mod, k.code); };
-        g_cancelSend.store(false);
         while (!sender.done()) {
             if (ble_keyboard::disconnects() != disconnects) sender.drop();
             if (g_cancelSend.exchange(false)) sender.cancel();
@@ -300,6 +299,7 @@ Snapshot snapshot() {
     xSemaphoreTake(g_lock, portMAX_DELAY);
     Snapshot s = g_snap;
     xSemaphoreGive(g_lock);
+    s.version += ble_keyboard::version();  // the same number version() returns
     s.bluetooth = g_bluetooth;
     if (g_bluetooth) {
         s.bleReady = ble_keyboard::ready();
@@ -325,6 +325,9 @@ bool pair(const Helper& h, const std::string& code, const std::string& shortPin)
 }
 
 bool type(const std::string& text, const std::string& phrase, uint32_t edit) {
+    // Cleared here, not when the Send starts: a Stop tapped while this one waits in the queue (a
+    // browse holds the net task about 3 s) must still stop it. One Send at a time, so none is stale.
+    g_cancelSend.store(false);
     return enqueue(new Request{Request::Type, Helper{}, "", "", send::typeBody(text, phrase, edit), text});
 }
 

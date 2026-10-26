@@ -36,7 +36,7 @@ struct DeckView: View {
     @Environment(\.scenePhase) private var scenePhase
 
 
-    /// Wider than tall, from the Deck's own size rather than the device, so Split View counts.
+    /// Wider than tall, from the window's size rather than the device, so Split View counts.
     @State private var landscape = false
     /// Portrait and landscape each keep their own layout.
     private var layoutWidth: LayoutWidth { LayoutWidth(regular: sizeClass == .regular, landscape: landscape) }
@@ -68,9 +68,14 @@ struct DeckView: View {
                     .sensoryFeedback(.selection, trigger: columns)
                     .overlay(alignment: .topLeading) { carriedButton(deck: deck) }
                     .overlay(alignment: carry?.edge.edge == -1 ? .leading : .trailing) { edgeHighlight }
-                    .onGeometryChange(for: Bool.self) { $0.size.width > $0.size.height } action: { landscape = $0 }
                 }
             }
+        }
+        // The window's shape, past the safe area: the error banner's inset shrinks the Deck, and in a
+        // near-square Split View that alone would flip the layout and cancel a drag.
+        .background {
+            Color.clear.ignoresSafeArea()
+                .onGeometryChange(for: Bool.self) { $0.size.width > $0.size.height } action: { landscape = $0 }
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

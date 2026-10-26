@@ -10,11 +10,11 @@
 #include <host/ble_hs.h>
 #include <host/ble_hs_mbuf.h>
 #include <host/ble_store.h>
-#include <host/ble_hs_pvcy.h>
 #include <nimble/nimble_port.h>
 
 #include <atomic>
 #include <map>
+#include <mutex>
 #include <set>
 #include <vector>
 
@@ -206,7 +206,10 @@ std::atomic<bool> g_allowListOnly{false};
 
 // (Re)starts advertising, to the stored Computer only or to anyone. The allow list can't change
 // while advertising, so it stops first. allowListOnly reads g_computer: host task only.
+std::mutex g_advertiseLock;  // openPairing() runs this on the net task, the callbacks on the host task
+
 void advertise(bool allowListOnly) {
+    std::lock_guard<std::mutex> lock(g_advertiseLock);
     BLEAdvertising* adv = BLEDevice::getAdvertising();
     BLEDevice::stopAdvertising();
     // If the list can't be set, advertise to anyone: a locked-out Computer is worse than the wipe.
@@ -233,8 +236,8 @@ void protectComputer() {
     }
 }
 
-// NimBLE's sync callback, wrapped so a resync after a controller reset is seen: the reset turns
-// address resolution off and puts the Computer back in device mode.
+// NimBLE's sync callback, wrapped so a resync after a controller reset is seen: it puts every peer
+// back in device mode, and the reset ends advertising.
 ble_hs_sync_fn* g_syncCb = nullptr;
 std::atomic<bool> g_resynced{false};
 void onSync() {
@@ -415,12 +418,10 @@ void tick(ble_npl_event*) {
     portEXIT_CRITICAL(&g_windowLock);
     if (lapsed) pairingClosed();
     if (g_resynced.exchange(false)) {
-        log_w("BLE host resynced: privacy settings applied again");
-        const bool advertising = ble_gap_adv_active();
+        log_w("BLE host resynced: privacy mode applied again");
         BLEDevice::stopAdvertising();
-        if (ble_hs_pvcy_set_resolve_enabled(1) != 0) log_w("address resolution not turned back on");
         protectComputer();
-        if (advertising) advertise(wantAllowList());
+        if (g_trusted.load() == kNone || windowOpen()) advertise(wantAllowList());
     }
     // A window that lapsed or was canceled leaves advertising open to anyone; put the filter back.
     if (ble_gap_adv_active() && g_allowListOnly.load() != wantAllowList()) advertise(wantAllowList());
@@ -443,10 +444,6 @@ bool start() {
     if (!BLEDevice::init("Phrasedeck panel")) return false;
     g_storeWrite = ble_hs_cfg.store_write_cb;
     ble_hs_cfg.store_write_cb = gatedStoreWrite;
-    // NimBLE loads bonded peers' IRKs into the controller's resolving list but turns resolution on
-    // only for a panel using a private address itself, which this one doesn't. Without it a Mac
-    // reconnecting from a new private address is a stranger: no key, and blocked by the allow list.
-    if (ble_hs_pvcy_set_resolve_enabled(1) != 0) return false;
     g_syncCb = ble_hs_cfg.sync_cb;
     ble_hs_cfg.sync_cb = onSync;
     BLESecurity* sec = new BLESecurity();

@@ -45,7 +45,10 @@ struct DeckView: View {
         #endif
     }
 
-    private var layoutWidth: LayoutWidth { sizeClass == .regular ? .regular : .compact }
+    /// Wider than tall, from the Deck's own size rather than the device, so Split View counts.
+    @State private var landscape = false
+    /// Portrait and landscape each keep their own layout.
+    private var layoutWidth: LayoutWidth { LayoutWidth(regular: sizeClass == .regular, landscape: landscape) }
 
     var body: some View {
         Group {
@@ -74,6 +77,7 @@ struct DeckView: View {
                     .sensoryFeedback(.selection, trigger: columns)
                     .overlay(alignment: .topLeading) { carriedButton(deck: deck) }
                     .overlay(alignment: carry?.edge.edge == -1 ? .leading : .trailing) { edgeHighlight }
+                    .onGeometryChange(for: Bool.self) { $0.size.width > $0.size.height } action: { landscape = $0 }
                 }
             }
         }
@@ -107,6 +111,8 @@ struct DeckView: View {
         .onChange(of: arranging) { _, now in if !now { carry = nil } }
         // A canceled drag (a system edge swipe, a banner) skips onEnded: drop it without saving,
         // so the next drag can't save this Button.
+        // A rotation mid-drag changes the layout under the finger; drop nothing into the new one.
+        .onChange(of: layoutWidth) { carry = nil }
         .onChange(of: dragging) { _, now in if !now { withAnimation(.snappy) { carry = nil } } }
         // A finger resting still sends no updates, so the dwell and the edge timer are checked here.
         .task(id: carry == nil) {
@@ -264,10 +270,9 @@ struct DeckView: View {
 
     /// The Page's Buttons with their Spots for this Layout width.
     private func items(_ page: Page) -> [Arrangement.Item<Tile>] {
-        let spots = Deck.spots(on: page, width: layoutWidth, from: savedSpots)
-        return page.sortedPhrases.map {
-            Arrangement.Item(id: Tile.phrase($0.persistentModelID), columns: $0.sizeColumns, rows: $0.sizeRows,
-                             spot: spots[$0.uid])
+        let ids = Dictionary(uniqueKeysWithValues: page.sortedPhrases.map { ($0.uid, $0.persistentModelID) })
+        return Deck.items(of: page, width: layoutWidth, from: savedSpots).compactMap { item in
+            ids[item.id].map { Arrangement.Item(id: Tile.phrase($0), columns: item.columns, rows: item.rows, spot: item.spot) }
         }
     }
 

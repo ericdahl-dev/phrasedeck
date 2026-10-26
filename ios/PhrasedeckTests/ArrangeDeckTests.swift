@@ -132,4 +132,38 @@ struct ArrangeDeckTests {
         #expect(shown(page) == ["b": [1, 0], "c": [2, 0], "d": [0, 1]])
         #expect(try context.fetch(FetchDescriptor<Phrase>()).map(\.label).sorted() == ["b", "c", "d"])
     }
+
+    // MARK: Portrait and landscape (each its own layout)
+
+    /// Rows saved before layouts split by orientation say "compact" or "regular"; they're the
+    /// portrait layouts.
+    @Test func oldRowsAreThePortraitLayouts() {
+        #expect(LayoutWidth(rawValue: "compact") == LayoutWidth(regular: false, landscape: false))
+        #expect(LayoutWidth(rawValue: "regular") == LayoutWidth(regular: true, landscape: false))
+        #expect(LayoutWidth(regular: false, landscape: true) != LayoutWidth(regular: false, landscape: false))
+    }
+
+    /// A layout with no Spots yet starts from the other orientation's order, packed to its own
+    /// column count.
+    @Test func landscapeStartsFromPortraitsOrderReflowed() throws {
+        let (page, p) = try page(["a", "b", "c", "d"])
+        try Deck.move(p[3], to: Spot(column: 0, row: 0), on: page, width: .compact, columns: 3, in: context)
+        #expect(shown(page) == ["d": [0, 0], "b": [1, 0], "c": [2, 0], "a": [0, 1]])
+
+        #expect(shown(page, columns: 5, width: .compactLandscape)
+            == ["d": [0, 0], "b": [1, 0], "c": [2, 0], "a": [3, 0]])
+    }
+
+    /// Its first edit makes it its own: moving in landscape leaves portrait alone, and back.
+    @Test func editingLandscapeLeavesPortraitAlone() throws {
+        let (page, p) = try page(["a", "b", "c", "d"])
+        try Deck.move(p[3], to: Spot(column: 0, row: 0), on: page, width: .compact, columns: 3, in: context)
+
+        try Deck.move(p[0], to: Spot(column: 4, row: 1), on: page, width: .compactLandscape, columns: 5,
+                      in: context)
+
+        #expect(shown(page, columns: 5, width: .compactLandscape)
+            == ["d": [0, 0], "b": [1, 0], "c": [2, 0], "a": [4, 1]])
+        #expect(shown(page) == ["d": [0, 0], "b": [1, 0], "c": [2, 0], "a": [0, 1]])
+    }
 }

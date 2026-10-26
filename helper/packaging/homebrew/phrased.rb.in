@@ -16,6 +16,8 @@ cask "phrased" do
   caveats <<~EOS
     phrased types into the focused app, so it needs Accessibility:
       System Settings > Privacy & Security > Accessibility, add #{HOMEBREW_PREFIX}/bin/phrased
+    After a brew upgrade, if typing stops, remove phrased from that list and add it again:
+    each version lives at its own path, which macOS may treat as a new app.
     To start it at login, see "Run at login (Homebrew)" in the README.
   EOS
 end

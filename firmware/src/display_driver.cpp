@@ -7,6 +7,10 @@
 
 #include <Arduino.h>
 #include <esp_heap_caps.h>
+#include <esp_private/periph_ctrl.h>
+#include <esp_rom_sys.h>
+#include <esp_system.h>
+#include <soc/lcd_cam_struct.h>
 
 LGFX display_lcd;
 
@@ -92,6 +96,20 @@ LGFX::LGFX() {
     setPanel(&panel_);
 }
 
+namespace {
+
+// Runs inside every esp_restart(). The RGB panel's frame loop and its GDMA keep running through a
+// software reset, and the next boot then hung often enough for the RTC watchdog to reset it again
+// (#150: 4/10 restarts). Stopping both first: 0/10.
+void stopLcdOnRestart() {
+    LCD_CAM.lcd_user.lcd_start = 0;
+    esp_rom_delay_us(50000);  // the frame in progress ends (one frame is about 26 ms)
+    periph_module_reset(PERIPH_LCD_CAM_MODULE);
+    periph_module_reset(PERIPH_GDMA_MODULE);
+}
+
+}  // namespace
+
 bool display_init() {
     if (!display_lcd.init()) {
         Serial.println("display: lcd.init() failed");
@@ -154,6 +172,9 @@ bool display_init() {
                   board::LCD_WIDTH, board::LCD_HEIGHT,
                   static_cast<unsigned>(board::LCD_PCLK_HZ),
                   internal ? "internal RAM" : "PSRAM (expect jitter)");
+    if (esp_register_shutdown_handler(stopLcdOnRestart) != ESP_OK) {
+        Serial.println("display: couldn't register the restart handler (#150)");
+    }
     return true;
 }
 

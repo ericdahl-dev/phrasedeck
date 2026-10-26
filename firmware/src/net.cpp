@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <nvs_flash.h>
 
 #include <atomic>
 #include <map>
@@ -350,3 +351,11 @@ void closeBluetoothPairing() {
 }
 
 }  // namespace net
+
+// Arduino keeps the Bluetooth controller's internal RAM reserved whenever the BLE library is linked
+// (about 25 KB, which the web editor's TLS needs). This strong override answers from the stored
+// Mode instead, so Wi-Fi Mode gets it back. It runs in initArduino, before setup() and Serial, so it
+// opens the panel NVS itself and says "not in use" on any error rather than erasing anything.
+extern "C" bool bleInUse(void) {
+    return nvs_flash_init_partition(panel_store::kPartition) == ESP_OK && net::loadBluetooth();
+}

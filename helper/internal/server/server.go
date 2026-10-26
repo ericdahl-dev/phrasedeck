@@ -180,7 +180,9 @@ func (s *server) noticeIfEdited(req typeRequest) {
 	if len(preview) > 80 {
 		preview = append(preview[:80], '…')
 	}
-	s.cfg.Notice("Typed a Phrase changed on a panel: " + string(preview))
+	// Off the request goroutine: notify-send can block on D-Bus for ~25 s, and a late reply makes
+	// the panel show Maybe typed, inviting a second tap that types it twice.
+	go s.cfg.Notice("Typed a Phrase changed on a panel: " + string(preview))
 }
 
 func (s *server) typeText(w http.ResponseWriter, r *http.Request) {

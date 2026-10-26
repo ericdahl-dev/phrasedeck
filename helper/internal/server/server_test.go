@@ -268,23 +268,63 @@ func TestTyperError500(t *testing.T) {
 	wantCode(t, e.typeJSON(`{"text":"hi"}`), 500)
 }
 
+// noticeEnv records notices; they're shown off the request goroutine, so they arrive on a channel.
+func noticeEnv(t *testing.T, fake *typer.Fake) (*env, chan string) {
+	notices := make(chan string, 10)
+	return newEnv(t, fake, time.Second, func(c *Config) { c.Notice = func(msg string) { notices <- msg } }), notices
+}
+
+func wantNotices(t *testing.T, notices chan string, want ...string) {
+	t.Helper()
+	for _, w := range want {
+		select {
+		case got := <-notices:
+			if got != w {
+				t.Fatalf("notice %q, want %q", got, w)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("no notice, want %q", w)
+		}
+	}
+	select {
+	case got := <-notices:
+		t.Fatalf("extra notice %q", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 // A panel Phrase carries an edit counter (#98). The first time the Helper types a Phrase at a
 // counter it hasn't seen, it shows a notice, since an edit on the panel's web page could have
 // turned it into a command. The same counter again, or a request with none, shows nothing.
 func TestTypeNoticeOnFirstSendOfAnEditedPhrase(t *testing.T) {
-	var notices []string
-	e := newEnv(t, &typer.Fake{}, time.Second, func(c *Config) {
-		c.Notice = func(msg string) { notices = append(notices, msg) }
-	})
+	e, notices := noticeEnv(t, &typer.Fake{})
 	wantCode(t, e.typeJSON(`{"text":"ls\nrm -rf x","phrase":"p7","edit":1}`), 200)
 	wantCode(t, e.typeJSON(`{"text":"ls\nrm -rf x","phrase":"p7","edit":1}`), 200)
 	wantCode(t, e.typeJSON(`{"text":"hi"}`), 200)
 	wantCode(t, e.typeJSON(`{"text":"ls -l","phrase":"p7","edit":2}`), 200)
-	want := []string{
+	wantNotices(t, notices,
 		"Typed a Phrase changed on a panel: ls↵rm -rf x",
-		"Typed a Phrase changed on a panel: ls -l",
-	}
-	if !reflect.DeepEqual(notices, want) {
-		t.Fatalf("notices %q, want %q", notices, want)
+		"Typed a Phrase changed on a panel: ls -l")
+}
+
+// A failed type shows no notice and doesn't count as seen: the next successful one notices.
+func TestTypeNoticeOnlyAfterTyping(t *testing.T) {
+	e, notices := noticeEnv(t, &typer.Fake{FailOn: "type:boom"})
+	wantCode(t, e.typeJSON(`{"text":"boom","phrase":"p1","edit":1}`), 500)
+	wantNotices(t, notices)
+	wantCode(t, e.typeJSON(`{"text":"ok","phrase":"p1","edit":1}`), 200)
+	wantNotices(t, notices, "Typed a Phrase changed on a panel: ok")
+}
+
+// A notification that hangs (notify-send waiting on D-Bus) mustn't hold the reply, or the
+// panel times out, shows Maybe typed, and a second tap types twice.
+func TestTypeNoticeDoesNotDelayTheReply(t *testing.T) {
+	block := make(chan struct{})
+	t.Cleanup(func() { close(block) })
+	e := newEnv(t, &typer.Fake{}, time.Second, func(c *Config) { c.Notice = func(string) { <-block } })
+	start := time.Now()
+	wantCode(t, e.typeJSON(`{"text":"hi","phrase":"p1","edit":1}`), 200)
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("reply took %v", d)
 	}
 }

@@ -105,7 +105,9 @@ func desktopNotice(msg string) {
 			msg).Run()
 	case "linux":
 		if path, err := exec.LookPath("notify-send"); err == nil {
-			exec.Command(path, "--app-name=phrased", "--", "phrased", msg).Run()
+			// notify-send bodies are markup, so a Phrase's & < > are escaped.
+			body := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(msg)
+			exec.Command(path, "--app-name=phrased", "--", "phrased", body).Run()
 		}
 	}
 }

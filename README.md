@@ -55,6 +55,33 @@ the new binary and reloads the agent.
 - **Stop it** with `launchctl bootout gui/$(id -u)/dev.ericdahl.phrased`; remove the plist too to
   keep it from starting at the next login.
 
+### Install with Homebrew (Mac)
+
+Not available yet: this needs the first signed release and the `ericdahl-dev/homebrew-tap` repository.
+
+```sh
+brew install --cask ericdahl-dev/tap/phrased
+```
+
+This installs a universal `phrased` (Apple Silicon and Intel, macOS 12 or later), signed with
+Developer ID and notarized, so Gatekeeper lets it run. Grant it Accessibility (see "Grant
+Accessibility"); upgrades keep the grant.
+
+**Run at login.** The cask installs the binary only. To start it at login and keep it running, add
+the LaunchAgent:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ericdahl-dev/phrasedeck/main/helper/install/dev.ericdahl.phrased.plist |
+  sed -e "s|__HOME__/.local/bin/phrased|$(brew --prefix)/bin/phrased|" -e "s|__HOME__|$HOME|g" \
+  > ~/Library/LaunchAgents/dev.ericdahl.phrased.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.ericdahl.phrased.plist
+```
+
+`brew upgrade` swaps in the new binary. Restart it with
+`launchctl kickstart -k gui/$(id -u)/dev.ericdahl.phrased`. To uninstall, run
+`launchctl bootout gui/$(id -u)/dev.ericdahl.phrased`, delete the plist, then
+`brew uninstall --cask phrased`.
+
 ### Let it through the macOS firewall
 
 If the macOS firewall is on, it may drop incoming connections to `phrased` without asking,

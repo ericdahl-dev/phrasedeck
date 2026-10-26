@@ -1,0 +1,21 @@
+# Homebrew cask for the Mac Helper (#66). render.sh fills in the version and the zip's SHA-256;
+# the release workflow attaches the result. It goes in the tap as Casks/phrased.rb.
+cask "phrased" do
+  version "@VERSION@"
+  sha256 "@SHA256@"
+
+  url "https://github.com/ericdahl-dev/phrasedeck/releases/download/v#{version}/phrased-#{version}-macos.zip"
+  name "phrased"
+  desc "Types Phrases sent from the phrasedeck iPhone app"
+  homepage "https://github.com/ericdahl-dev/phrasedeck"
+
+  depends_on macos: ">= :monterey"
+
+  binary "phrased"
+
+  caveats <<~EOS
+    phrased types into the focused app, so it needs Accessibility:
+      System Settings > Privacy & Security > Accessibility, add #{HOMEBREW_PREFIX}/bin/phrased
+    To start it at login, see "Run at login (Homebrew)" in the README.
+  EOS
+end

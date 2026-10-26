@@ -124,6 +124,20 @@ bool storedLtk(const ble_addr_t& addr, uint8_t out[16]) {
     return true;
 }
 
+// NimBLE's NVS store saves a bond only when the number of bonds changes: a pairing that replaces an
+// existing bond for the same identity updates RAM and leaves the old keys in NVS, which come back at
+// the next start without the new IRK or LTK (#155). Deleting and writing the keys again makes the
+// count drop then grow, so both reach NVS. Only the keys: the subscriptions stay.
+bool persistBond(const ble_addr_t& addr) {
+    ble_store_key_sec key{};
+    key.peer_addr = addr;
+    ble_store_value_sec ours{}, peers{};
+    if (ble_store_read_our_sec(&key, &ours) != 0 || ble_store_read_peer_sec(&key, &peers) != 0) return false;
+    ble_store_delete_our_sec(&key);
+    ble_store_delete_peer_sec(&key);
+    return ble_store_write_our_sec(&ours) == 0 && ble_store_write_peer_sec(&peers) == 0;
+}
+
 bool isComputer(const ble_addr_t& addr) {
     uint8_t ltk[16];
     return g_hasComputer && g_hasLtk && ble_addr_cmp(&addr, &g_computer) == 0 && storedLtk(addr, ltk) &&
@@ -290,7 +304,8 @@ class SecurityCallbacks : public BLESecurityCallbacks {
                 // the Computer couldn't reconnect. Saved first: after a power cut in between, the
                 // next start forgets the old bonds.
                 uint8_t ltk[16];
-                if (!storedLtk(d->peer_id_addr, ltk) || !saveComputer(d->peer_id_addr)) {
+                if (!persistBond(d->peer_id_addr) || !storedLtk(d->peer_id_addr, ltk) ||
+                    !saveComputer(d->peer_id_addr)) {
                     reject(*d);
                     return;
                 }

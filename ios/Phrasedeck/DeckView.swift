@@ -35,15 +35,6 @@ struct DeckView: View {
     @State private var scrollFrames: [PersistentIdentifier: CGRect] = [:]
     @Environment(\.scenePhase) private var scenePhase
 
-    /// Arrange mode is reachable only in DEBUG builds launched with -arrangeEnabled until dragging
-    /// works, including holding then dragging (#81, slice 3b), so a release never shows half of it.
-    static var arrangeEnabled: Bool {
-        #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-arrangeEnabled")
-        #else
-        false
-        #endif
-    }
 
     /// Wider than tall, from the Deck's own size rather than the device, so Split View counts.
     @State private var landscape = false
@@ -240,7 +231,7 @@ struct DeckView: View {
                             PhraseButton(phrase: phrase, metrics: DeckSize.metrics(button: size),
                                          pinchGuard: pinchGuard,
                                          edit: { editing = .existing(phrase) }, delete: { deleting = (phrase, nil) },
-                                         editDeck: Self.arrangeEnabled ? { arranging = true } : nil,
+                                         editDeck: { arranging = true },
                                          arrange: arranging ? role(phrase, at: spot, on: page, columns: columns) : nil)
                         }
                     case .add:

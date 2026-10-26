@@ -1,33 +1,33 @@
 import XCTest
 
-/// Arrange mode (#81). Until dragging works it's reached only in DEBUG builds launched with
-/// -arrangeEnabled, so a release never shows half of it.
+/// Arrange mode (#81).
 final class ArrangeTests: XCTestCase {
     @MainActor
-    func launch(arrange: Bool) -> XCUIApplication {
+    func launch() -> XCUIApplication {
         // A test that rotates (or a crashed run) can leave the Simulator in landscape.
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
-        app.launchArguments = ["-uiTestingStubHelper"] + (arrange ? ["-arrangeEnabled"] : [])
+        app.launchArguments = ["-uiTestingStubHelper"]
         app.launch()
         return app
     }
 
+    /// Arrange mode ships: every build's long-press menu offers Edit Deck.
     @MainActor
-    func testWithoutTheFlagTheMenuHasNoEditDeck() {
-        let app = launch(arrange: false)
+    func testTheMenuOffersEditDeck() {
+        let app = launch()
         let button = app.buttons["phrase.agent-status"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))
 
         button.press(forDuration: 1)
 
         XCTAssertTrue(app.buttons["Edit"].waitForExistence(timeout: 20))
-        XCTAssertFalse(app.buttons["Edit Deck"].exists)
+        XCTAssertTrue(app.buttons["Edit Deck"].exists)
     }
 
     @MainActor
     func testArrangeModeShowsDoneTypesNothingAndEndsWithDone() {
-        let app = launch(arrange: true)
+        let app = launch()
         let button = app.buttons["phrase.agent-status"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))
 
@@ -57,7 +57,7 @@ final class ArrangeTests: XCTestCase {
     /// The toolbar "+" adds a Button to the Page shown, in normal mode too.
     @MainActor
     func testTheToolbarPlusAddsAButton() {
-        let app = launch(arrange: false)
+        let app = launch()
         XCTAssertTrue(app.buttons["phrase.agent-status"].waitForExistence(timeout: 20))
         XCTAssertFalse(app.buttons["deck.add"].exists, "no + tile in normal mode")
 
@@ -68,7 +68,7 @@ final class ArrangeTests: XCTestCase {
 
     @MainActor
     func testLeavingTheAppEndsArrangeMode() {
-        let app = launch(arrange: true)
+        let app = launch()
         let button = app.buttons["phrase.agent-status"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))
         enterArrangeMode(app, from: button)
@@ -94,7 +94,7 @@ final class ArrangeTests: XCTestCase {
     /// In Arrange mode a Button drags at once; dropped on another Button it takes that Spot.
     @MainActor
     func testInArrangeModeAButtonDragsOntoAnotherAndTakesItsSpot() {
-        let app = launch(arrange: true)
+        let app = launch()
         let button = app.buttons["phrase.agent-status"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))
         enterArrangeMode(app, from: button)
@@ -111,7 +111,7 @@ final class ArrangeTests: XCTestCase {
     @MainActor
     func testLandscapeHasItsOwnLayout() {
         defer { XCUIDevice.shared.orientation = .portrait }
-        let app = launch(arrange: true)
+        let app = launch()
         let button = app.buttons["phrase.agent-status"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))
         enterArrangeMode(app, from: button)
@@ -133,7 +133,7 @@ final class ArrangeTests: XCTestCase {
     /// (spec section 6).
     @MainActor
     func testHoldingAtTheEdgeFlipsToTheNextPageAndDropsThere() {
-        let app = launch(arrange: true)
+        let app = launch()
         let button = app.buttons["phrase.agent-status"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))
         addPages(app, ["Other"])
@@ -149,7 +149,7 @@ final class ArrangeTests: XCTestCase {
     /// Holding on flips again, two Pages away; the drag carries on after its own Page scrolls off.
     @MainActor
     func testHoldingOnAtTheEdgeFlipsTwice() {
-        let app = launch(arrange: true)
+        let app = launch()
         let button = app.buttons["phrase.agent-status"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))
         addPages(app, ["Two", "Three"])
@@ -168,7 +168,7 @@ final class ArrangeTests: XCTestCase {
     /// removes it and leaves a gap (spec section 9).
     @MainActor
     func testTheMinusBadgeAsksThenDeletesLeavingAGap() {
-        let app = launch(arrange: true)
+        let app = launch()
         let button = app.buttons["phrase.agent-status"]
         let next = app.buttons["phrase.status-table"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))
@@ -197,7 +197,7 @@ final class ArrangeTests: XCTestCase {
     /// first row goes off the top.
     @MainActor
     func testHoldingNearTheBottomScrollsThePage() {
-        let app = launch(arrange: true)
+        let app = launch()
         let button = app.buttons["phrase.agent-status"]
         let first = app.buttons["phrase.status-table"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))
@@ -229,7 +229,7 @@ final class ArrangeTests: XCTestCase {
     /// The long-press menu's Delete asks the same way (spec open question 4).
     @MainActor
     func testTheMenusDeleteAsksFirst() {
-        let app = launch(arrange: false)
+        let app = launch()
         let button = app.buttons["phrase.agent-status"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))
 

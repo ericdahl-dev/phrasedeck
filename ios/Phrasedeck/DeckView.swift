@@ -177,6 +177,18 @@ struct DeckView: View {
                 .contentShape(.rect)
                 .onTapGesture { if arranging { arranging = false } }
         }
+        .overlay {
+            if page.sortedPhrases.isEmpty && !arranging {
+                ContentUnavailableView {
+                    Label("No Buttons", systemImage: "square.grid.2x2")
+                } description: {
+                    Text("Each Button types its Phrase on your Computer.")
+                } actions: {
+                    Button("Add a Button") { editing = .new(page) }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+        }
         .scrollPosition(Binding(get: { scrollPositions[page.persistentModelID] ?? ScrollPosition() },
                                 set: { scrollPositions[page.persistentModelID] = $0 }))
         // Only Arrange mode drags; outside it, scrolling writes no state.

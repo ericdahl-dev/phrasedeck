@@ -102,6 +102,17 @@ struct AppModelTests {
 
     // MARK: route choice (#11)
 
+    /// With no Computer, a send says so and the banner offers Add, so it stays up (UX review).
+    @Test func withNoComputerTheBannerOffersAdd() async throws {
+        let model = try model(withMac: false)
+
+        let feedback = await model.send(text: "yes", enter: true)
+
+        #expect(feedback.tone == .red)
+        #expect(feedback.addComputer)
+        #expect(!feedback.autoCloses)
+    }
+
     @Test func withNothingNearbyTheTailnetIsUsed() async throws {
         let model = try model()
         #expect(model.route(for: mac) == .tailnet)
@@ -167,6 +178,9 @@ struct AppModelTests {
         #expect(feedback.tone == .success)
         #expect(feedback.message?.hasPrefix("Typed: sent over the tailnet") == true)
         #expect(feedback.message?.contains("certificate") == true)
+        // It asks to pair again, so it offers the button and stays up.
+        #expect(feedback.pairAgain?.id == model.selectedHelper?.id)
+        #expect(!feedback.autoCloses)
         #expect(lan.typed.count == 1 && api.typed.count == 1)
         #expect(routes.log == [Self.lanRoute, .tailnet])
     }

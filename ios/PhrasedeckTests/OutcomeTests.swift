@@ -44,6 +44,13 @@ struct OutcomeTests {
         #expect(Outcome.pair(failure, on: mac) == message)
     }
 
+    /// A banner closes itself after a few seconds unless it asks for something (UX review).
+    @Test func onlyBannersThatAskForSomethingStayUp() {
+        #expect(Outcome.send(.unreachable, on: mac).autoCloses)
+        #expect(Outcome.send(.noReply, on: mac).autoCloses)
+        #expect(!Outcome.send(.unauthorized, on: mac).autoCloses)
+    }
+
     /// What the Button shows for a moment after a send, and VoiceOver says.
     @Test func eachToneHasAWordAndASymbol() {
         #expect(AppModel.Feedback.Tone.success.word == "Typed")

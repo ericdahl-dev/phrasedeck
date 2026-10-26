@@ -6,7 +6,9 @@ struct ContentView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @State private var showingComputers = false
+    @State private var addingComputer = false
     @State private var pairing: Helper?
     @State private var incomingLink: IncomingLink?
 
@@ -19,15 +21,17 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             DeckView()
-                .overlay(alignment: .top) { banner }
+                // An inset, not an overlay, so the banner pushes the grid down instead of covering row 1.
+                .safeAreaInset(edge: .top) { banner }
                 .toolbar {
                     ToolbarItem(placement: .principal) {
-                        HelperPicker(showComputers: { showingComputers = true })
+                        HelperPicker(showComputers: { showingComputers = true }, addComputer: { addingComputer = true })
                     }
                 }
                 .navigationBarTitleDisplayMode(.inline)
         }
         .sheet(isPresented: $showingComputers) { ComputersView() }
+        .sheet(isPresented: $addingComputer) { AddHelperView() }
         .sheet(item: $pairing) { helper in AddHelperView(pairAgain: helper) }
         .sheet(item: $incomingLink) { incoming in AddHelperView(link: incoming.result) }
         .onOpenURL { url in
@@ -69,6 +73,22 @@ struct ContentView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(.white.opacity(0.25))
                 }
+                if feedback.addComputer {
+                    Button("Add") {
+                        model.dismissFeedback()
+                        addingComputer = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.white.opacity(0.25))
+                    .accessibilityIdentifier("banner.add")
+                }
+                Button { model.dismissFeedback() } label: {
+                    Image(systemName: "xmark")
+                        .font(.callout.weight(.bold))
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
+                }
+                .accessibilityLabel("Close")
             }
             .foregroundStyle(.white)
             .padding()
@@ -77,6 +97,12 @@ struct ContentView: View {
             .padding(.horizontal)
             .onTapGesture { model.dismissFeedback() }
             .transition(.move(edge: .top).combined(with: .opacity))
+            // VoiceOver users close it themselves, so it can't vanish mid-read.
+            .task(id: model.feedbackShown) {
+                guard feedback.autoCloses, !voiceOver else { return }
+                try? await Task.sleep(for: .seconds(4))
+                if !Task.isCancelled { withAnimation { model.dismissFeedback() } }
+            }
         }
     }
 

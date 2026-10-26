@@ -99,11 +99,12 @@ struct SpotStorageTests {
     @Test func ofTwoSyncedRowsTheNewestWinsAndTheNextSaveLeavesOne() throws {
         let (page, p) = try page("Agents", ["a"])
         let old = SavedSpot(phraseUID: p[0].uid, width: .compact, spot: Spot(column: 0, row: 5))
-        old.updated = Date(timeIntervalSince1970: 100)
         let new = SavedSpot(phraseUID: p[0].uid, width: .compact, spot: Spot(column: 2, row: 1))
-        new.updated = Date(timeIntervalSince1970: 200)
         context.insert(new)
         context.insert(old)
+        // Dates are set after insert, as the app does: set before, they were lost on iOS 26 (#90).
+        old.updated = Date(timeIntervalSince1970: 100)
+        new.updated = Date(timeIntervalSince1970: 200)
         try context.save()
 
         // Flaky on CI's iOS 26.4.1 Simulator (#90): the message shows each row's date when it fails.

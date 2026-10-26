@@ -750,9 +750,10 @@ void setup() {
     touch_init();
     loadPhrases();
     buildPage();
-    if (!panel_store::begin()) Serial.println("phrasedeck panel: panel NVS unavailable");
+    const bool store = panel_store::begin();
+    if (!store) Serial.println("phrasedeck panel: panel NVS unavailable");
     admin::begin();
-    if (!admin::isSet()) {
+    if (store && !admin::isSet()) {  // without NVS a password can't be saved: don't trap the panel in Step 1
         g_wizard = Wizard::Password;
         openLock(true);
     }

@@ -169,16 +169,29 @@ final class ArrangeTests: XCTestCase {
 
     // MARK: Auto-scroll (spec section 5)
 
-    /// Held near the bottom of the Page, a dragged Button scrolls it, so the first row goes off the
-    /// top, and lands below what fit on screen.
+    /// Held near the bottom of a Page taller than the screen, a dragged Button scrolls it, so the
+    /// first row goes off the top.
     @MainActor
     func testHoldingNearTheBottomScrollsThePage() {
         let app = launch(arrange: true)
         let button = app.buttons["phrase.agent-status"]
         let first = app.buttons["phrase.status-table"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))
-        enterArrangeMode(app, from: button)
         let grid = app.scrollViews["deck.grid"].firstMatch
+        // Two columns and a 1 by 3 Button at the end run the Page past the bottom of the screen.
+        grid.pinch(withScale: 4, velocity: 2)
+        XCTAssertEqual(grid.value as? String, "2 columns")
+        app.buttons["deck.new"].tap()
+        let label = app.textFields["editor.label"]
+        XCTAssertTrue(label.waitForExistence(timeout: 20))
+        label.tap()
+        label.typeText("Tall")
+        app.textViews["editor.text"].firstMatch.tap()
+        app.textViews["editor.text"].firstMatch.typeText("tall")
+        app.buttons["editor.size.1x3"].tap()
+        app.buttons["editor.save"].tap()
+        XCTAssertTrue(app.buttons["phrase.Tall"].waitForExistence(timeout: 20))
+        enterArrangeMode(app, from: button)
         let top = grid.frame.minY
 
         let from = button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))

@@ -116,7 +116,7 @@ Ubuntu with GNOME (Wayland):
 ```sh
 sudo apt install ydotool wl-clipboard
 sudo usermod -aG input "$USER"   # the package's udev rule gives the input group /dev/uinput
-# log out and back in so the group applies, then:
+# restart the computer so the group applies (see below), then:
 systemctl --user enable --now ydotool   # ydotoold, the daemon ydotool talks to
 cd helper
 make install-linux
@@ -124,16 +124,88 @@ make install-linux
 
 - The Helper isn't Ready until `ydotoold` is running: it checks for its socket at
   `$XDG_RUNTIME_DIR/.ydotool_socket` (or `$YDOTOOL_SOCKET`).
+- Restart rather than log out. The user services (`systemctl --user`) keep the groups you had when
+  they started, and an ssh session or a second login keeps them running across a logout, so
+  `ydotool.service` still can't open `/dev/uinput`. A restart (or
+  `sudo systemctl restart user@$(id -u)`, which ends that user's sessions) picks the group up.
 - On an X11 session, install `xdotool xclip` instead; no daemon or group is needed.
 - Pasting works as on omarchy: it serves the phrase once, sends Ctrl+Shift+V (the terminal
   paste key), and puts the old clipboard text back.
+
+### Install from a package (Ubuntu, Debian, Arch)
+
+Each version tag (`vX.Y.Z`) builds Linux packages for amd64 and arm64 and attaches them to that
+tag's [GitHub Release](https://github.com/ericdahl-dev/phrasedeck/releases), with `SHA256SUMS`:
+
+- `phrased_<version>_<arch>.deb` for Ubuntu and Debian.
+- `phrased-<version>-linux-<arch>.tar.gz`, plus `PKGBUILD`, `phrased-bin.install` and `.SRCINFO` for
+  the AUR package `phrased-bin`.
+
+Either package installs `/usr/bin/phrased` and the user unit
+`/usr/lib/systemd/user/phrased.service`. Installing turns nothing on; each user does that once
+(below). Set the release first (the version without the `v`, and `arm64` on an ARM machine):
+
+```sh
+v=1.2.3 arch=amd64
+base=https://github.com/ericdahl-dev/phrasedeck/releases/download/v$v
+```
+
+**Ubuntu or Debian.** GNOME and KDE type through `ydotool`, which needs Ubuntu 26.04 or later (see
+the table above).
+
+```sh
+curl -fLO "$base/phrased_${v}_$arch.deb" -fLO "$base/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+sudo apt install "./phrased_${v}_$arch.deb"
+```
+
+- The .deb recommends `wl-clipboard`, `ydotool` and `libnotify-bin` (for the panel's notice when
+  an edited Phrase is first typed), so `apt` installs them unless you pass
+  `--no-install-recommends`. It only suggests `wtype`.
+- On GNOME or KDE, add yourself to the `input` group, restart, and start `ydotoold`, as in
+  [Install on Ubuntu, GNOME or KDE](#install-on-ubuntu-gnome-or-kde):
+
+  ```sh
+  sudo usermod -aG input "$USER"
+  # restart the computer, then:
+  systemctl --user enable --now ydotool
+  ```
+
+- On Sway or another wlroots compositor, `sudo apt install wtype`. On X11,
+  `sudo apt install xdotool xclip`.
+
+**Arch or Omarchy (`phrased-bin`).** `phrased-bin` isn't on the AUR yet; until it is, build it from
+the files on the release:
+
+```sh
+mkdir phrased-bin && cd phrased-bin
+curl -fLO "$base/PKGBUILD" -fLO "$base/phrased-bin.install" -fLO "$base/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS   # makepkg runs the PKGBUILD, so check it first
+makepkg -si
+```
+
+- `makepkg` downloads the tarball for your architecture and checks it against the SHA-256 in the
+  `PKGBUILD`.
+- It needs `wtype` and `wl-clipboard`. Optional: `ydotool` (GNOME or KDE, with the `input` group
+  and `ydotool.service` steps above), `xdotool` and `xclip` (X11), and `libnotify` (the panel's
+  notice).
+
+**Turn it on.** As your user, not root:
+
+```sh
+systemctl --user enable --now phrased
+```
+
+It starts with your graphical session from then on. `systemctl --user status phrased` shows
+whether it's running, and `curl http://<tailnet-name>:47811/health` whether it's Ready. Then pair a
+phone with `phrased pair` (next section).
 
 ### Pair a device
 
 Each phone or tablet gets its own token. On the computer running `phrased`:
 
 ```sh
-./phrased pair
+phrased pair   # ./phrased pair from a build directory
 ```
 
 It prints a 6-digit code, valid for 2 minutes, and on the Mac also shows it as a notification.

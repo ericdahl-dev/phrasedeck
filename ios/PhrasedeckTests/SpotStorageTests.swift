@@ -75,17 +75,42 @@ struct SpotStorageTests {
 
     /// Two phones that each saved a Spot for the same Button sync as two rows: the newest wins, and
     /// the next save leaves one.
-    @Test func ofTwoSyncedRowsTheNewestWinsAndTheNextSaveLeavesOne() throws {
+    /// Rows saved at the same instant settle the same way on every phone, whatever order the store
+    /// returns them in: the earlier Spot in reading order wins.
+    @Test(arguments: [false, true])
+    func rowsWithTheSameTimeSettleTheSameWayEverywhere(reversed: Bool) throws {
         let (page, p) = try page("Agents", ["a"])
-        let old = SavedSpot(phraseUID: p[0].uid, width: .compact, spot: Spot(column: 0, row: 5))
-        old.updated = Date(timeIntervalSince1970: 100)
-        let new = SavedSpot(phraseUID: p[0].uid, width: .compact, spot: Spot(column: 2, row: 1))
-        new.updated = Date(timeIntervalSince1970: 200)
-        context.insert(new)
-        context.insert(old)
+        let at = Date(timeIntervalSince1970: 100)
+        var synced = [SavedSpot(phraseUID: p[0].uid, width: .compact, spot: Spot(column: 0, row: 5)),
+                      SavedSpot(phraseUID: p[0].uid, width: .compact, spot: Spot(column: 2, row: 1))]
+        if reversed { synced.reverse() }
+        for row in synced {
+            row.updated = at
+            context.insert(row)
+        }
         try context.save()
 
         #expect(Deck.spots(on: page, width: .compact, in: context) == [p[0].uid: Spot(column: 2, row: 1)])
+        try Deck.saveSpots([:], width: .compact, in: context)
+        try Deck.saveSpots([p[0].uid: Spot(column: 2, row: 1)], width: .compact, in: context)
+        #expect(try rows(p[0].uid).map(\.spot) == [Spot(column: 2, row: 1)])
+    }
+
+    @Test func ofTwoSyncedRowsTheNewestWinsAndTheNextSaveLeavesOne() throws {
+        let (page, p) = try page("Agents", ["a"])
+        let old = SavedSpot(phraseUID: p[0].uid, width: .compact, spot: Spot(column: 0, row: 5))
+        let new = SavedSpot(phraseUID: p[0].uid, width: .compact, spot: Spot(column: 2, row: 1))
+        context.insert(new)
+        context.insert(old)
+        // Dates are set after insert, as the app does: set before, they were lost on iOS 26 (#90).
+        old.updated = Date(timeIntervalSince1970: 100)
+        new.updated = Date(timeIntervalSince1970: 200)
+        try context.save()
+
+        // Flaky on CI's iOS 26.4.1 Simulator (#90): the message shows each row's date when it fails.
+        let saved = try rows(p[0].uid).map { "\($0.spot) @ \($0.updated.timeIntervalSince1970)" }
+        #expect(Deck.spots(on: page, width: .compact, in: context) == [p[0].uid: Spot(column: 2, row: 1)],
+                "rows: \(saved)")
 
         try Deck.saveSpots([p[0].uid: Spot(column: 0, row: 0)], width: .compact, in: context)
         #expect(try rows(p[0].uid).map(\.spot) == [Spot(column: 0, row: 0)])

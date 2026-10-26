@@ -16,6 +16,22 @@ struct DeckView: View {
     @State private var pinchColumns: Int?
     @State private var pinchStart: Int?
     @State private var pinchGuard = PinchGuard()
+    @Query private var savedSpots: [SavedSpot]
+    /// Arrange mode (#81): Buttons jiggle and move, taps don't type, Done ends it.
+    @State private var arranging = false
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// Arrange mode is reachable only in DEBUG builds launched with -arrangeEnabled until dragging
+    /// works (#81, slice 3), so a release never shows half of it.
+    static var arrangeEnabled: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-arrangeEnabled")
+        #else
+        false
+        #endif
+    }
+
+    private var layoutWidth: LayoutWidth { sizeClass == .regular ? .regular : .compact }
 
     var body: some View {
         Group {
@@ -37,6 +53,10 @@ struct DeckView: View {
                                 grid(page, columns: columns, cell: cell)
                                     .padding(DeckSize.padding)
                                     .animation(.snappy, value: columns)
+                                    .frame(maxWidth: .infinity, alignment: .top)
+                                    // A tap on empty space ends Arrange mode; Buttons take their own taps.
+                                    .contentShape(.rect)
+                                    .onTapGesture { if arranging { arranging = false } }
                             }
                             .accessibilityIdentifier("deck.grid")
                             .accessibilityValue("\(columns) columns")
@@ -44,18 +64,34 @@ struct DeckView: View {
                         }
                     }
                     .tabViewStyle(.page(indexDisplayMode: pages.count > 1 ? .always : .never))
-                    // Alongside the page swipe, not instead of it.
-                    .simultaneousGesture(pinch(width: geo.size.width))
+                    // Alongside the page swipe, not instead of it. Off in Arrange mode, where a
+                    // change in column count would reflow everything under the finger.
+                    .simultaneousGesture(pinch(width: geo.size.width), including: arranging ? .subviews : .all)
                     .sensoryFeedback(.selection, trigger: columns)
                 }
             }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("Pages", systemImage: "rectangle.stack") { editingPages = true }
-                    .accessibilityIdentifier("deck.pages")
+            if arranging {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { arranging = false }
+                        .accessibilityIdentifier("arrange.done")
+                }
+            } else {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Pages", systemImage: "rectangle.stack") { editingPages = true }
+                        .accessibilityIdentifier("deck.pages")
+                }
             }
         }
+        .sensoryFeedback(.impact(weight: .medium), trigger: arranging) { _, now in now }
+        .onChange(of: arranging) { _, now in
+            if now {
+                AccessibilityNotification.Announcement(
+                    "Editing Deck. Use actions to move Buttons. Done is in the toolbar.").post()
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { arranging = false } }
         .sheet(item: $editing) { PhraseEditor(target: $0) }
         .sheet(isPresented: $editingPages) { PageEditor() }
         .saveFailureAlert($saveError)
@@ -102,13 +138,16 @@ struct DeckView: View {
         case add
     }
 
-    /// The page's Buttons packed by Size (#51), with the "+" tile as a trailing 1×1.
+    /// The page's Buttons at their Spots for this Layout width, or packed by Size (#51) when it has
+    /// none, with the "+" tile after them (hidden in Arrange mode).
     private func grid(_ page: Page, columns: Int, cell: CGSize) -> some View {
         let phrases = Dictionary(uniqueKeysWithValues: page.sortedPhrases.map { ($0.persistentModelID, $0) })
+        let spots = Deck.spots(on: page, width: layoutWidth, from: savedSpots)
         let items = page.sortedPhrases.map {
-            Packing.Item(id: Tile.phrase($0.persistentModelID), columns: $0.sizeColumns, rows: $0.sizeRows)
-        } + [Packing.Item(id: Tile.add, columns: 1, rows: 1)]
-        let placed = Packing.pack(items, columns: columns)
+            Arrangement.Item(id: Tile.phrase($0.persistentModelID), columns: $0.sizeColumns, rows: $0.sizeRows,
+                             spot: spots[$0.uid])
+        } + (arranging ? [] : [Arrangement.Item(id: Tile.add, columns: 1, rows: 1, spot: nil)])
+        let placed = Arrangement.resolve(items, columns: columns)
         let step = CGSize(width: cell.width + DeckSize.spacing, height: cell.height + DeckSize.spacing)
         let rows = CGFloat(Packing.rows(of: placed))
         return ZStack(alignment: .topLeading) {
@@ -121,7 +160,9 @@ struct DeckView: View {
                         if let phrase = phrases[id] {
                             PhraseButton(phrase: phrase, metrics: DeckSize.metrics(button: size),
                                          pinchGuard: pinchGuard,
-                                         edit: { editing = .existing(phrase) }, delete: { remove(phrase) })
+                                         edit: { editing = .existing(phrase) }, delete: { remove(phrase) },
+                                         editDeck: Self.arrangeEnabled ? { arranging = true } : nil,
+                                         arrange: arranging ? role(phrase, at: spot, on: page, columns: columns) : nil)
                         }
                     case .add:
                         addTile(page)
@@ -129,8 +170,11 @@ struct DeckView: View {
                 }
                 .frame(width: size.width, height: size.height)
                 .offset(x: CGFloat(spot.x) * step.width, y: CGFloat(spot.y) * step.height)
+                // VoiceOver reads Buttons as they're shown, row by row, not in order.
+                .accessibilitySortPriority(-Double(spot.y * columns + spot.x))
             }
         }
+        .accessibilityElement(children: .contain)
         .frame(width: CGFloat(columns) * step.width - DeckSize.spacing,
                height: max(0, rows * step.height - DeckSize.spacing), alignment: .topLeading)
     }
@@ -147,6 +191,29 @@ struct DeckView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Add a phrase to \(page.name)")
         .accessibilityIdentifier("deck.add")
+    }
+
+    /// A Button's move actions in Arrange mode. Each move saves at once and is announced.
+    private func role(_ phrase: Phrase, at shown: Packing.Placement<Tile>, on page: Page,
+                      columns: Int) -> PhraseButton.ArrangeRole {
+        PhraseButton.ArrangeRole(
+            spot: Spot(column: shown.x, row: shown.y),
+            nudges: Arrangement.nudges(for: shown, columns: columns),
+            otherPages: pages.filter { $0 !== page },
+            nudge: { nudge in
+                do {
+                    let result = try withAnimation(.snappy) {
+                        try Deck.nudge(phrase, nudge, on: page, width: layoutWidth, columns: columns, in: context)
+                    }
+                    AccessibilityNotification.Announcement(
+                        Deck.moveAnnouncement(to: result.to, shifted: result.shifted)).post()
+                } catch {
+                    saveError = error.localizedDescription
+                }
+            },
+            moveToPage: { target in
+                do { try Deck.moveToPage(phrase, target) } catch { saveError = error.localizedDescription }
+            })
     }
 
     private func remove(_ phrase: Phrase) {

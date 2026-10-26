@@ -126,8 +126,9 @@ jobs:
         run: |
           zip="$RUNNER_TEMP/mac/phrased-${GITHUB_REF_NAME#v}-macos.zip"
           # A bare binary can't be stapled; Gatekeeper fetches the ticket online on first launch.
+          # || true: a rejected submission exits non-zero, and the status check below prints its log.
           xcrun notarytool submit "$zip" --key "$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8" \
-            --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait --output-format json | tee "$RUNNER_TEMP/notary.json"
+            --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait --output-format json | tee "$RUNNER_TEMP/notary.json" || true
           status=$(plutil -extract status raw -o - "$RUNNER_TEMP/notary.json")
           if [ "$status" != Accepted ]; then
             id=$(plutil -extract id raw -o - "$RUNNER_TEMP/notary.json")

@@ -65,7 +65,9 @@ brew install --cask ericdahl-dev/tap/phrased
 
 This installs a universal `phrased` (Apple Silicon and Intel, macOS 12 or later), signed with
 Developer ID and notarized, so Gatekeeper lets it run. Grant it Accessibility (see "Grant
-Accessibility"); upgrades keep the grant.
+Accessibility"). After `brew upgrade`, if typing stops, remove `phrased` from the Accessibility list
+and add it again: each version lives at its own path under the Caskroom, which macOS may treat as a
+new app.
 
 **Run at login.** The cask installs the binary only. To start it at login and keep it running, add
 the LaunchAgent:

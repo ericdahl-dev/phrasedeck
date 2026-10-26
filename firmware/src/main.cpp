@@ -73,12 +73,16 @@ void showNet() {
     if (s.messageSeq != g_message_seq) {
         g_message_seq = s.messageSeq;
         g_busy = false;
-        if (g_pair != nullptr && g_pairing_now) pairResult(s);
+        if (g_pairing_now) {  // also after Cancel and reopen, so a reopened screen still gets its result
+            g_pairing_now = false;
+            if (g_pair != nullptr) pairResult(s);
+        }
         lv_label_set_text(g_status, s.message.c_str());
     }
 }
 
 void closePair(lv_event_t*) {
+    if (g_pair == nullptr) return;
     lv_obj_delete_async(g_pair);  // not during its own event
     g_pair = nullptr;
 }
@@ -121,7 +125,6 @@ void submitPair(lv_event_t*) {
 
 // Paired: close. Anything else stays on this screen, so the code and Pin can be fixed in place.
 void pairResult(const net::Snapshot& s) {
-    g_pairing_now = false;
     if (s.ok) {
         closePair(nullptr);
         return;
@@ -184,11 +187,13 @@ lv_obj_t* textButton(lv_obj_t* parent, const char* text, lv_event_cb_t cb, void*
 // Not const: LVGL 9.1 takes a non-const map.
 const char* kHexMap[] = {"1", "2", "3", "A", "\n", "4", "5", "6", "B", "\n", "7", "8", "9", "C", "\n",
                                "0", "D", "E", "F", "\n", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""};
-const lv_buttonmatrix_ctrl_t kHexCtrl[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2};
+// OK fires once, on release, as in LVGL's own maps: held down, it must not pair twice.
+constexpr lv_buttonmatrix_ctrl_t kOk = LV_BUTTONMATRIX_CTRL_NO_REPEAT | LV_BUTTONMATRIX_CTRL_CLICK_TRIG;
+const lv_buttonmatrix_ctrl_t kHexCtrl[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, kOk | 2};
 // The code is digits only: no +/-, dot or arrows.
 const char* kDigitMap[] = {"1", "2", "3", "\n", "4", "5", "6", "\n", "7", "8", "9", "\n",
                            LV_SYMBOL_BACKSPACE, "0", LV_SYMBOL_OK, ""};
-const lv_buttonmatrix_ctrl_t kDigitCtrl[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+const lv_buttonmatrix_ctrl_t kDigitCtrl[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, kOk | 1};
 
 void openPair(lv_event_t*) {
     if (g_pair != nullptr) return;
@@ -196,7 +201,6 @@ void openPair(lv_event_t*) {
     lv_obj_set_size(g_pair, board::LCD_WIDTH, board::LCD_HEIGHT);
     lv_obj_set_style_radius(g_pair, 0, 0);
     lv_obj_remove_flag(g_pair, LV_OBJ_FLAG_SCROLLABLE);
-    g_pairing_now = false;
 
     lv_obj_t* title = lv_label_create(g_pair);
     g_pair_helpers = net::snapshot().nearby;
@@ -237,7 +241,7 @@ void openPair(lv_event_t*) {
     g_pair_note = lv_label_create(g_pair);
     lv_obj_set_width(g_pair_note, 340);
     lv_label_set_long_mode(g_pair_note, LV_LABEL_LONG_WRAP);
-    lv_label_set_text(g_pair_note, "");
+    lv_label_set_text(g_pair_note, g_pairing_now ? "Pairing..." : "");
     lv_obj_set_style_text_color(g_pair_note, lv_palette_main(LV_PALETTE_ORANGE), 0);
     lv_obj_align(g_pair_note, LV_ALIGN_TOP_LEFT, 0, 190);
 

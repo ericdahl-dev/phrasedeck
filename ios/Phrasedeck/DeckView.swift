@@ -64,27 +64,7 @@ struct DeckView: View {
                     let deck = geo.frame(in: .global)
                     TabView(selection: $shownPage) {
                         ForEach(pages) { page in
-                            ScrollView {
-                                grid(page, columns: columns, cell: cell, deck: deck)
-                                    .padding(DeckSize.padding)
-                                    .animation(.snappy, value: columns)
-                                    .frame(maxWidth: .infinity, alignment: .top)
-                                    // A tap on empty space ends Arrange mode; Buttons take their own taps.
-                                    .contentShape(.rect)
-                                    .onTapGesture { if arranging { arranging = false } }
-                            }
-                            .scrollPosition(Binding(get: { scrollPositions[page.persistentModelID] ?? ScrollPosition() },
-                                                    set: { scrollPositions[page.persistentModelID] = $0 }))
-                            .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { _, geometry in
-                                scrollGeometries[page.persistentModelID] = geometry
-                            }
-                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
-                                scrollFrames[page.persistentModelID] = $0
-                            }
-                            .accessibilityIdentifier("deck.grid")
-                            .accessibilityValue("\(columns) columns")
-                            .navigationTitle(page.name)
-                            .tag(Optional(page.persistentModelID))
+                            pageScroll(page, columns: columns, cell: cell, deck: deck)
                         }
                     }
                     .tabViewStyle(.page(indexDisplayMode: pages.count > 1 ? .always : .never))
@@ -178,6 +158,31 @@ struct DeckView: View {
                 pinchStart = nil
                 pinchGuard.ended()
             }
+    }
+
+    /// One Page's scrolling grid. Its own function, so the type-checker doesn't time out on body.
+    private func pageScroll(_ page: Page, columns: Int, cell: CGSize, deck: CGRect) -> some View {
+        ScrollView {
+            grid(page, columns: columns, cell: cell, deck: deck)
+                .padding(DeckSize.padding)
+                .animation(.snappy, value: columns)
+                .frame(maxWidth: .infinity, alignment: .top)
+                // A tap on empty space ends Arrange mode; Buttons take their own taps.
+                .contentShape(.rect)
+                .onTapGesture { if arranging { arranging = false } }
+        }
+        .scrollPosition(Binding(get: { scrollPositions[page.persistentModelID] ?? ScrollPosition() },
+                                set: { scrollPositions[page.persistentModelID] = $0 }))
+        .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { _, geometry in
+            scrollGeometries[page.persistentModelID] = geometry
+        }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+            scrollFrames[page.persistentModelID] = $0
+        }
+        .accessibilityIdentifier("deck.grid")
+        .accessibilityValue("\(columns) columns")
+        .navigationTitle(page.name)
+        .tag(Optional(page.persistentModelID))
     }
 
     private enum Tile: Hashable {

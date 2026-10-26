@@ -40,6 +40,8 @@ unsigned g_message_seq = 0;
 lv_obj_t* g_grid = nullptr;
 lv_obj_t* g_sending = nullptr;  // the Button whose Send is in flight, dimmed until its result
 lv_obj_t* g_maybe = nullptr;    // a Maybe typed Button stays orange until the next tap
+lv_timer_t* g_flash = nullptr;  // ends the 700 ms result color on g_flashed
+lv_obj_t* g_flashed = nullptr;
 bool g_busy = false;  // a pair or Send is queued or running: further taps are refused, not queued
 
 // The Pair screen: which Nearby Computer, the Pairing code and the short Pin from `phrased pair`.
@@ -77,6 +79,7 @@ void showNet() {
     if (s.messageSeq != g_message_seq) {
         g_message_seq = s.messageSeq;
         g_busy = false;
+        lv_obj_remove_local_style_prop(g_status, LV_STYLE_TEXT_COLOR, 0);  // only Send results are colored
         if (g_pairing_now) {  // also after Cancel and reopen, so a reopened screen still gets its result
             g_pairing_now = false;
             if (g_pair != nullptr) pairResult(s);
@@ -302,13 +305,30 @@ void clearColor(lv_obj_t* button) {
     lv_obj_remove_local_style_prop(g_status, LV_STYLE_TEXT_COLOR, 0);
 }
 
-void endFlash(lv_timer_t* t) { clearColor(static_cast<lv_obj_t*>(lv_timer_get_user_data(t))); }
+void endFlash(lv_timer_t*) {
+    clearColor(g_flashed);
+    g_flash = nullptr;  // a one-shot timer deletes itself
+    g_flashed = nullptr;
+}
+
+// Ends any result color now, so an older timer can't clear a newer one.
+void clearResult() {
+    if (g_flash != nullptr) {
+        lv_timer_delete(g_flash);
+        endFlash(nullptr);
+    }
+    if (g_maybe != nullptr) {
+        clearColor(g_maybe);
+        g_maybe = nullptr;
+    }
+}
 
 // Like the iPhone: the Button flashes green (Typed), orange (Maybe typed) or red (Not typed) for
 // 700 ms, the status line in the same color. Maybe typed stays until the next tap.
 void sendResult(const net::Snapshot& s) {
     lv_obj_t* b = g_sending;
     g_sending = nullptr;
+    clearResult();
     lv_obj_remove_state(b, LV_STATE_DISABLED);
     const lv_color_t c = lv_palette_main(s.ok ? LV_PALETTE_GREEN : s.maybe ? LV_PALETTE_ORANGE : LV_PALETTE_RED);
     lv_obj_set_style_bg_color(b, c, 0);
@@ -317,8 +337,9 @@ void sendResult(const net::Snapshot& s) {
         g_maybe = b;
         return;
     }
-    lv_timer_t* t = lv_timer_create(endFlash, 700, b);
-    lv_timer_set_repeat_count(t, 1);
+    g_flashed = b;
+    g_flash = lv_timer_create(endFlash, 700, nullptr);
+    lv_timer_set_repeat_count(g_flash, 1);
 }
 
 void sendPhrase(size_t i) {
@@ -398,10 +419,7 @@ void openConfirm(size_t i) {
 }
 
 void tap(size_t i) {
-    if (g_maybe != nullptr) {
-        clearColor(g_maybe);
-        g_maybe = nullptr;
-    }
+    clearResult();
     if (g_busy) {
         lv_label_set_text(g_status, "Still sending the last one: wait for it");
         return;

@@ -1,6 +1,7 @@
 # PlatformIO pre-build script: writes src/wifi_secrets.h (gitignored) from an ini file with
 # [wifi] ssid / password, PHRASEDECK_WIFI_INI or ~/.config/phrasedeck/panel-wifi.ini. Without the
 # file (CI), both are empty and the panel skips Wi-Fi. The values never go into build flags or logs.
+# configparser strips spaces around a value and keeps quotes: write `password = abc`, not "abc".
 import configparser
 import os
 

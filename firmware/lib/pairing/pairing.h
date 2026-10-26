@@ -1,4 +1,4 @@
-// Pairing the panel with a Helper: the keypad state for the Pairing code, and the short Pin check
+// Pairing the panel with a Helper: the short Pin check, the whole Pin check and the /pair reply
 // (docs/launch/lan-threat-checklist.md, "Panel pairing").
 #pragma once
 
@@ -6,23 +6,6 @@
 #include <string>
 
 namespace pairing {
-
-class CodeEntry {
-  public:
-    static constexpr size_t kLength = 6;
-
-    void digit(char d) {
-        if (d >= '0' && d <= '9' && code_.size() < kLength) code_ += d;
-    }
-    void back() {
-        if (!code_.empty()) code_.pop_back();
-    }
-    bool complete() const { return code_.size() == kLength; }
-    const std::string& code() const { return code_; }
-
-  private:
-    std::string code_;
-};
 
 // True if the short Pin typed from `phrased pair` (exactly 16 hex once spaces are dropped, any case)
 // starts certSha256, the lowercase hex SHA-256 of the Helper's TLS certificate. Only then may the

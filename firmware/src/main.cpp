@@ -7,6 +7,7 @@
 #include <lvgl.h>
 
 #include <string>
+#include <vector>
 
 #include "board_pins.h"
 #include "display_driver.h"
@@ -26,6 +27,16 @@ const char* const kPhrases[] = {
 lv_obj_t* g_status = nullptr;
 lv_obj_t* g_net = nullptr;
 unsigned g_net_version = 0;
+std::string g_last_message;
+
+// The Pair screen: which Nearby Computer, the Pairing code and the short Pin from `phrased pair`.
+lv_obj_t* g_pair = nullptr;
+lv_obj_t* g_pair_list = nullptr;
+lv_obj_t* g_code = nullptr;
+lv_obj_t* g_pin = nullptr;
+lv_obj_t* g_keyboard = nullptr;
+size_t g_pair_index = 0;
+std::vector<std::string> g_nearby_names;  // as of the last snapshot, for the Pair screen
 
 // Shows Wi-Fi and the Nearby Helpers; runs on the LVGL loop, reading the net task's snapshot.
 void showNet() {
@@ -44,12 +55,114 @@ void showNet() {
             text += (i ? ", " : "") + s.nearby[i].name;
         }
     }
+    if (!s.paired.empty()) text += "  |  Paired: " + s.paired;
     lv_label_set_text(g_net, text.c_str());
+    g_nearby_names.clear();
+    for (const auto& h : s.nearby) g_nearby_names.push_back(h.name);
+    if (s.message != g_last_message) {
+        g_last_message = s.message;
+        lv_label_set_text(g_status, s.message.c_str());
+    }
+}
+
+void closePair(lv_event_t*) {
+    lv_obj_delete(g_pair);
+    g_pair = nullptr;
+}
+
+void submitPair(lv_event_t*) {
+    const std::string code = lv_textarea_get_text(g_code);
+    const std::string pin = lv_textarea_get_text(g_pin);
+    if (code.size() != 6 || g_nearby_names.empty()) return;
+    net::pair(g_pair_index, code, pin);
+    lv_label_set_text_fmt(g_status, "Pairing with %s...", g_nearby_names[g_pair_index].c_str());
+    closePair(nullptr);
+}
+
+void pickComputer(lv_event_t* e) {
+    g_pair_index = reinterpret_cast<size_t>(lv_event_get_user_data(e));
+    for (uint32_t i = 0; i < lv_obj_get_child_count(g_pair_list); ++i) {
+        lv_obj_t* b = lv_obj_get_child(g_pair_list, i);
+        if (i == g_pair_index) lv_obj_add_state(b, LV_STATE_CHECKED);
+        else lv_obj_remove_state(b, LV_STATE_CHECKED);
+    }
+}
+
+void focusField(lv_event_t* e) {
+    lv_obj_t* ta = static_cast<lv_obj_t*>(lv_event_get_target(e));
+    lv_keyboard_set_textarea(g_keyboard, ta);
+    lv_keyboard_set_mode(g_keyboard, ta == g_code ? LV_KEYBOARD_MODE_NUMBER : LV_KEYBOARD_MODE_TEXT_LOWER);
+}
+
+lv_obj_t* field(lv_obj_t* parent, const char* placeholder, const char* accepted, uint32_t max) {
+    lv_obj_t* ta = lv_textarea_create(parent);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_placeholder_text(ta, placeholder);
+    lv_textarea_set_accepted_chars(ta, accepted);
+    lv_textarea_set_max_length(ta, max);
+    lv_obj_set_style_text_font(ta, &lv_font_montserrat_28, 0);
+    lv_obj_set_width(ta, 360);
+    lv_obj_add_event_cb(ta, focusField, LV_EVENT_FOCUSED, nullptr);
+    return ta;
+}
+
+lv_obj_t* textButton(lv_obj_t* parent, const char* text, lv_event_cb_t cb, void* data) {
+    lv_obj_t* b = lv_button_create(parent);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, data);
+    lv_obj_t* l = lv_label_create(b);
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
+    lv_label_set_text(l, text);
+    lv_obj_center(l);
+    return b;
+}
+
+void openPair(lv_event_t*) {
+    if (g_pair != nullptr) return;
+    g_pair = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(g_pair, board::LCD_WIDTH, board::LCD_HEIGHT);
+    lv_obj_set_style_bg_color(g_pair, lv_color_hex(0x111418), 0);
+    lv_obj_set_style_radius(g_pair, 0, 0);
+
+    lv_obj_t* title = lv_label_create(g_pair);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
+    lv_label_set_text(title, g_nearby_names.empty()
+                                 ? "No Computer is Nearby. Start phrased with -lan, then try again."
+                                 : "Run `phrased pair` on the Computer, then enter its code and Pin for a panel.");
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    g_pair_list = lv_obj_create(g_pair);
+    lv_obj_set_size(g_pair_list, 380, 150);
+    lv_obj_align(g_pair_list, LV_ALIGN_TOP_LEFT, 0, 36);
+    lv_obj_set_flex_flow(g_pair_list, LV_FLEX_FLOW_COLUMN);
+    g_pair_index = 0;
+    for (size_t i = 0; i < g_nearby_names.size(); ++i) {
+        lv_obj_t* b = textButton(g_pair_list, g_nearby_names[i].c_str(), pickComputer, reinterpret_cast<void*>(i));
+        lv_obj_add_flag(b, LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_set_width(b, lv_pct(100));
+        if (i == 0) lv_obj_add_state(b, LV_STATE_CHECKED);
+    }
+
+    g_code = field(g_pair, "Pairing code", "0123456789", 6);
+    lv_obj_align(g_code, LV_ALIGN_TOP_RIGHT, 0, 36);
+    g_pin = field(g_pair, "Pin for a panel", "0123456789abcdefABCDEF ", 19);
+    lv_obj_align(g_pin, LV_ALIGN_TOP_RIGHT, 0, 100);
+
+    lv_obj_t* cancel = textButton(g_pair, "Cancel", closePair, nullptr);
+    lv_obj_align(cancel, LV_ALIGN_TOP_RIGHT, -130, 160);
+    lv_obj_t* go = textButton(g_pair, "Pair", submitPair, nullptr);
+    lv_obj_align(go, LV_ALIGN_TOP_RIGHT, 0, 160);
+
+    g_keyboard = lv_keyboard_create(g_pair);
+    lv_obj_set_size(g_keyboard, board::LCD_WIDTH - 32, 220);
+    lv_obj_align(g_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_keyboard_set_textarea(g_keyboard, g_code);
+    lv_keyboard_set_mode(g_keyboard, LV_KEYBOARD_MODE_NUMBER);
 }
 
 void onTap(lv_event_t* e) {
     const char* phrase = static_cast<const char*>(lv_event_get_user_data(e));
-    lv_label_set_text_fmt(g_status, "Tapped: %s", phrase);
+    lv_label_set_text_fmt(g_status, "Sending: %s", phrase);
+    net::type(phrase);
     Serial.printf("tap: \"%s\" at %d,%d\n", phrase, touch_x(), touch_y());
 }
 
@@ -63,11 +176,14 @@ void buildPage() {
     lv_label_set_text(g_status, "Phrasedeck panel: tap a Button");
     lv_obj_align(g_status, LV_ALIGN_TOP_LEFT, 16, 12);
 
+    lv_obj_t* pairButton = textButton(screen, "Pair", openPair, nullptr);
+    lv_obj_align(pairButton, LV_ALIGN_TOP_RIGHT, -8, 4);
+
     g_net = lv_label_create(screen);
     lv_obj_set_style_text_font(g_net, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(g_net, lv_color_hex(0x8A929C), 0);
     lv_label_set_text(g_net, "");
-    lv_obj_align(g_net, LV_ALIGN_TOP_RIGHT, -16, 12);
+    lv_obj_align(g_net, LV_ALIGN_TOP_RIGHT, -100, 12);
 
     // 4 x 2 Buttons below the status line.
     static const int32_t cols[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
@@ -122,7 +238,32 @@ void setup() {
                   heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }
 
+#ifdef PANEL_SERIAL_COMMANDS
+// Dev builds only (env crowpanel-dev): the same pair and Send the screen does, from serial.
+void serialCommands() {
+    static std::string line;
+    while (Serial.available()) {
+        const char ch = static_cast<char>(Serial.read());
+        if (ch != '\n') {
+            if (ch != '\r' && line.size() < 256) line += ch;
+            continue;
+        }
+        if (line.rfind("pair ", 0) == 0) {
+            char code[8] = {}, pin[24] = {};
+            unsigned index = 0;
+            if (sscanf(line.c_str() + 5, "%u %7s %23[0-9a-fA-F ]", &index, code, pin) == 3) net::pair(index, code, pin);
+        } else if (line.rfind("type ", 0) == 0) {
+            net::type(line.substr(5));
+        }
+        line.clear();
+    }
+}
+#endif
+
 void loop() {
+#ifdef PANEL_SERIAL_COMMANDS
+    serialCommands();
+#endif
     touch_poll();
     showNet();
     lv_timer_handler();

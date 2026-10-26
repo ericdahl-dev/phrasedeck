@@ -16,6 +16,8 @@ struct Helper {
 };
 
 struct Snapshot {
+    std::string paired;   // the paired Computer's name, empty when not paired
+    std::string message;  // the last pairing or Send result, for the status line
     bool wifiConfigured = false;
     bool wifiUp = false;
     std::string ip;
@@ -31,5 +33,12 @@ bool start();
 unsigned version();
 
 Snapshot snapshot();
+
+// Pairs with Nearby Helper `index` (as of the last snapshot) using the Pairing code and the short
+// Pin from `phrased pair`. The code is sent only if that Helper's cert matches the short Pin.
+void pair(size_t index, const std::string& code, const std::string& shortPin);
+
+// Types text on the paired Computer, checked against its whole Pin.
+void type(const std::string& text);
 
 }  // namespace net

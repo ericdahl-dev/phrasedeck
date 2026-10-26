@@ -1,3 +1,4 @@
+import os
 import SwiftUI
 
 struct PhraseButton: View {
@@ -10,6 +11,8 @@ struct PhraseButton: View {
     var editDeck: (() -> Void)?
     /// Set in Arrange mode: taps don't type, and the move actions replace the menu.
     var arrange: ArrangeRole?
+    /// Set when holding then moving the finger should carry the Button into Arrange mode (#96).
+    var startDrag: (() -> Void)?
 
     /// What a Button needs in Arrange mode (#81, spec section 11).
     struct ArrangeRole {
@@ -65,6 +68,7 @@ struct PhraseButton: View {
                 Button("Delete", systemImage: "trash", role: .destructive, action: delete)
             }
         }
+        .modifier(DragSource(uid: phrase.uid, start: startDrag))
         .overlay {
             // Reduce Motion: a dashed outline instead of the jiggle.
             if arrange != nil && reduceMotion {
@@ -172,20 +176,37 @@ extension Arrangement.Nudge {
     }
 }
 
+/// Holding a Button opens its menu; moving the finger then hands off to a system drag (spec
+/// section 3, #96). Only applied when `start` is set.
+private struct DragSource: ViewModifier {
+    let uid: String
+    let start: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        if let start {
+            content.onDrag {
+                dragLog.notice("onDrag \(uid, privacy: .public)")
+                start()
+                return NSItemProvider(object: uid as NSString)
+            }
+        } else {
+            content
+        }
+    }
+}
+
 /// The Arrange mode jiggle: about 1.5° each way, about 0.13 s a swing, each Button starting at its
 /// own point so they don't move in step (spec section 10).
 private struct Jiggle: ViewModifier {
     let active: Bool
     @State private var phase = Double.random(in: 0..<1)
 
+    // One structure whether jiggling or not: swapping views mid-drag would end a system drag that
+    // just switched Arrange mode on (#96).
     func body(content: Content) -> some View {
-        if active {
-            TimelineView(.animation) { timeline in
-                let t = timeline.date.timeIntervalSinceReferenceDate / 0.26 + phase
-                content.rotationEffect(.degrees(1.5 * sin(t * 2 * .pi)))
-            }
-        } else {
-            content
+        TimelineView(.animation(paused: !active)) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate / 0.26 + phase
+            content.rotationEffect(.degrees(active ? 1.5 * sin(t * 2 * .pi) : 0))
         }
     }
 }

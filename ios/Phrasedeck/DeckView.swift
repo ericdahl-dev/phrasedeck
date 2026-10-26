@@ -1,5 +1,11 @@
+import os
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
+
+/// The hold-then-drag path, for a device test (#96): `log collect`, then filter on this subsystem
+/// and category.
+let dragLog = Logger(subsystem: "dev.ericdahl.phrasedeck", category: "drag")
 
 /// One page per swipe, each a grid of phrase buttons and a "+" tile. Long-press a button to
 /// edit or delete it; pinch to change how many columns there are.
@@ -21,6 +27,9 @@ struct DeckView: View {
     @State private var arranging = false
     /// The Button being dragged, if any.
     @State private var carry: Carry?
+    /// A Button held long enough for a system drag (#96). It's carried once the finger moves, so
+    /// holding alone still opens the menu.
+    @State private var lifted: Carry?
     /// True while a finger drags; SwiftUI resets it even when a drag is canceled without onEnded.
     @GestureState private var dragging = false
     @State private var shownPage: PersistentIdentifier?
@@ -232,7 +241,9 @@ struct DeckView: View {
                                          pinchGuard: pinchGuard,
                                          edit: { editing = .existing(phrase) }, delete: { deleting = (phrase, nil) },
                                          editDeck: { arranging = true },
-                                         arrange: arranging ? role(phrase, at: spot, on: page, columns: columns) : nil)
+                                         arrange: arranging ? role(phrase, at: spot, on: page, columns: columns) : nil,
+                                         startDrag: systemCarry(spot, size: size, on: page, step: step,
+                                                                columns: columns, deck: deck))
                         }
                     case .add:
                         addTile(page)
@@ -256,6 +267,49 @@ struct DeckView: View {
                alignment: .topLeading)
         .onGeometryChange(for: CGPoint.self) { $0.frame(in: .global).origin } action: {
             gridOrigins[page.persistentModelID] = $0
+        }
+        // A Button carried by a system drag, from normal mode (spec section 3, #96).
+        .onDrop(of: [.plainText], delegate: CarryDrop(
+            moved: { location in
+                if let l = lifted {
+                    lifted = nil
+                    carry = l
+                    arranging = true
+                    dragLog.notice("carry from lift")
+                }
+                guard carry != nil, let grid = gridOrigins[page.persistentModelID] else { return }
+                carry?.finger = CGPoint(x: grid.x + location.x, y: grid.y + location.y)
+                tick()
+                dragLog.notice("target \(carry?.target?.column ?? -1) \(carry?.target?.row ?? -1)")
+            },
+            // Off this grid: show the Page as it was until the drag comes back.
+            exited: { carry?.dwell = Dwell(); carry?.target = nil; carry?.preview = [:] },
+            dropped: {
+                let carrying = carry != nil
+                drop()
+                return carrying
+            }))
+    }
+
+    /// Holding a Button lifts it for a system drag; moving the finger then closes the menu, starts
+    /// Arrange mode and carries it (spec section 3). The system draws the Button under the finger.
+    /// Set in Arrange mode too, so the drag source outlives the switch into it.
+    private func systemCarry(_ spot: Packing.Placement<Tile>, size: CGSize, on page: Page, step: CGSize,
+                             columns: Int, deck: CGRect) -> () -> Void {
+        {
+            // An Arrange-mode finger drag already under way is kept.
+            if carry?.system ?? true {
+                let grid = gridOrigins[page.persistentModelID] ?? .zero
+                let grab = CGSize(width: size.width / 2, height: size.height / 2)
+                var c = Carry(tile: spot.id, columns: spot.columns, rows: spot.rows, from: page.persistentModelID,
+                              page: page.persistentModelID, pickup: Arrangement.resolve(items(page), columns: columns),
+                              step: step, columnCount: columns, deck: deck, size: size, grab: grab, system: true)
+                // Until the first drop update, the finger is where the Button was.
+                c.finger = CGPoint(x: grid.x + CGFloat(spot.x) * step.width + grab.width,
+                                   y: grid.y + CGFloat(spot.y) * step.height + grab.height)
+                lifted = c
+            }
+            dragLog.notice("lift at \(spot.x) \(spot.y) arranging=\(arranging)")
         }
     }
 
@@ -343,6 +397,7 @@ struct DeckView: View {
 
     /// Saves the carried Button where the finger let go, on the Page it's over.
     private func drop() {
+        dragLog.notice("drop system=\(carry?.system ?? false) target=\(carry?.target?.column ?? -1) \(carry?.target?.row ?? -1)")
         defer { withAnimation(.snappy) { carry = nil } }
         guard let c = carry, let target = c.target, case .phrase(let id) = c.tile,
               let from = pages.first(where: { $0.persistentModelID == c.from }),
@@ -363,7 +418,7 @@ struct DeckView: View {
 
     /// The carried Button, drawn above the Pages under the finger.
     @ViewBuilder private func carriedButton(deck: CGRect) -> some View {
-        if let c = carry, case .phrase(let id) = c.tile,
+        if let c = carry, !c.system, case .phrase(let id) = c.tile,
            let phrase = pages.lazy.flatMap(\.sortedPhrases).first(where: { $0.persistentModelID == id }) {
             PhraseButton(phrase: phrase, metrics: DeckSize.metrics(button: c.size))
                 .frame(width: c.size.width, height: c.size.height)
@@ -403,6 +458,8 @@ struct DeckView: View {
         let size: CGSize
         /// Where in the Button the finger holds it.
         let grab: CGSize
+        /// Carried by a system drag (#96), which draws its own preview and drops through `CarryDrop`.
+        var system = false
         var finger = CGPoint.zero
         var dwell = Dwell()
         var edge = EdgeFlip()
@@ -545,4 +602,28 @@ final class PinchGuard {
     }
 
     var blocksTaps: Bool { isPinching || Date() < quietUntil }
+}
+
+/// Passes a system drag's location in the grid and its drop to the Deck (#96).
+private struct CarryDrop: DropDelegate {
+    let moved: (CGPoint) -> Void
+    let exited: () -> Void
+    let dropped: () -> Bool
+
+    func dropEntered(info: DropInfo) { dragLog.notice("dropEntered") }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        moved(info.location)
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        dragLog.notice("dropExited")
+        exited()
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        dragLog.notice("performDrop")
+        return dropped()
+    }
 }

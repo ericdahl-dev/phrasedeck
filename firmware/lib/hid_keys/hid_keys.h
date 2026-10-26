@@ -36,9 +36,13 @@ class Pacer {
     explicit Pacer(uint32_t intervalMs) : interval_(intervalMs) {}
     bool due(uint32_t now) {
         if (started_ && now - last_ < interval_) return false;
+        sentAt(now);
+        return true;
+    }
+    // Counts a report sent outside due(), so the next one still waits a whole interval.
+    void sentAt(uint32_t now) {
         started_ = true;
         last_ = now;
-        return true;
     }
 
   private:
@@ -50,28 +54,29 @@ class Pacer {
 // Sends a Plan's keys as HID reports: each key's press, then an all-zero release, one report per
 // Pacer interval. step(), done() and result() belong to the BLE task; call step() often. notify
 // sends one report and returns false when the stack didn't take it: that report goes again next
-// interval, or at once for a release, so a held key can't reach the host's auto-repeat. After about
-// a second of failures in a row it gives up. cancel() and drop() may come from any task and take
+// interval, or at once for a release, so a held key can't reach the host's auto-repeat. After a
+// second of failures in a row it gives up. The BLE task must yield between steps (vTaskDelay or an
+// event wait), so a release retry doesn't spin. cancel() and drop() may come from any task and take
 // effect at the next step(): cancel() still sends the release of a key that's down (a user cancel);
-// drop() stops at once (a disconnect, where the host drops held keys itself).
+// drop() stops at once (a disconnect, where the host drops held keys itself) and wins over a cancel.
 class Sender {
   public:
     // Stopped: ended partway, so some keys were typed.
     enum class Result { Running, Sent, Stopped, NotSent };
 
     Sender(std::vector<Key> keys, uint32_t intervalMs)
-        : keys_(std::move(keys)), pacer_(intervalMs), end_(keys_.size() * 2),
-          maxFailures_(intervalMs == 0 ? 50 : 1000 / intervalMs) {}
+        : keys_(std::move(keys)), pacer_(intervalMs), end_(keys_.size() * 2) {}
 
-    void cancel() { request_ = kCancel; }
-    void drop() { request_ = kDrop; }
+    void cancel() { request_.fetch_or(kCancel); }
+    void drop() { request_.fetch_or(kDrop); }
 
     template <typename Notify>
     void step(uint32_t now, Notify notify) {
-        switch (request_.exchange(kNone)) {
-            case kCancel: end_ = std::min(end_, next_ + next_ % 2); break;
-            case kDrop: end_ = next_; break;
-            default: break;
+        const uint8_t request = request_.exchange(0);
+        if (request & kDrop) {
+            end_ = next_;
+        } else if (request & kCancel) {
+            end_ = std::min(end_, next_ + next_ % 2);
         }
         if (done()) return;
         const bool releaseRetry = next_ % 2 == 1 && failures_ > 0;
@@ -80,7 +85,10 @@ class Sender {
         if (notify(report)) {
             next_++;
             failures_ = 0;
-        } else if (++failures_ >= maxFailures_) {
+            pacer_.sentAt(now);
+        } else if (failures_++ == 0) {
+            firstFailure_ = now;
+        } else if (now - firstFailure_ >= kGiveUpMs) {
             end_ = next_;
         }
     }
@@ -93,14 +101,15 @@ class Sender {
     }
 
   private:
-    enum : uint8_t { kNone, kCancel, kDrop };
+    enum : uint8_t { kCancel = 1, kDrop = 2 };  // bits, so a drop isn't lost to a later cancel
+    static constexpr uint32_t kGiveUpMs = 1000;
     std::vector<Key> keys_;
     Pacer pacer_;
     size_t end_;       // reports to send in all; cancel(), drop() and failures cut it short
     size_t next_ = 0;  // even: the next key's press; odd: its release
     uint32_t failures_ = 0;  // notify failures in a row
-    uint32_t maxFailures_;
-    std::atomic<uint8_t> request_{kNone};
+    uint32_t firstFailure_ = 0;
+    std::atomic<uint8_t> request_{0};
 };
 
 // The status line after a Bluetooth send, and whether it's green. The panel can't see what landed,

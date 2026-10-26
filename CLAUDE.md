@@ -54,7 +54,7 @@ CI (`test`) runs `xcodebuild test -scheme Phrasedeck -destination "id=<iPhone si
 and UI tests. Keep at most one Simulator booted on this Mac across all sessions, and shut down
 any you boot.
 
-The required checks are `linux`, `macos`, `test` and `spelling`.
+The required checks are `linux`, `macos`, `test`, `firmware` and `spelling`.
 
 ## Release
 

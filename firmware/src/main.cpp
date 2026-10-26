@@ -30,7 +30,7 @@ const char* const kStarterPhrases[] = {
 constexpr const char* kPhrasesFile = "/phrases.json";
 phrases::List g_phrases;
 lv_obj_t* g_confirm = nullptr;  // the "Send?" overlay
-size_t g_confirm_index = 0;
+uint32_t g_confirm_id = 0, g_confirm_edit = 0;  // the edit it shows, not an index that can shift
 
 lv_obj_t* g_status = nullptr;
 lv_obj_t* g_net = nullptr;
@@ -198,10 +198,14 @@ void loadPhrases() {
     if (!LittleFS.begin(true)) Serial.println("phrasedeck panel: LittleFS unavailable, Buttons won't be saved");
     File f = LittleFS.open(kPhrasesFile, "r");
     if (f) {
-        const String json = f.readString();
+        std::string json(f.size(), '\0');
+        const bool read = f.read(reinterpret_cast<uint8_t*>(&json[0]), json.size()) == json.size();
         f.close();
-        if (g_phrases.fromJson(json.c_str())) return;
-        Serial.println("phrasedeck panel: saved Buttons didn't load, using the starter Buttons");
+        if (read && g_phrases.fromJson(json)) return;
+        // Kept, not overwritten: a load can fail for a reason that passes (out of memory).
+        LittleFS.remove("/phrases.bad");
+        LittleFS.rename(kPhrasesFile, "/phrases.bad");
+        Serial.println("phrasedeck panel: saved Buttons didn't load, kept as /phrases.bad; using the starter Buttons");
     }
     for (const char* p : kStarterPhrases) g_phrases.add(p, p);
     for (size_t i = 0; i < g_phrases.size(); ++i) g_phrases.confirmed(i);
@@ -232,14 +236,20 @@ void confirmSend(lv_event_t* e) {
         lv_label_set_text(g_status, "Still sending the last one: wait for it");
         return;
     }
-    g_phrases.confirmed(g_confirm_index);
+    const size_t i = g_phrases.find(g_confirm_id, g_confirm_edit);
+    if (i >= g_phrases.size()) {
+        lv_label_set_text(g_status, "That Button changed: tap it again");
+        return;
+    }
+    g_phrases.confirmed(i);
     if (!savePhrases()) Serial.println("phrasedeck panel: couldn't save the confirm");
-    sendPhrase(g_confirm_index);
+    sendPhrase(i);
 }
 
 // Eric (#98): a Phrase added or edited on the web page shows its text and asks first.
 void openConfirm(size_t i) {
-    g_confirm_index = i;
+    g_confirm_id = g_phrases.at(i).id;
+    g_confirm_edit = g_phrases.at(i).edit;
     g_confirm = lv_obj_create(lv_screen_active());
     lv_obj_set_size(g_confirm, board::LCD_WIDTH, board::LCD_HEIGHT);
     lv_obj_center(g_confirm);

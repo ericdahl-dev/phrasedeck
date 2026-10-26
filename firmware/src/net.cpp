@@ -188,6 +188,8 @@ void handleType(const Request& req, Snapshot& s) {
 // each, so 100 characters take about 4 s.
 constexpr uint32_t kKeyIntervalMs = 20;
 
+std::atomic<bool> g_cancelSend{false};  // set from the UI task, read by the send loop
+
 void handleBluetoothType(const Request& req, Snapshot& s) {
     const hid_keys::Plan p = hid_keys::plan(req.raw, false);
     hid_keys::Said r = p.ok ? hid_keys::Said{"Not sent: no Computer connected over Bluetooth", false}
@@ -196,10 +198,19 @@ void handleBluetoothType(const Request& req, Snapshot& s) {
         hid_keys::Sender sender(p.keys, kKeyIntervalMs);
         const unsigned disconnects = ble_keyboard::disconnects();
         const auto notify = [](const hid_keys::Key& k) { return ble_keyboard::send(k.mod, k.code); };
+        g_cancelSend.store(false);
         while (!sender.done()) {
             if (ble_keyboard::disconnects() != disconnects) sender.drop();
+            if (g_cancelSend.exchange(false)) sender.cancel();
             sender.step(millis(), notify);
             vTaskDelay(1);  // Sender needs a yield between steps
+        }
+        // Gave up partway on a stalled link: a key may still be down on the Computer, which would
+        // auto-repeat it once the link recovers. Keep offering a release until it goes or the link does.
+        const uint32_t start = millis();
+        while (sender.result() == hid_keys::Sender::Result::Stopped && ble_keyboard::disconnects() == disconnects &&
+               millis() - start < 6000 && !ble_keyboard::send(0, 0)) {
+            vTaskDelay(pdMS_TO_TICKS(kKeyIntervalMs));
         }
         r = hid_keys::said(sender.result());
     }
@@ -324,6 +335,8 @@ bool setBluetooth(bool on) {
     p.end();
     return ok;
 }
+
+void cancelBluetoothSend() { g_cancelSend.store(true); }
 
 void openBluetoothPairing(uint32_t ms) {
     if (g_bluetooth) ble_keyboard::openPairing(ms);

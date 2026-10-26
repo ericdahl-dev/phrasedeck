@@ -55,6 +55,9 @@ bool type(const std::string& text, const std::string& phrase = "", uint32_t edit
 // The Mode, stored in the panel NVS. A change takes effect at the next restart. False if not saved.
 bool setBluetooth(bool on);
 
+// Stops a Bluetooth Send partway, releasing any key that's down. Any task.
+void cancelBluetoothSend();
+
 // Lets a new Computer pair over Bluetooth for ms, replacing the paired one. Bluetooth Mode only.
 void openBluetoothPairing(uint32_t ms);
 

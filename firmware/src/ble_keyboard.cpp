@@ -11,6 +11,7 @@
 #include <host/ble_store.h>
 
 #include <atomic>
+#include <map>
 #include <vector>
 
 #include "bt_pairing.h"
@@ -48,6 +49,7 @@ const uint8_t kReportMap[] = {
 
 constexpr int kNone = -1;
 
+std::atomic<bool> g_started{false};  // NimBLE is up: the API is safe to call
 BLEServer* g_server = nullptr;
 BLECharacteristic* g_input = nullptr;
 
@@ -72,9 +74,14 @@ bool windowOpen() {
 
 void bump() { g_version.fetch_add(1); }
 
+// Rejected connections whose keys go at disconnect: NimBLE writes the peer's CCCDs after the
+// ENC_CHANGE callback, so deleting there would leave orphans that can evict the Computer's bond.
+// Host task only (connect, security and disconnect callbacks all run there).
+std::map<uint16_t, ble_addr_t> g_forget;
+
 // Ends the connection and forgets its keys, so it has to pair again (inside a window) to return.
 void reject(const ble_gap_conn_desc& d) {
-    ble_store_util_delete_peer(&d.peer_id_addr);
+    g_forget[d.conn_handle] = d.peer_id_addr;
     ble_gap_terminate(d.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
 }
 
@@ -106,6 +113,13 @@ class ServerCallbacks : public BLEServerCallbacks {
         if (g_pairing.compare_exchange_strong(expected, kNone)) g_passkey.store(kNone);
         expected = handle;
         g_subscribed.compare_exchange_strong(expected, kNone);
+        const auto forget = g_forget.find(d->conn_handle);
+        if (forget != g_forget.end()) {
+            ble_store_util_delete_peer(&forget->second);
+            g_forget.erase(forget);
+        }
+        // advertiseOnDisconnect is off by default: without this the Computer can't come back.
+        if (g_trusted.load() == kNone || windowOpen()) BLEDevice::startAdvertising();
         bump();
     }
 };
@@ -213,6 +227,7 @@ bool start() {
     adv->addServiceUUID(hid->hidService()->getUUID());
     adv->setScanResponse(true);
     BLEDevice::startAdvertising();
+    g_started.store(true);
     return true;
 }
 
@@ -225,7 +240,7 @@ bool ready() {
 
 bool send(uint8_t mod, uint8_t code) {
     const int handle = g_trusted.load();
-    if (handle == kNone || g_subscribed.load() != handle || g_input == nullptr) return false;
+    if (!g_started.load() || handle == kNone || g_subscribed.load() != handle) return false;
     // Notify only the paired Computer's connection. NimBLE ignores the input report's encryption
     // permission, so a plain notify() would also reach a stranger who connected and subscribed.
     const uint8_t report[8] = {mod, 0, code, 0, 0, 0, 0, 0};
@@ -237,6 +252,7 @@ bool send(uint8_t mod, uint8_t code) {
 unsigned disconnects() { return g_disconnects.load(); }
 
 void openPairing(uint32_t ms) {
+    if (!g_started.load()) return;
     portENTER_CRITICAL(&g_windowLock);
     g_window.open(millis(), ms);
     portEXIT_CRITICAL(&g_windowLock);
@@ -248,7 +264,7 @@ void closePairing() {
     portENTER_CRITICAL(&g_windowLock);
     g_window.close();
     portEXIT_CRITICAL(&g_windowLock);
-    if (g_trusted.load() != kNone) BLEDevice::stopAdvertising();
+    if (g_started.load() && g_trusted.load() != kNone) BLEDevice::stopAdvertising();
     bump();
 }
 

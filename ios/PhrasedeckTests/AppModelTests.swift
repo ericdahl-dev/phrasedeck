@@ -178,7 +178,7 @@ struct AppModelTests {
         let feedback = await model.send(text: "yes", enter: true)
 
         #expect(feedback.tone == .red)
-        #expect(feedback.message?.contains("nothing was sent") == true)
+        #expect(feedback.message?.hasPrefix("Not typed:") == true)
     }
 
     @Test(arguments: ["192.168.1.20", "10.0.0.5", "fe80::1", "169.254.1.1", "8.8.8.8", "mac.local", "Mac.local."])

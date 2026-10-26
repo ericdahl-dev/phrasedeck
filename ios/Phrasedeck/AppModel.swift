@@ -22,7 +22,27 @@ final class AppModel {
     enum RouteKind: Equatable { case home, tailnet }
 
     struct Feedback: Equatable {
-        enum Tone: Equatable { case success, amber, red }
+        enum Tone: Equatable {
+            case success, amber, red
+
+            /// What happened to the text, shown on the Button and leading every message.
+            var word: String {
+                switch self {
+                case .success: "Typed"
+                case .amber: "Maybe typed"
+                case .red: "Not typed"
+                }
+            }
+
+            /// SF Symbol shown with `word`.
+            var symbol: String {
+                switch self {
+                case .success: "checkmark"
+                case .amber: "questionmark"
+                case .red: "xmark"
+                }
+            }
+        }
         let tone: Tone
         let message: String?
         /// Set after a 401, so the banner can offer "Pair again".

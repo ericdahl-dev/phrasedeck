@@ -60,6 +60,12 @@ bool g_pairing_now = false;       // a pair from this screen is in flight: it st
 size_t g_pair_index = 0;
 std::vector<net::Helper> g_pair_helpers;  // copied when the Pair screen opens, so it can't shift
 
+// First boot (#98): set the admin password, pair, then see the web editor's address. Until a
+// password is set, the panel starts here again.
+enum class Wizard { Off, Password, Pair, Web };
+Wizard g_wizard = Wizard::Off;
+void wizardWeb();
+
 void closePair(lv_event_t*);
 void pairResult(const net::Snapshot& s);
 void sendResult(const net::Snapshot& s);
@@ -96,6 +102,7 @@ void closePair(lv_event_t*) {
     if (g_pair == nullptr) return;
     lv_obj_delete_async(g_pair);  // not during its own event
     g_pair = nullptr;
+    if (g_wizard == Wizard::Pair) wizardWeb();  // paired or skipped
 }
 
 // Queues a request unless one is already in flight; says so either way.
@@ -217,9 +224,11 @@ void openPair(lv_event_t*) {
 
     lv_obj_t* title = lv_label_create(g_pair);
     g_pair_helpers = net::snapshot().nearby;
-    lv_label_set_text(title, g_pair_helpers.empty()
-                                 ? "No Computer nearby. Start phrased with -lan, then open this again."
-                                 : "Run phrased pair on the Computer, then enter the 6-digit code and the Pin.");
+    lv_label_set_text(title, (std::string(g_wizard == Wizard::Pair ? "Step 2 of 3: " : "") +
+                              (g_pair_helpers.empty()
+                                   ? "No Computer nearby. Start phrased with -lan, then open this again."
+                                   : "Run phrased pair on the Computer, then enter the code and Pin."))
+                                 .c_str());
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     g_pair_list = lv_obj_create(g_pair);
@@ -244,7 +253,7 @@ void openPair(lv_event_t*) {
     g_pin_count = lv_label_create(g_pair);
     lv_obj_align(g_pin_count, LV_ALIGN_TOP_RIGHT, -(300 + 12), 112);  // left of the Pin field
 
-    lv_obj_t* cancel = textButton(g_pair, "Cancel", closePair, nullptr);
+    lv_obj_t* cancel = textButton(g_pair, g_wizard == Wizard::Pair ? "Skip" : "Cancel", closePair, nullptr);
     lv_obj_set_size(cancel, 140, 56);
     lv_obj_align(cancel, LV_ALIGN_TOP_RIGHT, -156, 156);
     g_pair_go = textButton(g_pair, "Pair", submitPair, nullptr);
@@ -477,6 +486,48 @@ lv_obj_t* tabText(lv_obj_t* tab, const char* text) {
     return l;
 }
 
+// The web editor's address, as text and a QR code for a phone camera.
+void webEditorInfo(lv_obj_t* parent) {
+    lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
+    const std::string ip = net::snapshot().ip;
+    if (ip.empty()) {
+        tabText(parent, "Connect the panel to Wi-Fi to edit its Buttons from a browser.");
+        return;
+    }
+    const std::string url = "https://" + ip + "/";
+    tabText(parent, ("Edit this panel's Buttons from a browser on your home network:\n" + url +
+                     "\n\nThe web editor comes in a later firmware update.").c_str());
+    lv_obj_t* qr = lv_qrcode_create(parent);
+    lv_qrcode_set_size(qr, 180);
+    lv_qrcode_update(qr, url.data(), url.size());
+}
+
+lv_obj_t* g_wizard_web = nullptr;
+
+void finishWizard(lv_event_t*) {
+    g_wizard = Wizard::Off;
+    if (g_wizard_web == nullptr) return;
+    lv_obj_delete_async(g_wizard_web);
+    g_wizard_web = nullptr;
+}
+
+void wizardWeb() {
+    g_wizard = Wizard::Web;
+    g_wizard_web = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(g_wizard_web, board::LCD_WIDTH, board::LCD_HEIGHT);
+    lv_obj_set_style_radius(g_wizard_web, 0, 0);
+    lv_obj_t* title = lv_label_create(g_wizard_web);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
+    lv_label_set_text(title, "Step 3 of 3: the web editor");
+    lv_obj_t* body = lv_obj_create(g_wizard_web);
+    lv_obj_set_size(body, board::LCD_WIDTH - 220, board::LCD_HEIGHT - 100);
+    lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 48);
+    lv_obj_set_style_border_width(body, 0, 0);
+    lv_obj_set_style_pad_all(body, 0, 0);
+    webEditorInfo(body);
+    lv_obj_align(textButton(g_wizard_web, "Done", finishWizard, nullptr), LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+}
+
 void openSettings() {
     if (g_settings != nullptr) return;
     const net::Snapshot s = net::snapshot();
@@ -494,18 +545,7 @@ void openSettings() {
     tabText(computer, s.paired.empty() ? "Not paired with a Computer." : ("Paired with " + s.paired + ".").c_str());
     textButton(computer, "Pair a Computer", choosePair, nullptr);
 
-    lv_obj_t* web = lv_tabview_add_tab(tabs, "Web editor");
-    lv_obj_set_flex_flow(web, LV_FLEX_FLOW_COLUMN);
-    if (s.ip.empty()) {
-        tabText(web, "Connect the panel to Wi-Fi to edit its Buttons from a browser.");
-    } else {
-        const std::string url = "https://" + s.ip + "/";
-        tabText(web, ("Edit this panel's Buttons from a browser on your home network:\n" + url +
-                      "\n\nThe web editor comes in a later firmware update.").c_str());
-        lv_obj_t* qr = lv_qrcode_create(web);
-        lv_qrcode_set_size(qr, 180);
-        lv_qrcode_update(qr, url.data(), url.size());
-    }
+    webEditorInfo(lv_tabview_add_tab(tabs, "Web editor"));
 
     lv_obj_t* password = lv_tabview_add_tab(tabs, "Password");
     lv_obj_set_flex_flow(password, LV_FLEX_FLOW_COLUMN);
@@ -542,7 +582,14 @@ void submitLock(lv_event_t*) {
             lv_label_set_text(g_lock_note, "Couldn't save it: try again");
         } else {
             closeLock(nullptr);
-            openSettings();
+            if (g_wizard != Wizard::Password) {
+                openSettings();
+            } else if (net::snapshot().paired.empty()) {
+                g_wizard = Wizard::Pair;
+                openPair(nullptr);
+            } else {
+                wizardWeb();
+            }
         }
         return;
     }
@@ -585,7 +632,9 @@ void openLock(bool setting) {
 
     lv_obj_t* title = lv_label_create(g_lock);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
-    lv_label_set_text(title, setting ? "Set an admin password" : "Admin password");
+    lv_label_set_text(title, g_wizard == Wizard::Password ? "Step 1 of 3: set an admin password"
+                             : setting                    ? "Set an admin password"
+                                                          : "Admin password");
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     g_pw = passwordField(setting ? "At least 8 characters" : "Password");
@@ -599,9 +648,11 @@ void openLock(bool setting) {
     lv_obj_set_style_min_width(eye, 64, 0);
     lv_obj_align(eye, LV_ALIGN_TOP_LEFT, 476, 44);
 
-    lv_obj_t* cancel = textButton(g_lock, "Cancel", closeLock, nullptr);
-    lv_obj_set_style_bg_color(cancel, lv_color_hex(0x3A3F47), 0);
-    lv_obj_align(cancel, LV_ALIGN_TOP_RIGHT, 0, 0);
+    if (g_wizard != Wizard::Password) {  // a new panel must get a password before anything else
+        lv_obj_t* cancel = textButton(g_lock, "Cancel", closeLock, nullptr);
+        lv_obj_set_style_bg_color(cancel, lv_color_hex(0x3A3F47), 0);
+        lv_obj_align(cancel, LV_ALIGN_TOP_RIGHT, 0, 0);
+    }
     lv_obj_t* ok = textButton(g_lock, setting ? "Save" : "Open", submitLock, nullptr);
     lv_obj_align(ok, LV_ALIGN_TOP_RIGHT, 0, 76);
 
@@ -699,8 +750,13 @@ void setup() {
     touch_init();
     loadPhrases();
     buildPage();
-    if (!panel_store::begin()) Serial.println("phrasedeck panel: panel NVS unavailable");
+    const bool store = panel_store::begin();
+    if (!store) Serial.println("phrasedeck panel: panel NVS unavailable");
     admin::begin();
+    if (store && !admin::isSet()) {  // without NVS a password can't be saved: don't trap the panel in Step 1
+        g_wizard = Wizard::Password;
+        openLock(true);
+    }
     if (!net::start()) Serial.println("phrasedeck panel: net task didn't start");
     lv_timer_handler();
     panel_mcu::backlightOn();  // last, so the screen doesn't flash on boot

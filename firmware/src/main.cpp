@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <LittleFS.h>
+#include <Preferences.h>
 #include <Wire.h>
 #include <esp_heap_caps.h>
 #include <lvgl.h>
@@ -10,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "admin.h"
+#include "admin_password.h"
 #include "board_pins.h"
 #include "display_driver.h"
 #include "net.h"
@@ -184,6 +187,8 @@ lv_obj_t* field(lv_obj_t* parent, const char* placeholder, const char* accepted,
 lv_obj_t* textButton(lv_obj_t* parent, const char* text, lv_event_cb_t cb, void* data) {
     lv_obj_t* b = lv_button_create(parent);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, data);
+    lv_obj_set_style_min_width(b, 140, 0);  // big enough for a finger (UI review)
+    lv_obj_set_style_min_height(b, 64, 0);
     lv_obj_t* l = lv_label_create(b);
     lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
     lv_label_set_text(l, text);
@@ -434,6 +439,189 @@ void tap(size_t i) {
 
 void onTap(lv_event_t* e) { tap(reinterpret_cast<size_t>(lv_event_get_user_data(e))); }
 
+// Settings (#98): one screen of tabs behind the admin password. The first time, the gear asks for a
+// new password instead, typed twice.
+lv_obj_t* g_lock = nullptr;  // the password screen
+lv_obj_t* g_pw = nullptr;
+lv_obj_t* g_pw_again = nullptr;  // only when setting one
+lv_obj_t* g_lock_note = nullptr;
+lv_obj_t* g_lock_keyboard = nullptr;
+lv_obj_t* g_settings = nullptr;
+
+void closeLock(lv_event_t*) {
+    if (g_lock == nullptr) return;
+    // Overwrite the typed password before LVGL frees its buffers.
+    lv_textarea_set_text(g_pw, "");
+    if (g_pw_again != nullptr) lv_textarea_set_text(g_pw_again, "");
+    lv_obj_delete_async(g_lock);
+    g_lock = nullptr;
+}
+
+void closeSettings(lv_event_t*) {
+    if (g_settings == nullptr) return;
+    lv_obj_delete_async(g_settings);
+    g_settings = nullptr;
+}
+
+void openLock(bool setting);
+
+void changePassword(lv_event_t*) { openLock(true); }
+
+void choosePair(lv_event_t*) { openPair(nullptr); }
+
+lv_obj_t* tabText(lv_obj_t* tab, const char* text) {
+    lv_obj_t* l = lv_label_create(tab);
+    lv_obj_set_width(l, lv_pct(100));
+    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(l, text);
+    return l;
+}
+
+void openSettings() {
+    if (g_settings != nullptr) return;
+    const net::Snapshot s = net::snapshot();
+    g_settings = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(g_settings, board::LCD_WIDTH, board::LCD_HEIGHT);
+    lv_obj_set_style_radius(g_settings, 0, 0);
+    lv_obj_set_style_pad_all(g_settings, 0, 0);
+    lv_obj_remove_flag(g_settings, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t* tabs = lv_tabview_create(g_settings);
+    lv_tabview_set_tab_bar_size(tabs, 64);
+    lv_obj_set_size(tabs, board::LCD_WIDTH, board::LCD_HEIGHT);
+
+    lv_obj_t* computer = lv_tabview_add_tab(tabs, "Computer");
+    lv_obj_set_flex_flow(computer, LV_FLEX_FLOW_COLUMN);
+    tabText(computer, s.paired.empty() ? "Not paired with a Computer." : ("Paired with " + s.paired + ".").c_str());
+    textButton(computer, "Pair a Computer", choosePair, nullptr);
+
+    lv_obj_t* web = lv_tabview_add_tab(tabs, "Web editor");
+    lv_obj_set_flex_flow(web, LV_FLEX_FLOW_COLUMN);
+    if (s.ip.empty()) {
+        tabText(web, "Connect the panel to Wi-Fi to edit its Buttons from a browser.");
+    } else {
+        const std::string url = "https://" + s.ip + "/";
+        tabText(web, ("Edit this panel's Buttons from a browser on your home network:\n" + url +
+                      "\n\nThe web editor comes in a later firmware update.").c_str());
+        lv_obj_t* qr = lv_qrcode_create(web);
+        lv_qrcode_set_size(qr, 180);
+        lv_qrcode_update(qr, url.data(), url.size());
+    }
+
+    lv_obj_t* password = lv_tabview_add_tab(tabs, "Password");
+    lv_obj_set_flex_flow(password, LV_FLEX_FLOW_COLUMN);
+    tabText(password, "The admin password guards Settings here and, later, the web editor.");
+    textButton(password, "Change password", changePassword, nullptr);
+
+    lv_obj_t* mode = lv_tabview_add_tab(tabs, "Mode");
+    lv_obj_set_flex_flow(mode, LV_FLEX_FLOW_COLUMN);
+    tabText(mode, "How the panel types:\n" LV_SYMBOL_OK "  Over Wi-Fi, through phrased on the Computer\n"
+                  "     As a Bluetooth keyboard: coming in a later update (#94)");
+
+    lv_obj_t* close = textButton(g_settings, LV_SYMBOL_CLOSE, closeSettings, nullptr);
+    lv_obj_set_size(close, 64, 64);
+    lv_obj_set_style_min_width(close, 64, 0);
+    lv_obj_align(close, LV_ALIGN_TOP_RIGHT, 0, 0);
+    // The tab bar fills the width; leave room for the close button.
+    lv_obj_set_width(lv_tabview_get_tab_bar(tabs), board::LCD_WIDTH - 64);
+}
+
+void showHide(lv_event_t*) {
+    const bool hidden = lv_textarea_get_password_mode(g_pw);
+    lv_textarea_set_password_mode(g_pw, !hidden);
+    if (g_pw_again != nullptr) lv_textarea_set_password_mode(g_pw_again, !hidden);
+}
+
+void submitLock(lv_event_t*) {
+    const std::string pw = lv_textarea_get_text(g_pw);
+    if (g_pw_again != nullptr) {
+        if (pw.size() < admin_password::kMinLength) {
+            lv_label_set_text(g_lock_note, "At least 8 characters");
+        } else if (pw != lv_textarea_get_text(g_pw_again)) {
+            lv_label_set_text(g_lock_note, "The two don't match");
+        } else if (!admin::set(pw)) {
+            lv_label_set_text(g_lock_note, "Couldn't save it: try again");
+        } else {
+            closeLock(nullptr);
+            openSettings();
+        }
+        return;
+    }
+    uint32_t wait = 0;
+    switch (admin::check(pw, wait)) {
+        case admin::Check::Ok:
+            closeLock(nullptr);
+            openSettings();
+            break;
+        case admin::Check::Wrong:
+            lv_textarea_set_text(g_pw, "");
+            lv_label_set_text(g_lock_note, "Wrong password");
+            break;
+        case admin::Check::Wait:
+            lv_label_set_text_fmt(g_lock_note, "Too many wrong tries: wait %u s", static_cast<unsigned>((wait + 999) / 1000));
+            break;
+    }
+}
+
+void focusLockField(lv_event_t* e) { lv_keyboard_set_textarea(g_lock_keyboard, static_cast<lv_obj_t*>(lv_event_get_target(e))); }
+
+lv_obj_t* passwordField(const char* placeholder) {
+    lv_obj_t* ta = lv_textarea_create(g_lock);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_password_mode(ta, true);
+    lv_textarea_set_placeholder_text(ta, placeholder);
+    lv_textarea_set_max_length(ta, 64);
+    lv_obj_set_style_text_font(ta, &lv_font_montserrat_28, 0);
+    lv_obj_set_width(ta, 460);
+    lv_obj_add_event_cb(ta, focusLockField, LV_EVENT_CLICKED, nullptr);
+    return ta;
+}
+
+void openLock(bool setting) {
+    closeLock(nullptr);
+    g_lock = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(g_lock, board::LCD_WIDTH, board::LCD_HEIGHT);
+    lv_obj_set_style_radius(g_lock, 0, 0);
+    lv_obj_remove_flag(g_lock, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* title = lv_label_create(g_lock);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
+    lv_label_set_text(title, setting ? "Set an admin password" : "Admin password");
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    g_pw = passwordField(setting ? "At least 8 characters" : "Password");
+    lv_obj_align(g_pw, LV_ALIGN_TOP_LEFT, 0, 44);
+    g_pw_again = nullptr;
+    if (setting) {
+        g_pw_again = passwordField("Type it again");
+        lv_obj_align(g_pw_again, LV_ALIGN_TOP_LEFT, 0, 108);
+    }
+    lv_obj_t* eye = textButton(g_lock, LV_SYMBOL_EYE_OPEN, showHide, nullptr);
+    lv_obj_set_style_min_width(eye, 64, 0);
+    lv_obj_align(eye, LV_ALIGN_TOP_LEFT, 476, 44);
+
+    lv_obj_t* cancel = textButton(g_lock, "Cancel", closeLock, nullptr);
+    lv_obj_set_style_bg_color(cancel, lv_color_hex(0x3A3F47), 0);
+    lv_obj_align(cancel, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_t* ok = textButton(g_lock, setting ? "Save" : "Open", submitLock, nullptr);
+    lv_obj_align(ok, LV_ALIGN_TOP_RIGHT, 0, 76);
+
+    g_lock_note = lv_label_create(g_lock);
+    lv_label_set_text(g_lock_note, "");
+    lv_obj_set_style_text_color(g_lock_note, lv_palette_main(LV_PALETTE_ORANGE), 0);
+    lv_obj_align(g_lock_note, LV_ALIGN_TOP_LEFT, 0, setting ? 172 : 108);
+
+    g_lock_keyboard = lv_keyboard_create(g_lock);
+    lv_obj_set_size(g_lock_keyboard, board::LCD_WIDTH - 32, 220);
+    lv_obj_align(g_lock_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_keyboard_set_textarea(g_lock_keyboard, g_pw);
+    lv_obj_add_event_cb(g_lock_keyboard, submitLock, LV_EVENT_READY, nullptr);
+}
+
+void openGear(lv_event_t*) {
+    if (g_settings != nullptr || g_lock != nullptr) return;
+    openLock(!admin::isSet());
+}
+
 void buildPage() {
     // LVGL's default theme is light; dark, so every screen and overlay matches without per-object colors.
     lv_display_set_theme(display_lvgl(), lv_theme_default_init(display_lvgl(), lv_palette_main(LV_PALETTE_BLUE),
@@ -444,8 +632,11 @@ void buildPage() {
 
     // Header: status on the left, then Wi-Fi and the paired Computer, then Pair. Fixed widths, so
     // long text ends in "..." instead of running into the next one.
-    lv_obj_t* pairButton = textButton(screen, "Pair", openPair, nullptr);
-    lv_obj_align(pairButton, LV_ALIGN_TOP_RIGHT, -8, 4);
+    lv_obj_t* gear = textButton(screen, LV_SYMBOL_SETTINGS, openGear, nullptr);
+    lv_obj_set_size(gear, 64, 48);
+    lv_obj_set_style_min_width(gear, 64, 0);
+    lv_obj_set_style_min_height(gear, 48, 0);
+    lv_obj_align(gear, LV_ALIGN_TOP_RIGHT, -8, 2);
 
     g_net = lv_label_create(screen);
     lv_obj_set_width(g_net, 240);
@@ -509,6 +700,7 @@ void setup() {
     loadPhrases();
     buildPage();
     if (!panel_store::begin()) Serial.println("phrasedeck panel: panel NVS unavailable");
+    admin::begin();
     if (!net::start()) Serial.println("phrasedeck panel: net task didn't start");
     lv_timer_handler();
     panel_mcu::backlightOn();  // last, so the screen doesn't flash on boot
@@ -563,6 +755,27 @@ void serialCommands() {
                 out[len++] = '\n';
                 Serial.write(reinterpret_cast<const uint8_t*>(out), len);
             }
+        } else if (line.rfind("setpw ", 0) == 0) {
+            Serial.printf("setpw: %s\n", admin::set(line.substr(6)) ? "set" : "refused");
+        } else if (line.rfind("checkpw ", 0) == 0) {
+            uint32_t wait = 0;
+            const uint32_t start = millis();
+            const admin::Check c = admin::check(line.substr(8), wait);
+            Serial.printf("checkpw: %s, wait %u ms, took %u ms\n",
+                          c == admin::Check::Ok ? "ok" : c == admin::Check::Wrong ? "wrong" : "wait",
+                          static_cast<unsigned>(wait), static_cast<unsigned>(millis() - start));
+        } else if (line == "clearpw") {  // dev only: back to "no admin password", as on a new panel
+            Preferences p;
+            if (p.begin("admin", false, panel_store::kPartition)) p.clear();
+            Serial.println("clearpw: done, reboot to load");
+        } else if (line == "gear") {
+            openGear(nullptr);
+        } else if (line.rfind("pw ", 0) == 0 && g_lock != nullptr) {  // types into the password screen, then OK
+            lv_textarea_set_text(g_pw, line.c_str() + 3);
+            if (g_pw_again != nullptr) lv_textarea_set_text(g_pw_again, line.c_str() + 3);
+            submitLock(nullptr);
+        } else if (line.rfind("tab ", 0) == 0 && g_settings != nullptr) {
+            lv_tabview_set_active(lv_obj_get_child(g_settings, 0), strtoul(line.c_str() + 4, nullptr, 10), LV_ANIM_OFF);
         } else if (line == "pairscreen") {
             openPair(nullptr);
         } else if (line.rfind("key ", 0) == 0 && g_pair != nullptr) {  // as the on-screen keys would

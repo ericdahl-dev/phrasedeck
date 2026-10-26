@@ -8,12 +8,19 @@ void setUp() {}
 void tearDown() {}
 
 // A stand-in for PBKDF2 (mbedTLS isn't in the host build): mixes password, salt and iterations.
-void fakeKdf(const std::string& pw, const uint8_t* salt, size_t saltLen, uint32_t iterations, uint8_t* out) {
+bool fakeKdf(const std::string& pw, const uint8_t* salt, size_t saltLen, uint32_t iterations, uint8_t* out) {
     for (size_t i = 0; i < admin_password::kHashLen; ++i) {
         out[i] = static_cast<uint8_t>(iterations + i);
         for (char c : pw) out[i] = static_cast<uint8_t>(out[i] * 31 + c);
         out[i] ^= salt[i % saltLen];
     }
+    return true;
+}
+
+// PBKDF2 can fail (out of heap for its HMAC context) and leave out unwritten.
+bool g_kdf_fails = false;
+bool flakyKdf(const std::string& pw, const uint8_t* salt, size_t saltLen, uint32_t iterations, uint8_t* out) {
+    return !g_kdf_fails && fakeKdf(pw, salt, saltLen, iterations, out);
 }
 
 const uint8_t kSalt[admin_password::kSaltLen] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
@@ -56,11 +63,24 @@ void test_iteration_counts_are_capped() {
     TEST_ASSERT_FALSE(admin_password::make("long enough", kSalt, admin_password::kMaxIterations + 1, fakeKdf, r));
 }
 
+// A KDF that fails never sets a password and never lets one in, whatever is left in its buffer.
+void test_a_failed_kdf_neither_sets_nor_opens() {
+    admin_password::Record r, kept;
+    TEST_ASSERT_TRUE(admin_password::make("correct horse", kSalt, 10000, flakyKdf, r));
+    kept = r;
+    g_kdf_fails = true;
+    TEST_ASSERT_FALSE(admin_password::check(r, "correct horse", flakyKdf));
+    TEST_ASSERT_FALSE(admin_password::make("another horse", kSalt, 10000, flakyKdf, r));
+    TEST_ASSERT_EQUAL_MEMORY(kept.hash, r.hash, admin_password::kHashLen);
+    g_kdf_fails = false;
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_only_the_right_password_checks_out);
     RUN_TEST(test_short_passwords_and_low_iteration_counts_are_refused);
     RUN_TEST(test_the_record_round_trips_as_a_blob_and_bad_blobs_dont_load);
     RUN_TEST(test_iteration_counts_are_capped);
+    RUN_TEST(test_a_failed_kdf_neither_sets_nor_opens);
     return UNITY_END();
 }

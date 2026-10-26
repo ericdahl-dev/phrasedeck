@@ -15,6 +15,7 @@
 #include "admin_password.h"
 #include "board_pins.h"
 #include "display_driver.h"
+#include "factory_reset.h"
 #include "net.h"
 #include "panel_store.h"
 #include "pairing.h"
@@ -831,6 +832,42 @@ void applyWebEdit() {
     web_server::editDone(seq, ok);
 }
 
+// A finger on the top-left corner at power-on: count down on screen, and after 10 s erase the
+// panel NVS (admin password, lockouts, web key and cert, pairing) and the saved Buttons.
+void factoryResetIfHeld() {
+    touch_poll();
+    if (!touch_pressed()) return;
+    lv_obj_t* label = lv_label_create(lv_screen_active());
+    lv_obj_center(label);
+    panel_mcu::backlightOn();
+    const uint32_t start = millis();
+    factory_reset::Hold hold;
+    while ((hold = factory_reset::check(touch_pressed(), touch_x(), touch_y(), millis() - start)) ==
+           factory_reset::Hold::Holding) {
+        const uint32_t left = (factory_reset::kHoldMs - (millis() - start) + 999) / 1000;
+        lv_label_set_text_fmt(label, "Keep holding to erase this panel: %u s", static_cast<unsigned>(left));
+        lv_timer_handler();
+        delay(20);
+        touch_poll();
+    }
+    if (hold == factory_reset::Hold::Reset) {
+        lv_label_set_text(label, "Erased. Lift your finger.");
+        lv_timer_handler();
+        const bool nvs = panel_store::erase();
+        const bool fs = LittleFS.begin(true);
+        for (const char* f : {kPhrasesFile, "/phrases.tmp", "/phrases.bad"}) {
+            if (fs && LittleFS.exists(f)) LittleFS.remove(f);
+        }
+        Serial.printf("phrasedeck panel: factory reset, NVS %s, Buttons %s\n", nvs ? "erased" : "FAILED",
+                      fs ? "erased" : "FAILED");
+        while (touch_pressed()) {  // so the finger doesn't land on the wizard
+            delay(20);
+            touch_poll();
+        }
+    }
+    lv_obj_delete(label);
+}
+
 }  // namespace
 
 void setup() {
@@ -849,6 +886,7 @@ void setup() {
         esp_restart();
     }
     touch_init();
+    factoryResetIfHeld();
     loadPhrases();
     buildPage();
     const bool store = panel_store::begin();

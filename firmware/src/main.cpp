@@ -6,6 +6,7 @@
 #include <Preferences.h>
 #include <Wire.h>
 #include <esp_heap_caps.h>
+#include <esp_partition.h>
 #include <lvgl.h>
 
 #include <string>
@@ -15,6 +16,7 @@
 #include "admin_password.h"
 #include "board_pins.h"
 #include "display_driver.h"
+#include "factory_reset.h"
 #include "net.h"
 #include "panel_store.h"
 #include "pairing.h"
@@ -831,6 +833,55 @@ void applyWebEdit() {
     web_server::editDone(seq, ok);
 }
 
+// A finger on the top-left corner at power-on: count down on screen, and after 10 s erase the
+// panel NVS (admin password, lockouts, web key and cert, pairing) and the saved Buttons.
+void factoryResetIfHeld() {
+    using factory_reset::Hold;
+    auto inCorner = [] { return factory_reset::check(touch_pressed(), touch_x(), touch_y(), 0) == Hold::Holding; };
+    // Several reads, not one: the first after the GT911 reset can miss a finger already down.
+    for (const uint32_t t = millis(); !inCorner() && millis() - t < 500;) {
+        delay(20);
+        touch_poll();
+    }
+    if (!inCorner()) return;
+    lv_obj_t* label = lv_label_create(lv_screen_active());
+    lv_obj_center(label);
+    const uint32_t start = millis();
+    Hold hold;
+    while ((hold = factory_reset::check(touch_pressed(), touch_x(), touch_y(), millis() - start)) == Hold::Holding) {
+        const uint32_t left = (factory_reset::kHoldMs - (millis() - start) + 999) / 1000;
+        lv_label_set_text_fmt(label, "Keep holding to erase this panel: %u s", static_cast<unsigned>(left));
+        lv_timer_handler();
+        panel_mcu::backlightOn();  // after the first draw, so the screen doesn't flash
+        delay(20);
+        touch_poll();
+    }
+    if (hold == Hold::Reset) {
+        lv_label_set_text(label, "Erasing...");
+        lv_timer_handler();
+        const bool nvs = panel_store::erase();
+        // The whole Buttons partition, not LittleFS.format(): that only rewrites the superblock.
+        // loadPhrases() then makes a fresh filesystem.
+        const esp_partition_t* buttons =
+            esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
+        const bool fs = buttons != nullptr && esp_partition_erase_range(buttons, 0, buttons->size) == ESP_OK;
+        // A crash dump can hold a Token or password from RAM.
+        const esp_partition_t* dump =
+            esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);
+        const bool core = dump == nullptr || esp_partition_erase_range(dump, 0, dump->size) == ESP_OK;
+        Serial.printf("phrasedeck panel: factory reset, NVS %s, Buttons %s, core dump %s\n", nvs ? "erased" : "FAILED",
+                      fs ? "erased" : "FAILED", core ? "erased" : "FAILED");
+        lv_label_set_text(label, nvs && fs && core ? "Erased. Lift your finger." : "Erase FAILED. Lift your finger.");
+        lv_timer_handler();
+        // So the finger doesn't land on the wizard; capped, so a bezel pressing the corner can't hang boot.
+        for (const uint32_t t = millis(); touch_pressed() && millis() - t < 5000;) {
+            delay(20);
+            touch_poll();
+        }
+    }
+    lv_obj_delete(label);
+}
+
 }  // namespace
 
 void setup() {
@@ -849,6 +900,7 @@ void setup() {
         esp_restart();
     }
     touch_init();
+    factoryResetIfHeld();
     loadPhrases();
     buildPage();
     const bool store = panel_store::begin();

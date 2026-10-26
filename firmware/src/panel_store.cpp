@@ -16,4 +16,6 @@ bool begin() {
     return err == ESP_OK;
 }
 
+bool erase() { return nvs_flash_erase_partition(kPartition) == ESP_OK; }
+
 }  // namespace panel_store

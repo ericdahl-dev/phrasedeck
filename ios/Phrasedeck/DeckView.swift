@@ -111,6 +111,8 @@ struct DeckView: View {
         .onChange(of: arranging) { _, now in if !now { carry = nil } }
         // A canceled drag (a system edge swipe, a banner) skips onEnded: drop it without saving,
         // so the next drag can't save this Button.
+        // A rotation mid-drag changes the layout under the finger; drop nothing into the new one.
+        .onChange(of: layoutWidth) { carry = nil }
         .onChange(of: dragging) { _, now in if !now { withAnimation(.snappy) { carry = nil } } }
         // A finger resting still sends no updates, so the dwell and the edge timer are checked here.
         .task(id: carry == nil) {

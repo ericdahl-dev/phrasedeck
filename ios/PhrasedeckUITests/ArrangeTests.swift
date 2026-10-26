@@ -5,6 +5,8 @@ import XCTest
 final class ArrangeTests: XCTestCase {
     @MainActor
     func launch(arrange: Bool) -> XCUIApplication {
+        // A test that rotates (or a crashed run) can leave the Simulator in landscape.
+        XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestingStubHelper"] + (arrange ? ["-arrangeEnabled"] : [])
         app.launch()

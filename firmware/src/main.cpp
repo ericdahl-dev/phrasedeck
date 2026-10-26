@@ -21,6 +21,7 @@
 #include "panel_mcu.h"
 #include "phrases.h"
 #include "touch.h"
+#include "web_server.h"
 
 namespace {
 
@@ -496,8 +497,11 @@ void webEditorInfo(lv_obj_t* parent) {
         return;
     }
     const std::string url = "https://" + ip + "/";
-    tabText(parent, ("Edit this panel's Buttons from a browser on your home network:\n" + url +
-                     "\n\nThe web editor comes in a later firmware update.").c_str());
+    std::string fp = web_server::fingerprint();
+    if (fp.size() == 95) fp.insert(48, "\n");  // two lines of 16 bytes
+    tabText(parent, ("Open " + url + " in a browser on your home network and log in with the admin password.\n"
+                     "The browser warns about the certificate: check its SHA-256 fingerprint is\n" +
+                     (fp.empty() ? std::string("(still being made: open this again in a moment)") : fp)).c_str());
     lv_obj_t* qr = lv_qrcode_create(parent);
     lv_qrcode_set_size(qr, 180);
     lv_qrcode_update(qr, url.data(), url.size());
@@ -802,6 +806,7 @@ void setup() {
         openLock(true);
     }
     if (!net::start()) Serial.println("phrasedeck panel: net task didn't start");
+    if (store && !web_server::start()) Serial.println("phrasedeck panel: web task didn't start");
     lv_timer_handler();
     panel_mcu::backlightOn();  // last, so the screen doesn't flash on boot
     Serial.printf("phrasedeck panel: ready, internal heap free %u, PSRAM free %u\n",

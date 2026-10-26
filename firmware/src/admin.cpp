@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <esp_random.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <mbedtls/pkcs5.h>
 
 #include "admin_password.h"
@@ -14,6 +16,13 @@ namespace {
 
 // Measured on the S3 (#98): 572 ms per set or check at this count.
 constexpr uint32_t kIterations = 10000;
+
+// The touchscreen (LVGL loop) and the web login (httpd task) share the record and the lockout.
+SemaphoreHandle_t g_mutex = xSemaphoreCreateMutex();
+struct Hold {
+    Hold() { xSemaphoreTake(g_mutex, portMAX_DELAY); }
+    ~Hold() { xSemaphoreGive(g_mutex); }
+};
 
 admin_password::Record g_record;
 bool g_set = false;
@@ -33,6 +42,7 @@ bool saveFailures() {
 }  // namespace
 
 void begin() {
+    Hold hold;
     Preferences p;
     if (!p.begin("admin", true, panel_store::kPartition)) return;
     uint8_t blob[admin_password::kBlobLen];
@@ -41,9 +51,13 @@ void begin() {
     g_lockout = lockout::loaded(p.getUInt("failures", 0), millis());
 }
 
-bool isSet() { return g_set; }
+bool isSet() {
+    Hold hold;
+    return g_set;
+}
 
 bool set(const std::string& password) {
+    Hold hold;
     uint8_t salt[admin_password::kSaltLen];
     esp_fill_random(salt, sizeof salt);
     admin_password::Record r;
@@ -65,6 +79,7 @@ bool set(const std::string& password) {
 }
 
 Check check(const std::string& password, uint32_t& waitMs) {
+    Hold hold;
     waitMs = lockout::waitMs(g_lockout, millis());
     if (waitMs > 0) return Check::Wait;
     if (!g_set) return Check::Wrong;

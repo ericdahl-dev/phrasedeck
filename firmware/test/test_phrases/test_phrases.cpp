@@ -1,5 +1,7 @@
 #include <unity.h>
 
+#include <string>
+
 #include "phrases.h"
 
 void setUp() {}
@@ -57,12 +59,39 @@ void test_a_bad_file_is_refused_and_the_list_kept() {
     phrases::List list;
     list.add("Keep", "me");
     TEST_ASSERT_FALSE(list.fromJson("not json"));
-    TEST_ASSERT_FALSE(list.fromJson("{\"buttons\":[{\"label\":\"\",\"text\":\"x\"}]}"));
+    TEST_ASSERT_FALSE(list.fromJson("{\"buttons\":[{\"id\":1,\"edit\":1,\"label\":\"\",\"text\":\"x\"}]}"));
+    TEST_ASSERT_FALSE(list.fromJson("{\"buttons\":[{\"label\":\"a\",\"text\":\"x\"}]}"));  // no id
+    TEST_ASSERT_FALSE(list.fromJson("{\"buttons\":[{\"id\":1,\"edit\":1,\"label\":\"a\",\"text\":\"x\"},"
+                                    "{\"id\":1,\"edit\":1,\"label\":\"b\",\"text\":\"y\"}]}"));  // same id twice
     std::string many = "{\"buttons\":[";
-    for (size_t i = 0; i <= phrases::kMaxButtons; ++i) many += std::string(i ? "," : "") + "{\"label\":\"b\",\"text\":\"p\"}";
+    for (size_t i = 0; i <= phrases::kMaxButtons; ++i) many += std::string(i ? "," : "") + "{\"id\":" + std::to_string(i + 1) + ",\"edit\":1,\"label\":\"b\",\"text\":\"p\"}";
     TEST_ASSERT_FALSE(list.fromJson(many + "]}"));
     TEST_ASSERT_EQUAL(1, list.size());
     TEST_ASSERT_EQUAL_STRING("Keep", list.at(0).label.c_str());
+}
+
+// Each Button has an id that never changes and an edit counter that goes up on every edit, so the
+// Helper can notify the first time it types a changed Phrase (#98). Ids survive deletes and a
+// save and load, and a deleted id is never reused.
+void test_ids_stay_put_and_edits_count() {
+    phrases::List list;
+    list.add("A", "a");
+    list.add("B", "b");
+    const uint32_t idB = list.at(1).id;
+    TEST_ASSERT_EQUAL_UINT32(1, list.at(1).edit);
+    list.edit(1, "B", "b2");
+    list.edit(1, "B", "b3");
+    TEST_ASSERT_EQUAL_UINT32(3, list.at(1).edit);
+    list.remove(0);
+    list.add("C", "c");
+    TEST_ASSERT_EQUAL_UINT32(idB, list.at(0).id);
+    TEST_ASSERT_NOT_EQUAL(idB, list.at(1).id);
+    phrases::List back;
+    TEST_ASSERT_TRUE(back.fromJson(list.toJson()));
+    TEST_ASSERT_EQUAL_UINT32(idB, back.at(0).id);
+    TEST_ASSERT_EQUAL_UINT32(3, back.at(0).edit);
+    back.add("D", "d");
+    TEST_ASSERT_TRUE(back.at(2).id > list.at(1).id);
 }
 
 int main() {
@@ -71,5 +100,6 @@ int main() {
     RUN_TEST(test_count_and_lengths_are_capped);
     RUN_TEST(test_the_list_round_trips_through_json);
     RUN_TEST(test_a_bad_file_is_refused_and_the_list_kept);
+    RUN_TEST(test_ids_stay_put_and_edits_count);
     return UNITY_END();
 }

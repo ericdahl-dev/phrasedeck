@@ -2,6 +2,7 @@
 // Deck. Edited from the panel's web page; stored as JSON in LittleFS.
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,8 @@ constexpr size_t kMaxLabel = 40;   // bytes
 constexpr size_t kMaxText = 2000;  // bytes
 
 struct Button {
+    uint32_t id = 0;    // never changes and is never reused, so the Helper can tell Phrases apart
+    uint32_t edit = 1;  // goes up on each edit; the Helper notifies on a counter it hasn't seen
     std::string label;
     std::string text;  // the Phrase
 };
@@ -29,13 +32,14 @@ class List {
     bool remove(size_t i);
     bool move(size_t from, size_t to);  // to is the index it ends up at
 
-    // {"buttons":[{"label":..,"text":..},..]}. fromJson replaces the list only if the whole file
+    // {"next":N,"buttons":[{"id":..,"edit":..,"label":..,"text":..},..]}. fromJson replaces the list only if the whole file
     // parses and every Button fits the caps; otherwise it changes nothing.
     std::string toJson() const;
     bool fromJson(const std::string& json);
 
   private:
     std::vector<Button> buttons_;
+    uint32_t nextId_ = 1;
 };
 
 }  // namespace phrases

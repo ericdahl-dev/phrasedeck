@@ -23,6 +23,9 @@ struct DeckView: View {
     @State private var carry: Carry?
     /// True while a finger drags; SwiftUI resets it even when a drag is canceled without onEnded.
     @GestureState private var dragging = false
+    @State private var shownPage: PersistentIdentifier?
+    /// Where each Page's grid sits on screen, so a drag can cross Pages (#81, slice 4).
+    @State private var gridOrigins: [PersistentIdentifier: CGPoint] = [:]
     @Environment(\.scenePhase) private var scenePhase
 
     /// Arrange mode is reachable only in DEBUG builds launched with -arrangeEnabled until dragging
@@ -51,10 +54,11 @@ struct DeckView: View {
                     let cell = CGSize(width: DeckSize.columnWidth(width: geo.size.width, columns: columns),
                                       height: DeckSize.metrics(columnWidth: DeckSize.columnWidth(
                                           width: geo.size.width, columns: columns)).height)
-                    TabView {
+                    let deck = geo.frame(in: .global)
+                    TabView(selection: $shownPage) {
                         ForEach(pages) { page in
                             ScrollView {
-                                grid(page, columns: columns, cell: cell)
+                                grid(page, columns: columns, cell: cell, deck: deck)
                                     .padding(DeckSize.padding)
                                     .animation(.snappy, value: columns)
                                     .frame(maxWidth: .infinity, alignment: .top)
@@ -65,6 +69,7 @@ struct DeckView: View {
                             .accessibilityIdentifier("deck.grid")
                             .accessibilityValue("\(columns) columns")
                             .navigationTitle(page.name)
+                            .tag(Optional(page.persistentModelID))
                         }
                     }
                     .tabViewStyle(.page(indexDisplayMode: pages.count > 1 ? .always : .never))
@@ -72,6 +77,8 @@ struct DeckView: View {
                     // change in column count would reflow everything under the finger.
                     .simultaneousGesture(pinch(width: geo.size.width), including: arranging ? .subviews : .all)
                     .sensoryFeedback(.selection, trigger: columns)
+                    .overlay(alignment: .topLeading) { carriedButton(deck: deck) }
+                    .overlay(alignment: carry?.edge.edge == -1 ? .leading : .trailing) { edgeHighlight }
                 }
             }
         }
@@ -100,6 +107,14 @@ struct DeckView: View {
         // A canceled drag (a system edge swipe, a banner) skips onEnded: drop it without saving,
         // so the next drag can't save this Button.
         .onChange(of: dragging) { _, now in if !now { withAnimation(.snappy) { carry = nil } } }
+        // A finger resting still sends no updates, so the dwell and the edge timer are checked here.
+        .task(id: carry == nil) {
+            while carry != nil, !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(100))
+                tick()
+            }
+        }
+        .sensoryFeedback(.impact(weight: .light), trigger: carry?.page) { old, new in old != nil && new != nil }
         .sheet(item: $editing) { PhraseEditor(target: $0) }
         .sheet(isPresented: $editingPages) { PageEditor() }
         .saveFailureAlert($saveError)
@@ -148,25 +163,22 @@ struct DeckView: View {
 
     /// The page's Buttons at their Spots for this Layout width, or packed by Size (#51) when it has
     /// none, with the "+" tile after them (hidden in Arrange mode).
-    private func grid(_ page: Page, columns: Int, cell: CGSize) -> some View {
+    private func grid(_ page: Page, columns: Int, cell: CGSize, deck: CGRect) -> some View {
         let phrases = Dictionary(uniqueKeysWithValues: page.sortedPhrases.map { ($0.persistentModelID, $0) })
-        let spots = Deck.spots(on: page, width: layoutWidth, from: savedSpots)
-        let items = page.sortedPhrases.map {
-            Arrangement.Item(id: Tile.phrase($0.persistentModelID), columns: $0.sizeColumns, rows: $0.sizeRows,
-                             spot: spots[$0.uid])
-        } + (arranging ? [] : [Arrangement.Item(id: Tile.add, columns: 1, rows: 1, spot: nil)])
+        let items = items(page) + (arranging ? [] : [Arrangement.Item(id: Tile.add, columns: 1, rows: 1, spot: nil)])
         let placed = Arrangement.resolve(items, columns: columns)
         let step = CGSize(width: cell.width + DeckSize.spacing, height: cell.height + DeckSize.spacing)
         let rows = CGFloat(Packing.rows(of: placed))
-        let pickup = placed.filter { $0.id != .add }
-        let previewRows = carry.map { c in c.preview.map { $0.value.row + (c.pickup.first { $0.id == c.tile }?.rows ?? 1) }.max() ?? 0 } ?? 0
+        // The carried Button's preview shows on the Page it's over; the Page it left keeps a gap.
+        let here = carry?.page == page.persistentModelID
+        let previewRows = here ? carry.map { c in c.preview.map { $0.value.row + c.rows }.max() ?? 0 } ?? 0 : 0
         return ZStack(alignment: .topLeading) {
             ForEach(placed, id: \.id) { spot in
                 let size = CGSize(width: CGFloat(spot.columns) * step.width - DeckSize.spacing,
                                   height: CGFloat(spot.rows) * step.height - DeckSize.spacing)
                 let carried = carry?.tile == spot.id
-                let at = carried ? Spot(column: spot.x, row: spot.y)
-                    : carry?.preview[spot.id] ?? Spot(column: spot.x, row: spot.y)
+                let own = Spot(column: spot.x, row: spot.y)
+                let at = here && !carried ? carry?.preview[spot.id] ?? own : own
                 Group {
                     switch spot.id {
                     case .phrase(let id):
@@ -182,11 +194,11 @@ struct DeckView: View {
                     }
                 }
                 .frame(width: size.width, height: size.height)
-                .offset(x: CGFloat(at.column) * step.width + (carried ? carry?.offset.width ?? 0 : 0),
-                        y: CGFloat(at.row) * step.height + (carried ? carry?.offset.height ?? 0 : 0))
-                .zIndex(carried ? 1 : 0)
+                // While carried it's drawn above the Pages (carriedButton), so it can cross them.
+                .opacity(carried ? 0 : 1)
+                .offset(x: CGFloat(at.column) * step.width, y: CGFloat(at.row) * step.height)
                 // In Arrange mode a Button drags at once (spec section 4).
-                .highPriorityGesture(carryGesture(spot, pickup: pickup, on: page, step: step, columns: columns),
+                .highPriorityGesture(carryGesture(spot, size: size, on: page, step: step, columns: columns, deck: deck),
                                      including: arranging && spot.id != .add ? .all : .subviews)
                 // VoiceOver reads Buttons as they're shown, row by row, not in order.
                 .accessibilitySortPriority(-Double(spot.y * columns + spot.x))
@@ -196,85 +208,147 @@ struct DeckView: View {
         .frame(width: CGFloat(columns) * step.width - DeckSize.spacing,
                height: max(0, max(rows, CGFloat(previewRows)) * step.height - DeckSize.spacing),
                alignment: .topLeading)
-        .coordinateSpace(.named(Self.gridSpace))
-    }
-
-    private static let gridSpace = "deck.grid.space"
-
-    /// Arrange mode's drag: the Button follows the finger, the Page reflows under it after a short
-    /// rest, and letting go saves where it landed.
-    private func carryGesture(_ spot: Packing.Placement<Tile>, pickup: [Packing.Placement<Tile>], on page: Page,
-                              step: CGSize, columns: Int) -> some Gesture {
-        DragGesture(minimumDistance: 8, coordinateSpace: .named(Self.gridSpace))
-            .updating($dragging) { _, state, _ in state = true }
-            .onChanged { value in
-                if carry?.tile != spot.id { carry = Carry(tile: spot.id, width: spot.columns, pickup: pickup) }
-                carry?.offset = value.translation
-                carry(to: CGPoint(x: CGFloat(spot.x) * step.width + value.translation.width,
-                                  y: CGFloat(spot.y) * step.height + value.translation.height),
-                      step: step, columns: columns)
-            }
-            .onEnded { _ in drop(on: page, columns: columns) }
-    }
-
-    /// Aims the carried Button with its top-left at `topLeft`; the Page reflows once the target has
-    /// held for `Dwell.hold`, and again whenever a new one has.
-    private func carry(to topLeft: CGPoint, step: CGSize, columns: Int) {
-        guard carry != nil else { return }
-        let target = Arrangement.target(topLeft: (topLeft.x, topLeft.y), step: (step.width, step.height),
-                                        columns: columns, width: carry?.width ?? 1)
-        let isNew = carry?.dwell.candidate != target
-        carry?.target = target
-        settle(columns: columns)
-        guard isNew else { return }
-        // The finger may rest without moving, which sends no updates, so look again once it's held.
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(Dwell.hold))
-            if carry?.target == target { settle(columns: columns) }
+        .onGeometryChange(for: CGPoint.self) { $0.frame(in: .global).origin } action: {
+            gridOrigins[page.persistentModelID] = $0
         }
     }
 
-    private func settle(columns: Int) {
-        guard var c = carry, let target = c.target else { return }
+    /// The Page's Buttons with their Spots for this Layout width.
+    private func items(_ page: Page) -> [Arrangement.Item<Tile>] {
+        let spots = Deck.spots(on: page, width: layoutWidth, from: savedSpots)
+        return page.sortedPhrases.map {
+            Arrangement.Item(id: Tile.phrase($0.persistentModelID), columns: $0.sizeColumns, rows: $0.sizeRows,
+                             spot: spots[$0.uid])
+        }
+    }
+
+    /// Arrange mode's drag: the Button follows the finger, the Page under it reflows after a short
+    /// rest, holding at a screen edge flips the Page, and letting go saves where it landed.
+    private func carryGesture(_ spot: Packing.Placement<Tile>, size: CGSize, on page: Page, step: CGSize,
+                              columns: Int, deck: CGRect) -> some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .global)
+            .updating($dragging) { _, state, _ in state = true }
+            .onChanged { value in
+                if carry?.tile != spot.id {
+                    let grid = gridOrigins[page.persistentModelID] ?? .zero
+                    let corner = CGPoint(x: grid.x + CGFloat(spot.x) * step.width, y: grid.y + CGFloat(spot.y) * step.height)
+                    carry = Carry(tile: spot.id, columns: spot.columns, rows: spot.rows, from: page.persistentModelID,
+                                  page: page.persistentModelID,
+                                  pickup: Arrangement.resolve(items(page), columns: columns),
+                                  step: step, columnCount: columns, deck: deck, size: size,
+                                  grab: CGSize(width: value.startLocation.x - corner.x,
+                                               height: value.startLocation.y - corner.y))
+                }
+                carry?.finger = value.location
+                tick()
+            }
+            .onEnded { _ in drop() }
+    }
+
+    /// Flips the Page if the finger has held at an edge, then aims the carried Button at the Square
+    /// under its top-left corner; the Page reflows once that target has held for `Dwell.hold`.
+    private func tick() {
+        guard var c = carry else { return }
+        if let index = pages.firstIndex(where: { $0.persistentModelID == c.page }),
+           let next = c.edge.update(x: c.finger.x - c.deck.minX, width: c.deck.width, page: index,
+                                    pages: pages.count, at: .now) {
+            // The new Page reflows from its own layout, with the Button joining at its end.
+            let page = pages[next]
+            c.page = page.persistentModelID
+            c.pickup = Arrangement.resolve(
+                items(page) + [Arrangement.Item(id: c.tile, columns: c.columns, rows: c.rows, spot: nil)],
+                columns: c.columnCount)
+            (c.dwell, c.target, c.preview) = (Dwell(), nil, [:])
+            withAnimation { shownPage = c.page }
+        }
+        // A Page just flipped to may not be laid out yet; aim once it is (the next tick).
+        guard let grid = gridOrigins[c.page] else {
+            carry = c
+            return
+        }
+        let target = Arrangement.target(
+            topLeft: (c.finger.x - c.grab.width - grid.x, c.finger.y - c.grab.height - grid.y),
+            step: (c.step.width, c.step.height), columns: c.columnCount, width: c.columns)
+        c.target = target
         let before = c.dwell.accepted
         c.dwell.update(target, at: .now)
         if let accepted = c.dwell.accepted, accepted != before {
-            withAnimation(.snappy) {
-                c.preview = Arrangement.move(c.tile, to: accepted, from: c.pickup, columns: columns)
-                carry = c
-            }
+            c.preview = Arrangement.move(c.tile, to: accepted, from: c.pickup, columns: c.columnCount)
+            withAnimation(.snappy) { carry = c }
         } else {
             carry = c
         }
     }
 
-    /// Saves the carried Button where the finger let go.
-    private func drop(on page: Page, columns: Int) {
+    /// Saves the carried Button where the finger let go, on the Page it's over.
+    private func drop() {
         defer { withAnimation(.snappy) { carry = nil } }
         guard let c = carry, let target = c.target, case .phrase(let id) = c.tile,
-              let phrase = page.sortedPhrases.first(where: { $0.persistentModelID == id }) else { return }
+              let from = pages.first(where: { $0.persistentModelID == c.from }),
+              let to = pages.first(where: { $0.persistentModelID == c.page }),
+              let phrase = from.sortedPhrases.first(where: { $0.persistentModelID == id }) else { return }
         do {
             try withAnimation(.snappy) {
-                _ = try Deck.move(phrase, to: target, on: page, width: layoutWidth, columns: columns, in: context)
+                if to === from {
+                    _ = try Deck.move(phrase, to: target, on: to, width: layoutWidth, columns: c.columnCount, in: context)
+                } else {
+                    try Deck.move(phrase, to: target, onto: to, width: layoutWidth, columns: c.columnCount, in: context)
+                }
             }
         } catch {
             saveError = error.localizedDescription
         }
     }
 
+    /// The carried Button, drawn above the Pages under the finger.
+    @ViewBuilder private func carriedButton(deck: CGRect) -> some View {
+        if let c = carry, case .phrase(let id) = c.tile,
+           let phrase = pages.lazy.flatMap(\.sortedPhrases).first(where: { $0.persistentModelID == id }) {
+            PhraseButton(phrase: phrase, metrics: DeckSize.metrics(button: c.size))
+                .frame(width: c.size.width, height: c.size.height)
+                .scaleEffect(1.05)
+                .shadow(radius: 8)
+                .offset(x: c.finger.x - c.grab.width - deck.minX, y: c.finger.y - c.grab.height - deck.minY)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+
+    /// A soft highlight at the edge the finger is holding, filling in until the Page flips.
+    @ViewBuilder private var edgeHighlight: some View {
+        if carry?.edge.edge != nil {
+            Rectangle()
+                .fill(.tint.opacity(0.25))
+                .frame(width: EdgeFlip.zone)
+                .transition(.opacity.animation(.easeIn(duration: EdgeFlip.hold)))
+                .allowsHitTesting(false)
+        }
+    }
+
     /// A Button being dragged in Arrange mode.
     private struct Carry {
         let tile: Tile
-        let width: Int
-        /// The Page as it was when the Button was picked up; every reflow starts from it.
-        let pickup: [Packing.Placement<Tile>]
+        let columns: Int
+        let rows: Int
+        /// The Page it was picked up from, and the Page it's over now.
+        let from: PersistentIdentifier
+        var page: PersistentIdentifier
+        /// The Page it's over, as it was when the Button arrived; every reflow starts from it.
+        var pickup: [Packing.Placement<Tile>]
+        let step: CGSize
+        let columnCount: Int
+        /// The Deck's frame on screen, for the edges.
+        let deck: CGRect
+        let size: CGSize
+        /// Where in the Button the finger holds it.
+        let grab: CGSize
+        var finger = CGPoint.zero
         var dwell = Dwell()
+        var edge = EdgeFlip()
         /// The Square under the Button now, where it lands if let go.
         var target: Spot?
-        /// Every Button's Spot for the accepted target.
+        /// Every Button's Spot on that Page for the accepted target.
         var preview: [Tile: Spot] = [:]
-        /// The finger's travel from where it picked the Button up.
-        var offset: CGSize = .zero
     }
 
     private func addTile(_ page: Page) -> some View {

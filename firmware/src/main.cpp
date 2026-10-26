@@ -9,6 +9,7 @@
 #include <esp_partition.h>
 #include <nvs_flash.h>
 #include <lvgl.h>
+#include <mbedtls/platform.h>
 
 #include <string>
 #include <vector>
@@ -1004,6 +1005,9 @@ void factoryResetIfHeld() {
 }  // namespace
 
 void setup() {
+    // TLS buffers (16 KB records, two per session) to PSRAM, small ones stay internal: the prebuilt
+    // sdkconfig keeps them all internal, and in Bluetooth Mode no web session fits (#94).
+    mbedtls_platform_set_calloc_free(calloc, free);
     Serial.begin(115200);
     Serial.println("phrasedeck panel: boot");
     Wire.begin(board::I2C_SDA, board::I2C_SCL, board::I2C_HZ);
@@ -1119,6 +1123,10 @@ void serialCommands() {
             lv_tabview_set_active(lv_obj_get_child(g_settings, 0), strtoul(line.c_str() + 4, nullptr, 10), LV_ANIM_OFF);
         } else if (line == "mode" && g_settings != nullptr) {  // the Mode tab's switch; restarts
             switchMode(nullptr);
+        } else if (line == "heap") {  // internal RAM: free now, largest block, lowest since boot
+            Serial.printf("heap: internal free %u, largest %u, min %u; PSRAM free %u\n",
+                          heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                          heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
         } else if (line == "btpair") {
             openBtPair();
         } else if (line == "pairscreen") {

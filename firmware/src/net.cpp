@@ -11,7 +11,9 @@
 #include <atomic>
 #include <map>
 
+#include "ble_keyboard.h"
 #include "helper_client.h"
+#include "hid_keys.h"
 #include "pairing.h"
 #include "panel_store.h"
 #include "send.h"
@@ -24,7 +26,19 @@ struct Request {
     enum Kind { Pair, Type } kind;
     Helper helper;
     std::string code, shortPin, text;
+    std::string raw;  // Type: the Phrase itself, for Bluetooth
 };
+
+// Read once at start(), before the task: a Mode change waits for a restart.
+bool g_bluetooth = false;
+
+bool loadBluetooth() {
+    Preferences p;
+    if (!p.begin("mode", true, panel_store::kPartition)) return false;
+    const bool on = p.getBool("bluetooth", false);
+    p.end();
+    return on;
+}
 
 QueueHandle_t g_requests = nullptr;  // Request*, owned by the receiver
 
@@ -170,11 +184,35 @@ void handleType(const Request& req, Snapshot& s) {
     }
 }
 
+// One report per interval: a press, then its release. 20 ms leaves the host a connection event for
+// each, so 100 characters take about 4 s.
+constexpr uint32_t kKeyIntervalMs = 20;
+
+void handleBluetoothType(const Request& req, Snapshot& s) {
+    const hid_keys::Plan p = hid_keys::plan(req.raw, false);
+    hid_keys::Said r = p.ok ? hid_keys::Said{"Not sent: no Computer connected over Bluetooth", false}
+                            : hid_keys::refused(p.bad);
+    if (p.ok && ble_keyboard::ready()) {
+        hid_keys::Sender sender(p.keys, kKeyIntervalMs);
+        const unsigned disconnects = ble_keyboard::disconnects();
+        const auto notify = [](const hid_keys::Key& k) { return ble_keyboard::send(k.mod, k.code); };
+        while (!sender.done()) {
+            if (ble_keyboard::disconnects() != disconnects) sender.drop();
+            sender.step(millis(), notify);
+            vTaskDelay(1);  // Sender needs a yield between steps
+        }
+        r = hid_keys::said(sender.result());
+    }
+    s.message = r.message;
+    s.ok = r.ok;
+}
+
 void handleRequests(Snapshot& s, TickType_t wait) {
     Request* req = nullptr;
     while (xQueueReceive(g_requests, &req, wait) == pdTRUE) {
         s.ok = s.maybe = false;
         if (req->kind == Request::Pair) handlePair(*req, s);
+        else if (g_bluetooth) handleBluetoothType(*req, s);
         else handleType(*req, s);
         Serial.printf("net: %s: %s\n", req->kind == Request::Pair ? "pair" : "type", s.message.c_str());
         delete req;
@@ -189,9 +227,16 @@ void run(void*) {
     loadPairing();
     s.paired = g_pairing.ok() ? g_pairing.name : "";
     s.wifiConfigured = sizeof(WIFI_SSID) > 1;
+    if (g_bluetooth && !ble_keyboard::start()) {
+        s.message = "Bluetooth didn't start";
+        Serial.println("net: Bluetooth didn't start");
+    }
     publish(s);
     if (!s.wifiConfigured) {
         Serial.println("net: no Wi-Fi in this build");
+        if (g_bluetooth) {
+            for (;;) handleRequests(s, portMAX_DELAY);
+        }
         vTaskDelete(nullptr);
         return;
     }
@@ -233,24 +278,31 @@ bool start() {
     g_lock = xSemaphoreCreateMutex();
     g_requests = xQueueCreate(8, sizeof(Request*));
     if (g_lock == nullptr || g_requests == nullptr) return false;
+    g_bluetooth = loadBluetooth();
     // 16 KB: the TLS client runs on this task too (mbedTLS handshakes are stack hungry).
     return xTaskCreatePinnedToCore(run, "net", 16384, nullptr, 1, nullptr, 0) == pdPASS;
 }
 
-unsigned version() { return g_version.load(); }
+unsigned version() { return g_version.load() + ble_keyboard::version(); }
 
 Snapshot snapshot() {
     xSemaphoreTake(g_lock, portMAX_DELAY);
     Snapshot s = g_snap;
     xSemaphoreGive(g_lock);
+    s.bluetooth = g_bluetooth;
+    if (g_bluetooth) {
+        s.bleReady = ble_keyboard::ready();
+        s.blePairing = ble_keyboard::pairingOpen();
+        s.passkey = ble_keyboard::passkey();
+    }
     return s;
 }
 
 namespace {
 
 bool enqueue(Request* req) {
-    // No Wi-Fi in this build: the net task is gone, so nothing would ever answer the request.
-    if (sizeof(WIFI_SSID) > 1 && g_requests != nullptr && xQueueSend(g_requests, &req, 0) == pdTRUE) return true;
+    // No Wi-Fi in this build and no Bluetooth: the net task is gone, so nothing would answer.
+    if ((sizeof(WIFI_SSID) > 1 || g_bluetooth) && g_requests != nullptr && xQueueSend(g_requests, &req, 0) == pdTRUE) return true;
     delete req;
     return false;
 }
@@ -258,11 +310,23 @@ bool enqueue(Request* req) {
 }  // namespace
 
 bool pair(const Helper& h, const std::string& code, const std::string& shortPin) {
-    return enqueue(new Request{Request::Pair, h, code, shortPin, ""});
+    return enqueue(new Request{Request::Pair, h, code, shortPin, "", ""});
 }
 
 bool type(const std::string& text, const std::string& phrase, uint32_t edit) {
-    return enqueue(new Request{Request::Type, Helper{}, "", "", send::typeBody(text, phrase, edit)});
+    return enqueue(new Request{Request::Type, Helper{}, "", "", send::typeBody(text, phrase, edit), text});
+}
+
+bool setBluetooth(bool on) {
+    Preferences p;
+    if (!p.begin("mode", false, panel_store::kPartition)) return false;
+    const bool ok = p.putBool("bluetooth", on) > 0;
+    p.end();
+    return ok;
+}
+
+void openBluetoothPairing(uint32_t ms) {
+    if (g_bluetooth) ble_keyboard::openPairing(ms);
 }
 
 }  // namespace net

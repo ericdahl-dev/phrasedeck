@@ -83,3 +83,4 @@ schemes:
         Phrasedeck: all
     test:
       targets: [PhrasedeckTests, PhrasedeckUITests]
+

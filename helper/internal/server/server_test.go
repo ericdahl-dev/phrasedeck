@@ -268,6 +268,10 @@ func TestTyperError500(t *testing.T) {
 	wantCode(t, e.typeJSON(`{"text":"hi"}`), 500)
 }
 
+// noticeText is the whole notice: no Phrase text, since notifications stay in the desktop's
+// history (Eric, #98).
+const noticeText = "Typed a Phrase that changed on a panel"
+
 // noticeEnv records notices; they're shown off the request goroutine, so they arrive on a channel.
 func noticeEnv(t *testing.T, fake *typer.Fake) (*env, chan string) {
 	notices := make(chan string, 10)
@@ -303,8 +307,7 @@ func TestTypeNoticeOnFirstSendOfAnEditedPhrase(t *testing.T) {
 	wantCode(t, e.typeJSON(`{"text":"hi"}`), 200)
 	wantCode(t, e.typeJSON(`{"text":"ls -l","phrase":"p7","edit":2}`), 200)
 	wantNotices(t, notices,
-		"Typed a Phrase changed on a panel: ls↵rm -rf x",
-		"Typed a Phrase changed on a panel: ls -l")
+		noticeText, noticeText)
 }
 
 // A failed type shows no notice and doesn't count as seen: the next successful one notices.
@@ -313,7 +316,7 @@ func TestTypeNoticeOnlyAfterTyping(t *testing.T) {
 	wantCode(t, e.typeJSON(`{"text":"boom","phrase":"p1","edit":1}`), 500)
 	wantNotices(t, notices)
 	wantCode(t, e.typeJSON(`{"text":"ok","phrase":"p1","edit":1}`), 200)
-	wantNotices(t, notices, "Typed a Phrase changed on a panel: ok")
+	wantNotices(t, notices, noticeText)
 }
 
 // A notification that hangs (notify-send waiting on D-Bus) mustn't hold the reply, or the

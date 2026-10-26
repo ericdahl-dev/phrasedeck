@@ -176,13 +176,8 @@ func (s *server) noticeIfEdited(req typeRequest) {
 	if seen {
 		return
 	}
-	preview := []rune(strings.ReplaceAll(req.Text, "\n", "↵"))
-	if len(preview) > 80 {
-		preview = append(preview[:80], '…')
-	}
-	// Off the request goroutine: notify-send can block on D-Bus for ~25 s, and a late reply makes
-	// the panel show Maybe typed, inviting a second tap that types it twice.
-	go s.cfg.Notice("Typed a Phrase changed on a panel: " + string(preview))
+	// No Phrase text: notifications stay in the desktop's history (Eric, #98).
+	go s.cfg.Notice("Typed a Phrase that changed on a panel")
 }
 
 func (s *server) typeText(w http.ResponseWriter, r *http.Request) {

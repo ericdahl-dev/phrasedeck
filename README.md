@@ -174,8 +174,9 @@ curl -s http://<tailnet-name>:47811/type \
 - `mode` is `auto` (the default), `type` or `paste`. `auto` pastes any text with a newline and
   anything over 300 characters, and types the rest. `type` types newlines as Shift+Enter.
 - `phrase` and `edit` (sent by the ESP32 panel): the Phrase's id and its edit counter. The first
-  time the Helper types a Phrase at a new counter, it shows a notification (osascript on macOS,
-  `notify-send` on Linux), since an edit on the panel's web page could have changed what it types.
+  time the Helper types a Phrase at a new counter, it shows a notification without the Phrase's
+  text (osascript on macOS, `notify-send` on Linux), since an edit on the panel's web page could
+  have changed what it types. The panel itself asks before the first send of an edited Phrase.
   The Helper remembers counters until it restarts.
 - On the Mac, a paste puts the phrase on the clipboard, sends Cmd+V, and about half a second
   later puts back everything that was on the clipboard before (images and rich text too). If you

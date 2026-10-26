@@ -77,7 +77,7 @@ final class AppModel {
     @discardableResult
     func send(text: String, enter: Bool) async -> Feedback {
         guard let helper = selectedHelper else {
-            return show(Feedback(tone: .red, message: "Add a computer first."))
+            return show(Feedback(tone: .red, message: "Not typed: add a computer first."))
         }
         let route = computers.route(for: helper)
         do {
@@ -90,17 +90,17 @@ final class AppModel {
             do {
                 try await computers.connection(to: helper, via: .tailnet).type(text: text, enter: enter)
                 return show(Feedback(tone: .success, message: failure == .pinMismatch
-                    ? "Sent over the tailnet: on the home network, \(helper.name) showed a different certificate. Scan its QR code to pair again."
+                    ? "Typed: sent over the tailnet. On the home network, \(helper.name) showed a different certificate. Scan its QR code to pair again."
                     : nil))
             } catch let tailnetFailure as HelperClient.Failure {
                 return show(Outcome.send(failure == .pinMismatch ? failure : tailnetFailure, on: helper))
             } catch {
-                return show(Feedback(tone: .red, message: "\(helper.name): \(error.localizedDescription)"))
+                return show(Feedback(tone: .red, message: "Not typed: \(helper.name): \(error.localizedDescription)"))
             }
         } catch let failure as HelperClient.Failure {
             return show(Outcome.send(failure, on: helper))
         } catch {
-            return show(Feedback(tone: .red, message: "\(helper.name): \(error.localizedDescription)"))
+            return show(Feedback(tone: .red, message: "Not typed: \(helper.name): \(error.localizedDescription)"))
         }
     }
 

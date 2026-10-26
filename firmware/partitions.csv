@@ -1,0 +1,12 @@
+# Phrasedeck panel (#68). Elecrow's default_16MB.csv plus a 64 KB "panel" NVS for the Pin, Token,
+# the panel's TLS key and cert, and the admin password hash (#98). The partition table can't
+# change over OTA, so this is set before any of that is stored. otadata stays at 0xe000, where the
+# upload writes boot_app0.bin, so an upload never lands in the panel NVS.
+# Name,   Type, SubType,  Offset,   Size
+nvs,      data, nvs,      0x9000,   0x5000,
+otadata,  data, ota,      0xe000,   0x2000,
+panel,    data, nvs,      0x10000,  0x10000,
+app0,     app,  ota_0,    0x20000,  0x640000,
+app1,     app,  ota_1,    0x660000, 0x640000,
+spiffs,   data, spiffs,   0xca0000, 0x350000,
+coredump, data, coredump, 0xff0000, 0x10000,

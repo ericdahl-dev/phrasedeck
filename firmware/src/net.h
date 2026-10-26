@@ -24,7 +24,11 @@ struct Snapshot {
 };
 
 // Starts the task. Does nothing but report "not configured" when the build has no Wi-Fi.
-void start();
+// False if the task or its lock couldn't be created.
+bool start();
+
+// Bumps on every change; cheap to poll before taking a snapshot.
+unsigned version();
 
 Snapshot snapshot();
 

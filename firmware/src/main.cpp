@@ -94,16 +94,10 @@ void sendResult(const net::Snapshot& s);
 // Shows Wi-Fi and the paired Computer; runs on the LVGL loop, reading the net task's snapshot.
 // Nearby Computers are listed on the Pair screen, not here.
 void showNet() {
-    // The Bluetooth window closes on a timer without a version bump: recheck while it shows open.
-    static bool pairingShown = false;
-    static uint32_t checkedMs = 0;
-    const bool recheck = pairingShown && millis() - checkedMs >= 500;
-    const unsigned v = net::version();  // includes Bluetooth changes, which s.version doesn't
-    if (v == g_net_version && !recheck) return;
-    checkedMs = millis();
+    const unsigned v = net::version();  // bumps on Bluetooth changes too, the window running out included
+    if (v == g_net_version) return;
     const net::Snapshot s = net::snapshot();
     g_net_version = v;
-    pairingShown = s.blePairing;
     std::string text = LV_SYMBOL_WIFI " ";
     if (s.bluetooth) {
         text = LV_SYMBOL_BLUETOOTH " " + std::string(bt_pairing::status(s.bleReady, s.blePairing));
@@ -323,6 +317,7 @@ void closeBtPair(lv_event_t*) {
 
 void btPairShow(const net::Snapshot& s) {
     const std::string key = bt_pairing::passkeyText(s.passkey);
+    lv_obj_set_style_text_letter_space(g_bt_passkey, key.empty() ? 0 : 12, 0);  // spaced digits only
     lv_label_set_text(g_bt_passkey, key.empty() ? "(appears when your Computer connects)" : key.c_str());
     lv_label_set_text(g_bt_note, s.blePairing ? "Pairing is open for 2 minutes."
                                  : s.bleReady  ? "A Computer is connected. If it isn't yours, pair again."
@@ -347,7 +342,6 @@ void openBtPair() {
                                  .c_str());
     g_bt_passkey = lv_label_create(g_bt_pair);
     lv_obj_set_style_text_font(g_bt_passkey, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_letter_space(g_bt_passkey, 12, 0);
     lv_obj_align(g_bt_passkey, LV_ALIGN_TOP_MID, 0, 120);
     g_bt_note = lv_label_create(g_bt_pair);
     lv_obj_align(g_bt_note, LV_ALIGN_TOP_LEFT, 0, 200);

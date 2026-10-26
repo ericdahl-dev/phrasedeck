@@ -30,7 +30,8 @@ struct Request {
     std::string raw;  // Type: the Phrase itself, for Bluetooth
 };
 
-// Read once at start(), before the task: a Mode change waits for a restart.
+// Read once at boot by bleInUse(), before the task: a Mode change waits for a restart. The same
+// read decides whether Arduino kept the controller's RAM, so the two can't disagree.
 bool g_bluetooth = false;
 
 bool loadBluetooth() {
@@ -289,7 +290,6 @@ bool start() {
     g_lock = xSemaphoreCreateMutex();
     g_requests = xQueueCreate(8, sizeof(Request*));
     if (g_lock == nullptr || g_requests == nullptr) return false;
-    g_bluetooth = loadBluetooth();
     // 16 KB: the TLS client runs on this task too (mbedTLS handshakes are stack hungry).
     return xTaskCreatePinnedToCore(run, "net", 16384, nullptr, 1, nullptr, 0) == pdPASS;
 }
@@ -357,5 +357,6 @@ void closeBluetoothPairing() {
 // Mode instead, so Wi-Fi Mode gets it back. It runs in initArduino, before setup() and Serial, so it
 // opens the panel NVS itself and says "not in use" on any error rather than erasing anything.
 extern "C" bool bleInUse(void) {
-    return nvs_flash_init_partition(panel_store::kPartition) == ESP_OK && net::loadBluetooth();
+    net::g_bluetooth = nvs_flash_init_partition(panel_store::kPartition) == ESP_OK && net::loadBluetooth();
+    return net::g_bluetooth;
 }

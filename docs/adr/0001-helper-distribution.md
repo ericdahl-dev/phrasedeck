@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (issue #35, researched 2026-10-25). Eric decides.
+Accepted (Eric, 2026-10-25): option A, Developer ID + notarization, direct download and Homebrew cask. Researched 2026-10-25 for issue #35.
 
 ## Context
 

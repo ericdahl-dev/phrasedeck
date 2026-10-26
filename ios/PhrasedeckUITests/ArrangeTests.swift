@@ -90,6 +90,32 @@ final class ArrangeTests: XCTestCase {
         XCTAssertTrue(button.waitForValue("Row 2, column 2"))
         XCTAssertTrue(app.buttons["arrange.done"].exists, "still in Arrange mode after the drop")
     }
+
+    /// Held at the right screen edge, a dragged Button flips to the next Page and is dropped there
+    /// (spec section 6).
+    @MainActor
+    func testHoldingAtTheEdgeFlipsToTheNextPageAndDropsThere() {
+        let app = launch(arrange: true)
+        let button = app.buttons["phrase.agent-status"]
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+        app.buttons["deck.pages"].tap()
+        let name = app.textFields["pages.newName"]
+        XCTAssertTrue(name.waitForExistence(timeout: 20))
+        name.tap()
+        name.typeText("Other")
+        app.buttons["Add"].tap()
+        app.buttons["Done"].tap()
+        enterArrangeMode(app, from: button)
+
+        let from = button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let edge = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            .withOffset(CGVector(dx: app.windows.firstMatch.frame.width - 8, dy: button.frame.midY))
+        // Long enough for one flip (0.6 s), short of a second (another 0.8 s).
+        from.press(forDuration: 0.1, thenDragTo: edge, withVelocity: .slow, thenHoldForDuration: 1.0)
+
+        XCTAssertTrue(app.navigationBars["Other"].waitForExistence(timeout: 20))
+        XCTAssertTrue(button.waitForValue("Row 1, column 3"))
+    }
 }
 
 private extension XCUIElement {

@@ -28,6 +28,31 @@ inline bool dropIdle(bool encrypted, bool showingPasskey, bool windowOpen, bool 
     return !encrypted && !showingPasskey && !windowOpen && !graceOpen;
 }
 
+// Whether to advertise to the stored Computer only (#144): a nearby device that can't connect can't
+// start the repeat pairing that makes the Bluetooth library delete the Computer's bond. Off while a
+// window is open, so a new Computer can pair.
+inline bool allowListOnly(bool hasComputer, bool windowOpen) { return hasComputer && !windowOpen; }
+
+// A resolvable private address: random (type 1), its top two bits 01. val is little-endian.
+inline bool isRpa(uint8_t type, const uint8_t val[6]) { return type == 1 && (val[5] >> 6) == 1; }
+
+// Whether the stored Computer is matched only by the private addresses its IRK makes (network
+// privacy), not also by its identity address sent in the clear, which anyone can copy (#144). Needs
+// a real IRK, and the Computer seen connecting from such addresses: many stacks send an IRK yet
+// connect from their public address, and network mode would lock those out.
+inline bool networkPrivacy(bool irkPresent, const uint8_t irk[16], bool seenRpa) {
+    if (!irkPresent || !seenRpa) return false;
+    for (int i = 0; i < 16; ++i) {
+        if (irk[i] != 0) return true;
+    }
+    return false;
+}
+
+// Whether a store write goes ahead (#144). securityKeys: a pairing's keys. windowPairing: a passkey is
+// showing, which only happens in a window. Without this, a Just Works pairing that claims the
+// Computer's identity address overwrites its keys, and rejecting it then deletes them.
+inline bool saveToStore(bool securityKeys, bool windowPairing) { return !securityKeys || windowPairing; }
+
 // The pairing window. now is millis(); unsigned subtraction keeps it right across the wrap.
 class Window {
   public:

@@ -92,6 +92,24 @@ func macNotify(code string) {
 		code).Run()
 }
 
+// desktopNotice shows msg as a notification: osascript on macOS, notify-send on Linux when it's
+// installed. msg is passed as an argument, never spliced into a script, and isn't logged: the
+// Helper never logs typed text.
+func desktopNotice(msg string) {
+	switch runtime.GOOS {
+	case "darwin":
+		exec.Command("osascript",
+			"-e", "on run argv",
+			"-e", `display notification (item 1 of argv) with title "phrased"`,
+			"-e", "end run",
+			msg).Run()
+	case "linux":
+		if path, err := exec.LookPath("notify-send"); err == nil {
+			exec.Command(path, "--app-name=phrased", "--", "phrased", msg).Run()
+		}
+	}
+}
+
 // command runs the pair, devices or revoke subcommand. It reports false when args aren't one,
 // so main runs the server instead.
 func command(args []string, home string, out io.Writer) (bool, error) {

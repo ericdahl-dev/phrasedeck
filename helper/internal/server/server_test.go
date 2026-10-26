@@ -267,3 +267,24 @@ func TestTyperError500(t *testing.T) {
 	e := newEnv(t, &typer.Fake{FailOn: "type:hi"}, time.Second)
 	wantCode(t, e.typeJSON(`{"text":"hi"}`), 500)
 }
+
+// A panel Phrase carries an edit counter (#98). The first time the Helper types a Phrase at a
+// counter it hasn't seen, it shows a notice, since an edit on the panel's web page could have
+// turned it into a command. The same counter again, or a request with none, shows nothing.
+func TestTypeNoticeOnFirstSendOfAnEditedPhrase(t *testing.T) {
+	var notices []string
+	e := newEnv(t, &typer.Fake{}, time.Second, func(c *Config) {
+		c.Notice = func(msg string) { notices = append(notices, msg) }
+	})
+	wantCode(t, e.typeJSON(`{"text":"ls\nrm -rf x","phrase":"p7","edit":1}`), 200)
+	wantCode(t, e.typeJSON(`{"text":"ls\nrm -rf x","phrase":"p7","edit":1}`), 200)
+	wantCode(t, e.typeJSON(`{"text":"hi"}`), 200)
+	wantCode(t, e.typeJSON(`{"text":"ls -l","phrase":"p7","edit":2}`), 200)
+	want := []string{
+		"Typed a Phrase changed on a panel: ls↵rm -rf x",
+		"Typed a Phrase changed on a panel: ls -l",
+	}
+	if !reflect.DeepEqual(notices, want) {
+		t.Fatalf("notices %q, want %q", notices, want)
+	}
+}

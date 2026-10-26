@@ -677,7 +677,9 @@ void openGear(lv_event_t*) {
 // Lights the dot of the Page that's showing.
 void showPage(lv_event_t* e) {
     lv_obj_t* tiles = static_cast<lv_obj_t*>(lv_event_get_target(e));
-    const int32_t active = lv_obj_get_index(lv_tileview_get_tile_active(tiles));
+    lv_obj_t* tile = lv_tileview_get_tile_active(tiles);
+    if (tile == nullptr) return;
+    const int32_t active = lv_obj_get_index(tile);
     for (uint32_t p = 0; p < lv_obj_get_child_count(g_dots); ++p) {
         lv_obj_t* dot = lv_obj_get_child(g_dots, static_cast<int32_t>(p));
         if (static_cast<int32_t>(p) == active) lv_obj_add_state(dot, LV_STATE_CHECKED);

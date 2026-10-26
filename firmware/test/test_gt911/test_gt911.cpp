@@ -34,10 +34,19 @@ void test_a_stale_result_keeps_the_last_state() {
     TEST_ASSERT_TRUE(t.pressed);
 }
 
-// A failed I2C read must not leave a finger stuck down (#91 review).
-void test_a_failed_read_releases() {
+// A failed I2C read must not leave a finger stuck down (#91 review), but one glitch mid-press must
+// not release either, or LVGL sees a second tap (#95 review): release after 3 failed reads in a row.
+void test_three_failed_reads_in_a_row_release() {
     gt911::Touch t{true, 10, 10};
     const uint8_t junk[6] = {0x81, 0, 1, 0, 1, 0};
+    gt911::decode(junk, false, 800, 480, t);
+    gt911::decode(junk, false, 800, 480, t);
+    TEST_ASSERT_TRUE(t.pressed);
+    const uint8_t held[6] = {0x01, 0, 0, 0, 0, 0};  // a good read in between resets the count
+    gt911::decode(held, true, 800, 480, t);
+    gt911::decode(junk, false, 800, 480, t);
+    gt911::decode(junk, false, 800, 480, t);
+    TEST_ASSERT_TRUE(t.pressed);
     gt911::decode(junk, false, 800, 480, t);
     TEST_ASSERT_FALSE(t.pressed);
 }
@@ -47,6 +56,6 @@ int main() {
     RUN_TEST(test_a_fresh_point_presses_and_is_clamped_to_the_panel);
     RUN_TEST(test_a_fresh_result_with_no_points_releases);
     RUN_TEST(test_a_stale_result_keeps_the_last_state);
-    RUN_TEST(test_a_failed_read_releases);
+    RUN_TEST(test_three_failed_reads_in_a_row_release);
     return UNITY_END();
 }

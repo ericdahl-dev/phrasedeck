@@ -14,7 +14,8 @@ struct Computer {
     std::string ts;  // tailnet name, when Tailscale is up
 };
 
-// Reads a Helper's TXT. False unless `v` is 1, `port` is 1 to 65535 and `fp` is 64 hex characters.
+// Reads a Helper's TXT. False unless `v` is 1, `port` is 1 to 65535 and `fp` is 64 hex characters and
+// `ts`, if there, is at most 253 characters.
 bool parse(const std::map<std::string, std::string>& txt, Computer& out);
 
 }  // namespace nearby

@@ -26,6 +26,7 @@ int16_t g_x = 0;
 int16_t g_y = 0;
 
 uint32_t g_last_poll_ms = 0;
+gt911::Touch g_touch;
 
 bool readRegs(uint16_t reg, uint8_t* out, size_t len) {
     Wire.beginTransmission(g_addr);
@@ -112,11 +113,11 @@ void touch_poll() {
     // while a finger is down.
     uint8_t buf[6] = {};
     const bool ok = readRegs(REG_STATUS, buf, sizeof(buf));
-    gt911::Touch t{g_pressed, g_x, g_y};
-    gt911::decode(buf, ok, board::LCD_WIDTH, board::LCD_HEIGHT, t);
-    g_pressed = t.pressed;
-    g_x = t.x;
-    g_y = t.y;
+    g_touch.pressed = g_pressed;
+    gt911::decode(buf, ok, board::LCD_WIDTH, board::LCD_HEIGHT, g_touch);
+    g_pressed = g_touch.pressed;
+    g_x = g_touch.x;
+    g_y = g_touch.y;
     if (!ok || (buf[0] & 0x80) == 0) return;
 
     // The status register must be cleared or the controller stops reporting.

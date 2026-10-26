@@ -121,3 +121,6 @@ listener (47812) and the app's choice of route.
 - [ ] It then stores the full fingerprint and the Token in NVS, and every later request pins the
       full fingerprint, never the short one.
 - [ ] Bonjour TXT `fp` only finds the Helper (Nearby); it's never the source of the Pin.
+- [ ] Known limitation: the panel's NVS isn't encrypted (no flash encryption), so anyone with the
+      board on USB can read the Token, the Pin and, later, the panel's TLS key and admin password
+      hash. Revoke the panel (`phrased revoke`) if it leaves the house.

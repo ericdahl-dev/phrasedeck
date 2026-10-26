@@ -31,9 +31,12 @@ bool parse(const std::map<std::string, std::string>& txt, Computer& out) {
         ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     }
 
+    const std::string ts = get(txt, "ts");
+    if (ts.size() > 253) return false;  // longer than any DNS name
+
     out.port = static_cast<int>(n);
     out.fp = fp;
-    out.ts = get(txt, "ts");
+    out.ts = ts;
     return true;
 }
 

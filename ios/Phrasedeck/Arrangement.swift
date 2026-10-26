@@ -164,3 +164,27 @@ struct Dwell {
         if now.timeIntervalSince(since) >= Self.hold { accepted = spot }
     }
 }
+
+/// Holding a dragged Button near the left or right screen edge flips to the previous or next Page
+/// (spec section 6).
+struct EdgeFlip {
+    static let zone = 24.0
+    static let hold: TimeInterval = 0.6
+    /// Holding on after a flip flips again this often.
+    static let repeatHold: TimeInterval = 0.8
+
+    private var edge: Int?
+    private var since = Date.distantPast
+    private var flipped = false
+
+    /// The Page to flip to now, if any. `x` is the finger across a screen `width` wide.
+    mutating func update(x: Double, width: Double, page: Int, pages: Int, at now: Date) -> Int? {
+        var side = x < Self.zone ? -1 : x > width - Self.zone ? 1 : nil
+        // No Page past the first or last: that edge does nothing (spec open question 3).
+        if let s = side, !(0..<pages).contains(page + s) { side = nil }
+        if side != edge { (edge, since, flipped) = (side, now, false) }
+        guard let side, now.timeIntervalSince(since) >= (flipped ? Self.repeatHold : Self.hold) else { return nil }
+        (since, flipped) = (now, true)
+        return page + side
+    }
+}

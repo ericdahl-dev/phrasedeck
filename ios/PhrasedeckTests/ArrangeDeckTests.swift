@@ -102,4 +102,21 @@ struct ArrangeDeckTests {
         #expect(twinB.sortedPhrases.map(\.label) == ["x", "a"])
         #expect(twinA.sortedPhrases.isEmpty && page.sortedPhrases.isEmpty)
     }
+
+    // MARK: Dropping on another Page (spec section 6)
+
+    /// Dropped on another Page, a Button joins it at the drop Square on this Layout width. The other
+    /// width sees it at the end of the new Page, and its old Page keeps a gap.
+    @Test func droppedOnAnotherPageItJoinsItWhereItWasDropped() throws {
+        let (from, p) = try page(["a", "b"])
+        try Deck.move(p[1], to: Spot(column: 2, row: 0), on: from, width: .compact, columns: 3, in: context)
+        let to = try Deck.addPage(named: "Other", in: context)
+        try ["x", "y"].forEach { try Deck.addPhrase(PhraseDraft(label: $0, text: $0), to: to, in: context) }
+
+        try Deck.move(p[0], to: Spot(column: 1, row: 1), onto: to, width: .compact, columns: 3, in: context)
+
+        #expect(shown(to) == ["x": [0, 0], "y": [1, 0], "a": [1, 1]])
+        #expect(shown(to, width: .regular) == ["x": [0, 0], "y": [1, 0], "a": [2, 0]])
+        #expect(shown(from) == ["b": [2, 0]])
+    }
 }

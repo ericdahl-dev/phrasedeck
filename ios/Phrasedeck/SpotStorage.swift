@@ -123,6 +123,14 @@ extension Deck {
         try save(draft, into: phrase)
     }
 
+    /// A drag dropped on another Page (spec section 6): the Button joins `page` at `spot` on this
+    /// Layout width, and at the end of it on the others (rule 8).
+    static func move(_ phrase: Phrase, to spot: Spot, onto page: Page, width: LayoutWidth, columns: Int,
+                     in context: ModelContext) throws {
+        try moveToPage(phrase, page)
+        try move(phrase, to: spot, on: page, width: width, columns: columns, in: context)
+    }
+
     /// Deletes the Buttons' Spots on every Layout width. The caller saves.
     static func deleteSpots(of phrases: [Phrase], in context: ModelContext) {
         let uids = Set(phrases.map(\.uid))

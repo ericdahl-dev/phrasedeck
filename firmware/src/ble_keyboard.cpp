@@ -10,6 +10,7 @@
 #include <host/ble_store.h>
 
 #include <atomic>
+#include <vector>
 
 #include "bt_pairing.h"
 
@@ -52,6 +53,8 @@ BLECharacteristic* g_input = nullptr;
 // Written on the NimBLE host task, read anywhere.
 std::atomic<int> g_trusted{kNone};      // the paired Computer's connection, the only one keys go to
 std::atomic<int> g_pairing{kNone};      // the connection showing a passkey now
+std::atomic<bool> g_unmatched{false};   // a passkey went to a connection we couldn't tell apart
+std::atomic<int> g_subscribed{kNone};   // the connection that turned on input report notifies
 std::atomic<int32_t> g_passkey{kNone};
 std::atomic<unsigned> g_disconnects{0};
 std::atomic<unsigned> g_version{0};
@@ -99,7 +102,22 @@ class ServerCallbacks : public BLEServerCallbacks {
         g_trusted.compare_exchange_strong(expected, kNone);
         expected = handle;
         if (g_pairing.compare_exchange_strong(expected, kNone)) g_passkey.store(kNone);
+        expected = handle;
+        g_subscribed.compare_exchange_strong(expected, kNone);
         g_disconnects.fetch_add(1);
+        bump();
+    }
+};
+
+class InputCallbacks : public BLECharacteristicCallbacks {
+    // Also called when NimBLE restores a bonded Computer's subscription on reconnect.
+    void onSubscribe(BLECharacteristic*, ble_gap_conn_desc* d, uint16_t subValue) override {
+        if (subValue & 1) {
+            g_subscribed.store(d->conn_handle);
+        } else {
+            int expected = d->conn_handle;
+            g_subscribed.compare_exchange_strong(expected, kNone);
+        }
         bump();
     }
 };
@@ -110,30 +128,35 @@ class SecurityCallbacks : public BLESecurityCallbacks {
     bool onSecurityRequest() override { return true; }
 
     void onPassKeyNotify(uint32_t key) override {
-        // Pairing has started on the connection being set up. Outside a window, end it before a
-        // passkey is ever shown. The callback has no handle, so find the unencrypted connection.
+        // A new pairing has started. Every authenticated pairing comes through here (the panel
+        // can only display), so this is where the window is enforced. The callback has no handle:
+        // find the one unencrypted connection. Outside a window, or if there isn't exactly one,
+        // end them all before a passkey is shown.
+        std::vector<uint16_t> pending;
         for (const auto& [handle, status] : g_server->getPeerDevices(false)) {
             (void)status;
             ble_gap_conn_desc d;
-            if (ble_gap_conn_find(handle, &d) != 0 || d.sec_state.encrypted) continue;
-            if (!windowOpen()) {
-                ble_gap_terminate(handle, BLE_ERR_REM_USER_CONN_TERM);
-                continue;
-            }
-            g_pairing.store(handle);
+            if (ble_gap_conn_find(handle, &d) == 0 && !d.sec_state.encrypted) pending.push_back(handle);
+        }
+        if (pending.size() == 1 && windowOpen()) {
+            g_pairing.store(pending[0]);
             g_passkey.store(static_cast<int32_t>(key));
             bump();
+            return;
         }
+        if (pending.empty()) g_unmatched.store(true);  // onAuthenticationComplete rejects it
+        for (uint16_t handle : pending) ble_gap_terminate(handle, BLE_ERR_REM_USER_CONN_TERM);
     }
 
     void onAuthenticationComplete(ble_gap_conn_desc* d) override {
         int expected = d->conn_handle;
         const bool pairedNow = g_pairing.compare_exchange_strong(expected, kNone);
         if (pairedNow) g_passkey.store(kNone);
+        const bool unmatched = g_unmatched.exchange(false);
         bump();
         if (!d->sec_state.encrypted) return;  // failed: the link stays unencrypted and never trusted
         // Just Works or no bond: never trusted, whatever the window says.
-        if (!d->sec_state.authenticated || !d->sec_state.bonded) {
+        if (!d->sec_state.authenticated || !d->sec_state.bonded || (unmatched && !pairedNow)) {
             reject(*d);
             return;
         }
@@ -149,6 +172,7 @@ class SecurityCallbacks : public BLESecurityCallbacks {
                 break;
         }
         g_trusted.store(d->conn_handle);
+        if (!windowOpen()) BLEDevice::stopAdvertising();  // one Computer: nobody else needs to find it
         bump();
     }
 };
@@ -173,6 +197,7 @@ bool start() {
     hid->hidInfo(0x00, 0x01);
     hid->reportMap(const_cast<uint8_t*>(kReportMap), sizeof(kReportMap));
     g_input = hid->inputReport(1);
+    g_input->setCallbacks(new InputCallbacks());
     hid->startServices();
 
     BLEAdvertising* adv = BLEDevice::getAdvertising();
@@ -183,11 +208,16 @@ bool start() {
     return true;
 }
 
-bool ready() { return g_trusted.load() != kNone; }
+// Subscribed too: until the Computer turns on notifies it drops reports, and a send would claim
+// keystrokes that never landed.
+bool ready() {
+    const int handle = g_trusted.load();
+    return handle != kNone && g_subscribed.load() == handle;
+}
 
 bool send(uint8_t mod, uint8_t code) {
     const int handle = g_trusted.load();
-    if (handle == kNone || g_input == nullptr) return false;
+    if (!ready() || g_input == nullptr) return false;
     // Notify only the paired Computer's connection. NimBLE ignores the input report's encryption
     // permission, so a plain notify() would also reach a stranger who connected and subscribed.
     const uint8_t report[8] = {mod, 0, code, 0, 0, 0, 0, 0};
@@ -210,6 +240,7 @@ void closePairing() {
     portENTER_CRITICAL(&g_windowLock);
     g_window.close();
     portEXIT_CRITICAL(&g_windowLock);
+    if (g_trusted.load() != kNone) BLEDevice::stopAdvertising();
     bump();
 }
 

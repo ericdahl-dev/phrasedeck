@@ -28,6 +28,9 @@ void test_a_bad_txt_is_not_nearby() {
     TEST_ASSERT_FALSE(nearby::parse({{"v", "1"}, {"port", "47812x"}, {"fp", fp}}, c));
     TEST_ASSERT_FALSE(nearby::parse({{"v", "1"}, {"port", "47812"}, {"fp", fp.substr(1)}}, c));
     TEST_ASSERT_FALSE(nearby::parse({{"v", "1"}, {"port", "47812"}, {"fp", fp.substr(1) + "g"}}, c));
+    // `ts` is a DNS name, at most 253 characters; a longer one is spoofed or broken (#95 review).
+    TEST_ASSERT_TRUE(nearby::parse({{"v", "1"}, {"port", "47812"}, {"fp", fp}, {"ts", std::string(253, 'a')}}, c));
+    TEST_ASSERT_FALSE(nearby::parse({{"v", "1"}, {"port", "47812"}, {"fp", fp}, {"ts", std::string(254, 'a')}}, c));
 }
 
 int main() {

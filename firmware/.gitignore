@@ -1,3 +1,4 @@
 .pio/
 secrets.ini
 *.bin
+src/wifi_secrets.h

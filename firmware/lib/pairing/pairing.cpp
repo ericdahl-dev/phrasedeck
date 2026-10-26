@@ -1,5 +1,7 @@
 #include "pairing.h"
 
+#include <ArduinoJson.h>
+
 #include <cctype>
 
 namespace pairing {
@@ -16,6 +18,24 @@ bool matchesShortPin(const std::string& typed, const std::string& certSha256) {
     unsigned char diff = 0;
     for (size_t i = 0; i < 16; ++i) diff |= static_cast<unsigned char>(pin[i] ^ certSha256[i]);
     return diff == 0;
+}
+
+bool matchesPin(const std::string& pin, const std::string& certSha256) {
+    if (pin.size() != 64 || certSha256.size() != 64) return false;
+    unsigned char diff = 0;
+    for (size_t i = 0; i < 64; ++i) diff |= static_cast<unsigned char>(pin[i] ^ certSha256[i]);
+    return diff == 0;
+}
+
+bool readPairReply(int status, const std::string& body, const std::string& checkedCert, std::string& token) {
+    if (status != 200) return false;
+    JsonDocument doc;
+    if (deserializeJson(doc, body)) return false;
+    const char* t = doc["token"] | "";
+    const char* cert = doc["certSHA256"] | "";
+    if (*t == '\0' || !matchesPin(checkedCert, cert)) return false;
+    token = t;
+    return true;
 }
 
 std::string hexLower(const uint8_t digest[32]) {

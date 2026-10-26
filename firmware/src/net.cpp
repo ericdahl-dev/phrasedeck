@@ -6,6 +6,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
+#include <atomic>
 #include <map>
 
 #include "wifi_secrets.h"
@@ -15,6 +16,7 @@ namespace {
 
 SemaphoreHandle_t g_lock = nullptr;
 Snapshot g_snap;
+std::atomic<unsigned> g_version{0};
 
 void publish(const Snapshot& s) {
     xSemaphoreTake(g_lock, portMAX_DELAY);
@@ -22,6 +24,7 @@ void publish(const Snapshot& s) {
     g_snap = s;
     g_snap.version = v;
     xSemaphoreGive(g_lock);
+    g_version.store(v);
 }
 
 std::vector<Helper> browse() {
@@ -59,14 +62,19 @@ void run(void*) {
         if (up != s.wifiUp) {
             s.wifiUp = up;
             s.ip = up ? WiFi.localIP().toString().c_str() : "";
-            if (!up) s.nearby.clear();
+            if (!up) {
+                s.nearby.clear();
+                if (mdns) MDNS.end();
+                mdns = false;  // started again once Wi-Fi is back
+            }
             Serial.printf("net: Wi-Fi %s %s\n", up ? "connected" : "down", s.ip.c_str());
             publish(s);
         }
         if (up && !mdns) mdns = MDNS.begin("phrasedeck-panel");
         if (up && mdns) {
             s.nearby = browse();  // blocks about 3 s; fine on this task
-            Serial.printf("net: %u Nearby Helper(s)\n", static_cast<unsigned>(s.nearby.size()));
+            Serial.printf("net: %u Nearby Helper(s), stack left %u\n", static_cast<unsigned>(s.nearby.size()),
+                          static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
             publish(s);
             vTaskDelay(pdMS_TO_TICKS(10000));
         } else {
@@ -77,10 +85,14 @@ void run(void*) {
 
 }  // namespace
 
-void start() {
+bool start() {
     g_lock = xSemaphoreCreateMutex();
-    xTaskCreatePinnedToCore(run, "net", 8192, nullptr, 1, nullptr, 0);
+    if (g_lock == nullptr) return false;
+    // 16 KB: the TLS client runs on this task too (mbedTLS handshakes are stack hungry).
+    return xTaskCreatePinnedToCore(run, "net", 16384, nullptr, 1, nullptr, 0) == pdPASS;
 }
+
+unsigned version() { return g_version.load(); }
 
 Snapshot snapshot() {
     xSemaphoreTake(g_lock, portMAX_DELAY);

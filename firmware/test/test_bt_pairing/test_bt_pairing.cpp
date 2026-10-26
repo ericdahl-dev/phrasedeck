@@ -36,6 +36,26 @@ void test_the_pairing_window() {
     TEST_ASSERT_FALSE(w.isOpen(50001));
 }
 
+// With a Computer stored and no window open, only the Computer may connect, so a nearby device can't
+// start the pairing that wipes its bond (#144). A window lets a new Computer in.
+void test_only_the_computer_may_connect_outside_a_window() {
+    const bool computer = true, window = true;
+    TEST_ASSERT_TRUE(bt_pairing::allowListOnly(computer, !window));
+    TEST_ASSERT_FALSE(bt_pairing::allowListOnly(computer, window));
+    TEST_ASSERT_FALSE(bt_pairing::allowListOnly(!computer, !window));
+    TEST_ASSERT_FALSE(bt_pairing::allowListOnly(!computer, window));
+}
+
+// Keys are saved only for a passkey pairing from a window: a Just Works pairing claiming the
+// Computer's identity address can't overwrite its keys (#144). Other records, such as
+// subscriptions, are saved as usual.
+void test_only_a_window_pairing_saves_keys() {
+    const bool keys = true, windowPairing = true;
+    TEST_ASSERT_TRUE(bt_pairing::saveToStore(keys, windowPairing));
+    TEST_ASSERT_FALSE(bt_pairing::saveToStore(keys, !windowPairing));
+    TEST_ASSERT_TRUE(bt_pairing::saveToStore(!keys, !windowPairing));
+}
+
 // A window that runs out without a pairing or Cancel has lapsed, once, so the panel can stop
 // advertising (#141). Closing it ends that.
 void test_a_window_lapses_when_it_runs_out() {
@@ -79,5 +99,7 @@ int main() {
     RUN_TEST(test_a_window_lapses_when_it_runs_out);
     RUN_TEST(test_an_idle_unencrypted_connection_is_dropped);
     RUN_TEST(test_what_the_panel_shows);
+    RUN_TEST(test_only_the_computer_may_connect_outside_a_window);
+    RUN_TEST(test_only_a_window_pairing_saves_keys);
     return UNITY_END();
 }

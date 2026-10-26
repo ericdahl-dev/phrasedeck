@@ -28,6 +28,16 @@ inline bool dropIdle(bool encrypted, bool showingPasskey, bool windowOpen, bool 
     return !encrypted && !showingPasskey && !windowOpen && !graceOpen;
 }
 
+// Whether to advertise to the stored Computer only (#144): a nearby device that can't connect can't
+// start the repeat pairing that makes the Bluetooth library delete the Computer's bond. Off while a
+// window is open, so a new Computer can pair.
+inline bool allowListOnly(bool hasComputer, bool windowOpen) { return hasComputer && !windowOpen; }
+
+// Whether a store write goes ahead (#144). securityKeys: a pairing's keys. windowPairing: a passkey is
+// showing, which only happens in a window. Without this, a Just Works pairing that claims the
+// Computer's identity address overwrites its keys, and rejecting it then deletes them.
+inline bool saveToStore(bool securityKeys, bool windowPairing) { return !securityKeys || windowPairing; }
+
 // The pairing window. now is millis(); unsigned subtraction keeps it right across the wrap.
 class Window {
   public:

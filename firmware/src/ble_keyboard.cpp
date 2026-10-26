@@ -168,6 +168,35 @@ void forgetAllBut(const ble_addr_t* keep) {
     log_i("bonds: %d, forgot %d", n, forgotten);
 }
 
+// NimBLE's own store write, which gatedStoreWrite() calls for what may be saved.
+ble_store_write_fn* g_storeWrite = nullptr;
+
+// shortcut: checks that some passkey is showing, not that it's this peer's; a Just Works pairing
+// finishing at that moment could still save keys, and is rejected and deleted at its disconnect.
+int gatedStoreWrite(int type, const ble_store_value* value) {
+    const bool keys = type == BLE_STORE_OBJ_TYPE_OUR_SEC || type == BLE_STORE_OBJ_TYPE_PEER_SEC;
+    if (!bt_pairing::saveToStore(keys, g_pairing.load() != kNone)) return BLE_HS_EREJECT;
+    return g_storeWrite(type, value);
+}
+
+// The filter advertising runs with now, set by advertise().
+std::atomic<bool> g_allowListOnly{false};
+
+// (Re)starts advertising, to the stored Computer only or to anyone. The allow list can't change
+// while advertising, so it stops first. allowListOnly reads g_computer: host task only.
+void advertise(bool allowListOnly) {
+    BLEAdvertising* adv = BLEDevice::getAdvertising();
+    BLEDevice::stopAdvertising();
+    // If the list can't be set, advertise to anyone: a locked-out Computer is worse than the wipe.
+    if (allowListOnly && ble_gap_wl_set(&g_computer, 1) != 0) allowListOnly = false;
+    adv->setScanFilter(false, allowListOnly);
+    g_allowListOnly.store(allowListOnly);
+    BLEDevice::startAdvertising();
+}
+
+// Host task only.
+bool wantAllowList() { return bt_pairing::allowListOnly(g_hasComputer, windowOpen()); }
+
 class DeviceCallbacks : public BLEDeviceCallbacks {
     // The library's default makes room by unpairing the oldest bond, often the Computer's, so three
     // strangers bonding by Just Works could push it out. Refuse the new bond instead (#141).
@@ -181,7 +210,7 @@ class ServerCallbacks : public BLEServerCallbacks {
         g_grace[d->conn_handle].open(millis(), bt_pairing::kGraceMs);
         // NimBLE stops advertising on a connect. Keep it up while no paired Computer is here, so a
         // stranger who connects and sits can't lock the paired one out, and while a window is open.
-        if (g_trusted.load() == kNone || windowOpen()) BLEDevice::startAdvertising();
+        if (g_trusted.load() == kNone || windowOpen()) advertise(wantAllowList());
     }
     void onDisconnect(BLEServer*, ble_gap_conn_desc* d) override {
         int handle = d->conn_handle;
@@ -203,7 +232,7 @@ class ServerCallbacks : public BLEServerCallbacks {
             g_forget.erase(forget);
         }
         // advertiseOnDisconnect is off by default: without this the Computer can't come back.
-        if (g_trusted.load() == kNone || windowOpen()) BLEDevice::startAdvertising();
+        if (g_trusted.load() == kNone || windowOpen()) advertise(wantAllowList());
         bump();
     }
 };
@@ -325,6 +354,8 @@ void tick(ble_npl_event*) {
     if (lapsed) g_window.close();
     portEXIT_CRITICAL(&g_windowLock);
     if (lapsed) pairingClosed();
+    // A window that lapsed or was canceled leaves advertising open to anyone; put the filter back.
+    if (ble_gap_adv_active() && g_allowListOnly.load() != wantAllowList()) advertise(wantAllowList());
     const uint32_t now = millis();
     const bool window = windowOpen();
     for (const auto& [handle, grace] : g_grace) {
@@ -342,6 +373,8 @@ void tick(ble_npl_event*) {
 bool start() {
     BLEDevice::setDeviceCallbacks(new DeviceCallbacks());
     if (!BLEDevice::init("Phrasedeck panel")) return false;
+    g_storeWrite = ble_hs_cfg.store_write_cb;
+    ble_hs_cfg.store_write_cb = gatedStoreWrite;
     BLESecurity* sec = new BLESecurity();
     sec->setCapability(ESP_IO_CAP_OUT);               // the panel displays a passkey
     sec->setAuthenticationMode(true, true, true);     // bond, MITM, Secure Connections
@@ -379,7 +412,7 @@ bool start() {
         ble_npl_callout_reset(&g_tick, ble_npl_time_ms_to_ticks32(1000)) != 0) {
         return false;
     }
-    BLEDevice::startAdvertising();
+    advertise(wantAllowList());
     g_started.store(true);
     return true;
 }
@@ -409,7 +442,7 @@ void openPairing(uint32_t ms) {
     portENTER_CRITICAL(&g_windowLock);
     g_window.open(millis(), ms);
     portEXIT_CRITICAL(&g_windowLock);
-    BLEDevice::startAdvertising();
+    advertise(false);  // to anyone, for the new Computer
     bump();
 }
 

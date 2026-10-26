@@ -243,7 +243,7 @@ esp_err_t postLogin(httpd_req_t* req) {
     char token[web::kTokenLen + 1];
     for (size_t i = 0; i < sizeof raw; ++i) snprintf(token + 2 * i, 3, "%02x", raw[i]);
     web::startSession(g_session, token, millis());
-    const std::string cookie = std::string("s=") + token + "; HttpOnly; Secure; SameSite=Strict; Path=/";
+    const std::string cookie = std::string("__Host-s=") + token + "; HttpOnly; Secure; SameSite=Strict; Path=/";
     httpd_resp_set_hdr(req, "Set-Cookie", cookie.c_str());
     httpd_resp_set_hdr(req, "Location", "/");
     return reply(req, "303 See Other", "");
@@ -302,7 +302,7 @@ esp_err_t postLogout(httpd_req_t* req) {
     esp_err_t sent = ESP_OK;
     if (!postOk(req, body, sent)) return sent;
     web::endSession(g_session);
-    httpd_resp_set_hdr(req, "Set-Cookie", "s=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0");
+    httpd_resp_set_hdr(req, "Set-Cookie", "__Host-s=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0");
     httpd_resp_set_hdr(req, "Location", "/");
     return reply(req, "303 See Other", "");
 }

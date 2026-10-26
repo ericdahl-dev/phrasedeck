@@ -39,14 +39,16 @@ void test_a_form_field_is_decoded() {
     TEST_ASSERT_EQUAL_STRING("", web::formValue("password=", "password").c_str());
 }
 
-// The session cookie: only "s", only 32 lowercase hex.
+// The session cookie: only "__Host-s" (the browser takes it only from the panel's own https
+// origin, Path=/, no Domain), only 32 lowercase hex.
 void test_the_session_token_comes_from_its_cookie() {
     const std::string t = "0123456789abcdef0123456789abcdef";
-    TEST_ASSERT_EQUAL_STRING(t.c_str(), web::cookieToken("s=" + t).c_str());
-    TEST_ASSERT_EQUAL_STRING(t.c_str(), web::cookieToken("a=1; s=" + t + "; b=2").c_str());
-    TEST_ASSERT_EQUAL_STRING("", web::cookieToken("xs=" + t).c_str());
-    TEST_ASSERT_EQUAL_STRING("", web::cookieToken("s=" + t.substr(1)).c_str());
-    TEST_ASSERT_EQUAL_STRING("", web::cookieToken("s=" + t + "0").c_str());
+    TEST_ASSERT_EQUAL_STRING(t.c_str(), web::cookieToken("__Host-s=" + t).c_str());
+    TEST_ASSERT_EQUAL_STRING(t.c_str(), web::cookieToken("a=1; __Host-s=" + t + "; b=2").c_str());
+    TEST_ASSERT_EQUAL_STRING("", web::cookieToken("s=" + t).c_str());  // no prefix: any subdomain could set it
+    TEST_ASSERT_EQUAL_STRING("", web::cookieToken("x__Host-s=" + t).c_str());
+    TEST_ASSERT_EQUAL_STRING("", web::cookieToken("__Host-s=" + t.substr(1)).c_str());
+    TEST_ASSERT_EQUAL_STRING("", web::cookieToken("__Host-s=" + t + "0").c_str());
     TEST_ASSERT_EQUAL_STRING("", web::cookieToken("").c_str());
 }
 
@@ -68,6 +70,22 @@ void test_a_session_matches_its_token_until_it_expires() {
     TEST_ASSERT_FALSE(web::sessionValid(s, t, 0x100u));
 }
 
+// Requests keep a session alive, but never past kSessionMaxMs from login: a stolen cookie in
+// a tab left open doesn't work forever.
+void test_activity_does_not_keep_a_session_past_its_cap() {
+    web::Session s;
+    const std::string t = "0123456789abcdef0123456789abcdef";
+    const uint32_t start = 0xFFFFF000u;  // millis() wraps during the session
+    web::startSession(s, t, start);
+    for (uint32_t now = start; now - start < web::kSessionMaxMs - 1000; now += web::kSessionMs / 2) {
+        web::touch(s, now);
+        TEST_ASSERT_TRUE(web::sessionValid(s, t, now));
+    }
+    web::touch(s, start + web::kSessionMaxMs - 1);
+    TEST_ASSERT_TRUE(web::sessionValid(s, t, start + web::kSessionMaxMs - 1));
+    TEST_ASSERT_FALSE(web::sessionValid(s, t, start + web::kSessionMaxMs));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_only_the_panels_own_address_is_an_allowed_host);
@@ -75,5 +93,6 @@ int main() {
     RUN_TEST(test_a_form_field_is_decoded);
     RUN_TEST(test_the_session_token_comes_from_its_cookie);
     RUN_TEST(test_a_session_matches_its_token_until_it_expires);
+    RUN_TEST(test_activity_does_not_keep_a_session_past_its_cap);
     return UNITY_END();
 }

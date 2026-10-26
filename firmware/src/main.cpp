@@ -47,24 +47,20 @@ lv_obj_t* g_keyboard = nullptr;
 size_t g_pair_index = 0;
 std::vector<net::Helper> g_pair_helpers;  // copied when the Pair screen opens, so it can't shift
 
-// Shows Wi-Fi and the Nearby Helpers; runs on the LVGL loop, reading the net task's snapshot.
+// Shows Wi-Fi and the paired Computer; runs on the LVGL loop, reading the net task's snapshot.
+// Nearby Computers are listed on the Pair screen, not here.
 void showNet() {
     if (net::version() == g_net_version) return;
     const net::Snapshot s = net::snapshot();
     g_net_version = s.version;
-    std::string text;
+    std::string text = LV_SYMBOL_WIFI " ";
     if (!s.wifiConfigured) {
-        text = "Wi-Fi: not set up";
+        text += "Not set up";
     } else if (!s.wifiUp) {
-        text = "Wi-Fi: connecting";
+        text += "Connecting";
     } else {
-        text = "Wi-Fi " + s.ip + "  |  Nearby: ";
-        if (s.nearby.empty()) text += "none";
-        for (size_t i = 0; i < s.nearby.size(); ++i) {
-            text += (i ? ", " : "") + s.nearby[i].name;
-        }
+        text += s.paired.empty() ? "Not paired" : s.paired;
     }
-    if (!s.paired.empty()) text += "  |  Paired: " + s.paired;
     lv_label_set_text(g_net, text.c_str());
     if (s.messageSeq != g_message_seq) {
         g_message_seq = s.messageSeq;
@@ -284,23 +280,32 @@ void tap(size_t i) {
 void onTap(lv_event_t* e) { tap(reinterpret_cast<size_t>(lv_event_get_user_data(e))); }
 
 void buildPage() {
+    // LVGL's default theme is light; dark, so every screen and overlay matches without per-object colors.
+    lv_display_set_theme(display_lvgl(), lv_theme_default_init(display_lvgl(), lv_palette_main(LV_PALETTE_BLUE),
+                                                                lv_palette_main(LV_PALETTE_RED), true,
+                                                                &lv_font_montserrat_20));
     lv_obj_t* screen = lv_screen_active();
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x111418), 0);
 
-    g_status = lv_label_create(screen);
-    lv_obj_set_style_text_font(g_status, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(g_status, lv_color_hex(0xC8CDD4), 0);
-    lv_label_set_text(g_status, "Phrasedeck panel: tap a Button");
-    lv_obj_align(g_status, LV_ALIGN_TOP_LEFT, 16, 12);
-
+    // Header: status on the left, then Wi-Fi and the paired Computer, then Pair. Fixed widths, so
+    // long text ends in "..." instead of running into the next one.
     lv_obj_t* pairButton = textButton(screen, "Pair", openPair, nullptr);
     lv_obj_align(pairButton, LV_ALIGN_TOP_RIGHT, -8, 4);
 
     g_net = lv_label_create(screen);
-    lv_obj_set_style_text_font(g_net, &lv_font_montserrat_20, 0);
+    lv_obj_set_width(g_net, 240);
+    lv_label_set_long_mode(g_net, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(g_net, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_style_text_color(g_net, lv_color_hex(0x8A929C), 0);
     lv_label_set_text(g_net, "");
-    lv_obj_align(g_net, LV_ALIGN_TOP_RIGHT, -100, 12);
+    lv_obj_align(g_net, LV_ALIGN_TOP_RIGHT, -112, 12);
+
+    g_status = lv_label_create(screen);
+    lv_obj_set_width(g_status, board::LCD_WIDTH - 16 - 112 - 240 - 16);
+    lv_label_set_long_mode(g_status, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_color(g_status, lv_color_hex(0xC8CDD4), 0);
+    lv_label_set_text(g_status, "Tap a Button");
+    lv_obj_align(g_status, LV_ALIGN_TOP_LEFT, 16, 12);
 
     // Rows of 4 Buttons below the status line; two rows fit, more scroll.
     lv_obj_t* grid = lv_obj_create(screen);
@@ -381,6 +386,24 @@ void serialCommands() {
             char* rest = nullptr;
             const size_t i = strtoul(line.c_str() + 5, &rest, 10);
             if (i < g_phrases.size() && g_phrases.edit(i, g_phrases.at(i).label, rest + (*rest == ' '))) savePhrases();
+        } else if (line == "shot") {
+            // The screen, one line per row: "R" then hex (count, RGB565) runs. One write per row, so
+            // the net task's log lines land between rows, never inside one.
+            static uint16_t row[board::LCD_WIDTH];
+            static char out[2 + board::LCD_WIDTH * 6 + 1];
+            for (int y = 0; y < board::LCD_HEIGHT; ++y) {
+                display_lcd.readRect(0, y, board::LCD_WIDTH, 1, row);
+                size_t len = 0;
+                out[len++] = 'R';
+                for (int x = 0; x < board::LCD_WIDTH;) {
+                    int n = 1;
+                    while (x + n < board::LCD_WIDTH && n < 255 && row[x + n] == row[x]) ++n;
+                    len += snprintf(out + len, 7, "%02x%04x", n, row[x]);
+                    x += n;
+                }
+                out[len++] = '\n';
+                Serial.write(reinterpret_cast<const uint8_t*>(out), len);
+            }
         } else if (line == "send" && g_confirm != nullptr) {
             confirmSend(nullptr);
         }

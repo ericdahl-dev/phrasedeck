@@ -835,22 +835,27 @@ void applyWebEdit() {
 // A finger on the top-left corner at power-on: count down on screen, and after 10 s erase the
 // panel NVS (admin password, lockouts, web key and cert, pairing) and the saved Buttons.
 void factoryResetIfHeld() {
-    touch_poll();
-    if (!touch_pressed()) return;
-    lv_obj_t* label = lv_label_create(lv_screen_active());
-    lv_obj_center(label);
-    panel_mcu::backlightOn();
-    const uint32_t start = millis();
-    factory_reset::Hold hold;
-    while ((hold = factory_reset::check(touch_pressed(), touch_x(), touch_y(), millis() - start)) ==
-           factory_reset::Hold::Holding) {
-        const uint32_t left = (factory_reset::kHoldMs - (millis() - start) + 999) / 1000;
-        lv_label_set_text_fmt(label, "Keep holding to erase this panel: %u s", static_cast<unsigned>(left));
-        lv_timer_handler();
+    using factory_reset::Hold;
+    auto inCorner = [] { return factory_reset::check(touch_pressed(), touch_x(), touch_y(), 0) == Hold::Holding; };
+    // Several reads, not one: the first after the GT911 reset can miss a finger already down.
+    for (const uint32_t t = millis(); !inCorner() && millis() - t < 500;) {
         delay(20);
         touch_poll();
     }
-    if (hold == factory_reset::Hold::Reset) {
+    if (!inCorner()) return;
+    lv_obj_t* label = lv_label_create(lv_screen_active());
+    lv_obj_center(label);
+    const uint32_t start = millis();
+    Hold hold;
+    while ((hold = factory_reset::check(touch_pressed(), touch_x(), touch_y(), millis() - start)) == Hold::Holding) {
+        const uint32_t left = (factory_reset::kHoldMs - (millis() - start) + 999) / 1000;
+        lv_label_set_text_fmt(label, "Keep holding to erase this panel: %u s", static_cast<unsigned>(left));
+        lv_timer_handler();
+        panel_mcu::backlightOn();  // after the first draw, so the screen doesn't flash
+        delay(20);
+        touch_poll();
+    }
+    if (hold == Hold::Reset) {
         lv_label_set_text(label, "Erased. Lift your finger.");
         lv_timer_handler();
         const bool nvs = panel_store::erase();
@@ -860,7 +865,8 @@ void factoryResetIfHeld() {
         }
         Serial.printf("phrasedeck panel: factory reset, NVS %s, Buttons %s\n", nvs ? "erased" : "FAILED",
                       fs ? "erased" : "FAILED");
-        while (touch_pressed()) {  // so the finger doesn't land on the wizard
+        // So the finger doesn't land on the wizard; capped, so a bezel pressing the corner can't hang boot.
+        for (const uint32_t t = millis(); touch_pressed() && millis() - t < 5000;) {
             delay(20);
             touch_poll();
         }

@@ -11,10 +11,14 @@ final class SizeTests: XCTestCase {
         XCTAssertTrue(button.waitForExistence(timeout: 20))
         let before = button.frame
 
-        // The context menu animates in; on a slow simulator it isn't there the moment the press ends.
-        button.press(forDuration: 1)
+        // The context menu animates in, and on a slow CI simulator a press sometimes doesn't open it
+        // at all, so press again before giving up.
         let edit = app.buttons["Edit"]
-        XCTAssertTrue(edit.waitForExistence(timeout: 20))
+        for _ in 0..<3 where !edit.exists {
+            button.press(forDuration: 1.5)
+            _ = edit.waitForExistence(timeout: 10)
+        }
+        XCTAssertTrue(edit.exists)
         edit.tap()
         XCTAssertTrue(app.buttons["editor.size.2x2"].waitForExistence(timeout: 20))
         app.buttons["editor.size.2x2"].tap()

@@ -7,8 +7,10 @@ namespace panel_store {
 
 constexpr const char* kPartition = "panel";
 
-// Opens the partition. Erases it only when it's blank or from a newer NVS format (the first boot
-// after this table, when it still holds old app bytes); any other error leaves it alone.
+// Opens the partition. Blank flash, or the old app bytes left at 0x10000 by the table change, init
+// fine: NVS erases pages that fail their CRC before using them. It erases the whole partition only
+// on NO_FREE_PAGES or NEW_VERSION_FOUND; the latter after a firmware downgrade, which loses the
+// pairing, so the panel must pair again. Any other error leaves it alone.
 bool begin();
 
 }  // namespace panel_store

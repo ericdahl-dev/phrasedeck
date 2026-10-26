@@ -23,6 +23,10 @@ void test_status_codes_map_to_typed_not_typed_or_maybe_typed() {
 void test_no_reply_is_not_typed_unless_the_request_was_sent() {
     TEST_ASSERT_EQUAL(Outcome::NotTyped, send::outcome(false, 0));
     TEST_ASSERT_EQUAL(Outcome::MaybeTyped, send::outcome(true, 0));
+    // HTTP clients report "no reply" as negative codes (HTTPClient's -11 read timeout); after the
+    // request went out that's still Maybe typed, or the user taps again and it types twice.
+    TEST_ASSERT_EQUAL(Outcome::MaybeTyped, send::outcome(true, -11));
+    TEST_ASSERT_EQUAL(Outcome::NotTyped, send::outcome(false, -1));
 }
 
 int main() {

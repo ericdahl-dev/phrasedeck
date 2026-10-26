@@ -131,7 +131,7 @@ struct SpotStorageTests {
         try Deck.delete(p[0], in: context)
 
         #expect(try rows(p[0].uid).isEmpty)
-        #expect(try rows(p[1].uid).count == 2)
+        #expect(try rows(p[1].uid).count == LayoutWidth.allCases.count)
     }
 
     /// A Button moved to another Page loses its Spots, so it shows at the end there (spec rule 8).
@@ -155,7 +155,7 @@ struct SpotStorageTests {
         draft.label = "renamed"
         try Deck.save(draft, into: p[0])
 
-        #expect(try rows(p[0].uid).count == 2)
+        #expect(try rows(p[0].uid).count == LayoutWidth.allCases.count)
     }
 
     @Test func deletingAPageDeletesTheSpotsOfItsButtons() throws {
@@ -166,6 +166,6 @@ struct SpotStorageTests {
         try Deck.delete(agents, in: context)
 
         #expect(try context.fetch(FetchDescriptor<SavedSpot>()).map(\.phraseUID).allSatisfy { $0 == q[0].uid })
-        #expect(try rows(q[0].uid).count == 2)
+        #expect(try rows(q[0].uid).count == LayoutWidth.allCases.count)
     }
 }

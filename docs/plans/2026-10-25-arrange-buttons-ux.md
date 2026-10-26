@@ -23,10 +23,15 @@ Pages, live reflow, gaps allowed, one arrangement per width.
 
 ## 2. Widths and spots
 
-- **Width** = the horizontal size class: `compact` (iPhone portrait and most landscape, iPad Slide
-  Over) or `regular` (iPad full screen and split, iPhone Max/Plus landscape). This is the same key
-  the column count already uses. Consequence: an iPhone Max in landscape shows the iPad's
-  arrangement, and iPad Slide Over shows the iPhone's.
+- **Width** = the horizontal size class × orientation: `compact` and `compact-landscape` (iPhone,
+  iPad Slide Over), `regular` and `regular-landscape` (iPad full screen and split, iPhone Max/Plus
+  landscape). Landscape means the Deck's own size is wider than tall (from its GeometryReader, not
+  the device), so Split View counts. Portrait and landscape keep **independent** arrangements
+  (Eric, 2026-10-25). Rows saved before this say `compact` or `regular` and read as portrait; the
+  key is a String, so there's no CloudKit schema change.
+- A width with **no spots yet starts from the other orientation**: its Buttons come in that
+  orientation's reading order and are packed to this width's column count. Its first edit saves its
+  own spots, and from then on the two are independent.
 - A **spot** is (column, row) of a Button's top-left Square, for one width.
 - A Page **has an arrangement** at a width once any of its Buttons has a spot there. A Page with no
   arrangement is packed from `order`, exactly as today.
@@ -145,9 +150,9 @@ Arrange --Done / tap empty space / app to background--> Normal
 - **Pinch to fewer columns**: Buttons whose spot no longer fits are shown at the first free spot at or
   after it (resolution step 3). Nothing is saved, so pinching back restores the layout.
 - **Pinch to more columns**: spots keep their columns; new columns on the right are empty.
-- **Rotation or Split View** that changes size class switches to the other width's arrangement (or
-  packing if it has none). Rotation that keeps the size class keeps the arrangement; the column count
-  is already per size class.
+- **Rotation or Split View** switches to that width's own arrangement (size class × orientation), or
+  starts from the other orientation's order if it has none (section 2). Nothing is saved until an
+  edit.
 - **Size made bigger in the editor**: on Save, the edited Button keeps its spot and anything it now
   overlaps shifts forward (section 5 rule), saved for the current width. Other widths settle it by
   resolution when shown.

@@ -7,6 +7,7 @@
 #include <Wire.h>
 #include <esp_heap_caps.h>
 #include <esp_partition.h>
+#include <nvs_flash.h>
 #include <lvgl.h>
 
 #include <string>
@@ -313,6 +314,7 @@ lv_obj_t* g_bt_note = nullptr;
 
 void closeBtPair(lv_event_t*) {
     if (g_bt_pair == nullptr) return;
+    net::closeBluetoothPairing();  // Done or skipped: no one else may pair now
     lv_obj_delete_async(g_bt_pair);  // not during its own event
     g_bt_pair = nullptr;
     if (g_wizard == Wizard::Pair) wizardWeb();  // paired or skipped
@@ -321,7 +323,7 @@ void closeBtPair(lv_event_t*) {
 void btPairShow(const net::Snapshot& s) {
     lv_label_set_text(g_bt_passkey, bt_pairing::passkeyText(s.passkey).c_str());
     lv_label_set_text(g_bt_note, s.blePairing ? "Pairing is open for 2 minutes."
-                                 : s.bleReady  ? "Paired and connected."
+                                 : s.bleReady  ? "A Computer is connected. If it isn't yours, pair again."
                                                : "Pairing has closed. Open it again to pair.");
 }
 
@@ -948,7 +950,8 @@ void applyWebEdit() {
 }
 
 // A finger on the top-left corner at power-on: count down on screen, and after 10 s erase the
-// panel NVS (admin password, lockouts, web key and cert, pairing) and the saved Buttons.
+// panel NVS (admin password, lockouts, web key and cert, pairing, Mode), the saved Buttons and the
+// default NVS (Bluetooth bonds, so the last owner's Computer can't reconnect).
 void factoryResetIfHeld() {
     using factory_reset::Hold;
     auto inCorner = [] { return factory_reset::check(touch_pressed(), touch_x(), touch_y(), 0) == Hold::Holding; };
@@ -973,7 +976,8 @@ void factoryResetIfHeld() {
     if (hold == Hold::Reset) {
         lv_label_set_text(label, "Erasing...");
         lv_timer_handler();
-        const bool nvs = panel_store::erase();
+        // The default NVS holds the Bluetooth bonds; nothing in it is needed (Wi-Fi is compiled in).
+        const bool nvs = panel_store::erase() && nvs_flash_erase() == ESP_OK && nvs_flash_init() == ESP_OK;
         // The whole Buttons partition, not LittleFS.format(): that only rewrites the superblock.
         // loadPhrases() then makes a fresh filesystem.
         const esp_partition_t* buttons =

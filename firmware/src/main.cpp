@@ -321,7 +321,8 @@ void closeBtPair(lv_event_t*) {
 }
 
 void btPairShow(const net::Snapshot& s) {
-    lv_label_set_text(g_bt_passkey, bt_pairing::passkeyText(s.passkey).c_str());
+    const std::string key = bt_pairing::passkeyText(s.passkey);
+    lv_label_set_text(g_bt_passkey, key.empty() ? "(appears when your Computer connects)" : key.c_str());
     lv_label_set_text(g_bt_note, s.blePairing ? "Pairing is open for 2 minutes."
                                  : s.bleReady  ? "A Computer is connected. If it isn't yours, pair again."
                                                : "Pairing has closed. Open it again to pair.");

@@ -43,6 +43,7 @@ unsigned g_net_version = 0;
 unsigned g_message_seq = 0;
 std::vector<lv_obj_t*> g_buttons;  // the grid's Buttons, by phrase index
 lv_obj_t* g_dots = nullptr;        // one dot per Page, when there's more than one
+lv_obj_t* g_tiles = nullptr;       // the Pages of Buttons, rebuilt when the web page changes them
 lv_obj_t* g_sending = nullptr;  // the Button whose Send is in flight, dimmed until its result
 lv_obj_t* g_maybe = nullptr;    // a Maybe typed Button stays orange until the next tap
 lv_timer_t* g_flash = nullptr;  // ends the 700 ms result color on g_flashed
@@ -287,7 +288,9 @@ bool savePhrases() {
     const std::string json = g_phrases.toJson();
     const bool written = f.write(reinterpret_cast<const uint8_t*>(json.data()), json.size()) == json.size();
     f.close();
-    return written && LittleFS.rename("/phrases.tmp", kPhrasesFile);
+    if (!written || !LittleFS.rename("/phrases.tmp", kPhrasesFile)) return false;
+    web_server::publish(json);
+    return true;
 }
 
 // The saved list; the starter Buttons, already confirmed, when there's none or it won't load.
@@ -298,7 +301,10 @@ void loadPhrases() {
         std::string json(f.size(), '\0');
         const bool read = f.read(reinterpret_cast<uint8_t*>(&json[0]), json.size()) == json.size();
         f.close();
-        if (read && g_phrases.fromJson(json)) return;
+        if (read && g_phrases.fromJson(json)) {
+            web_server::publish(json);
+            return;
+        }
         // Kept, not overwritten: a load can fail for a reason that passes (out of memory).
         LittleFS.remove("/phrases.bad");
         LittleFS.rename(kPhrasesFile, "/phrases.bad");
@@ -306,7 +312,7 @@ void loadPhrases() {
     }
     for (const char* p : kStarterPhrases) g_phrases.add(p, p);
     for (size_t i = 0; i < g_phrases.size(); ++i) g_phrases.confirmed(i);
-    savePhrases();
+    if (!savePhrases()) web_server::publish(g_phrases.toJson());  // the page still shows them
 }
 
 // Which panel Phrase this is, for the Helper's edit notice: unique across panels by the chip's MAC.
@@ -691,6 +697,8 @@ void showPage(lv_event_t* e) {
     }
 }
 
+void buildGrid();
+
 void buildPage() {
     // LVGL's default theme is light; dark, so every screen and overlay matches without per-object colors.
     lv_display_set_theme(display_lvgl(), lv_theme_default_init(display_lvgl(), lv_palette_main(LV_PALETTE_BLUE),
@@ -722,11 +730,17 @@ void buildPage() {
     lv_label_set_text(g_status, "Tap a Button");
     lv_obj_align(g_status, LV_ALIGN_TOP_LEFT, 16, 12);
 
-    // Pages of 4 x 2 Buttons below the status line; past 8, swipe sideways, with a dot per Page.
+    buildGrid();
+}
+
+// Pages of 4 x 2 Buttons below the status line; past 8, swipe sideways, with a dot per Page.
+void buildGrid() {
+    lv_obj_t* screen = lv_screen_active();
     constexpr size_t kPerPage = 8;
     const size_t pages = g_phrases.size() == 0 ? 1 : (g_phrases.size() + kPerPage - 1) / kPerPage;
     const int32_t dots = pages > 1 ? 24 : 0;
-    lv_obj_t* tiles = lv_tileview_create(screen);
+    lv_obj_t* tiles = g_tiles = lv_tileview_create(screen);
+    lv_obj_move_background(tiles);  // under any overlay that's open when the web page rebuilds it
     lv_obj_set_size(tiles, board::LCD_WIDTH, board::LCD_HEIGHT - 52 - dots);
     lv_obj_align(tiles, LV_ALIGN_TOP_MID, 0, 52);
     lv_obj_set_style_bg_opa(tiles, LV_OPA_TRANSP, 0);
@@ -759,6 +773,7 @@ void buildPage() {
 
     if (pages < 2) return;
     g_dots = lv_obj_create(screen);
+    lv_obj_move_background(g_dots);
     lv_obj_remove_style_all(g_dots);
     lv_obj_set_size(g_dots, board::LCD_WIDTH, dots);
     lv_obj_align(g_dots, LV_ALIGN_BOTTOM_MID, 0, 0);
@@ -776,6 +791,33 @@ void buildPage() {
         if (p == 0) lv_obj_add_state(dot, LV_STATE_CHECKED);
     }
     lv_obj_add_event_cb(tiles, showPage, LV_EVENT_VALUE_CHANGED, nullptr);
+}
+
+// After the list changes: a fresh grid, with no result color or dimmed Button left on a deleted one.
+void rebuildGrid() {
+    clearResult();
+    lv_obj_delete(g_tiles);
+    if (g_dots != nullptr) lv_obj_delete(g_dots);
+    g_tiles = g_dots = nullptr;
+    g_buttons.clear();
+    buildGrid();
+}
+
+// One change from the web page, applied here on the LVGL loop. Waits while a Send is in flight, as
+// its result colors a Button the rebuild would delete; the page then says "busy".
+void applyWebEdit() {
+    if (g_busy) return;
+    web::Edit e;
+    uint32_t seq;
+    if (!web_server::takeEdit(e, seq)) return;
+    const phrases::List before = g_phrases;
+    bool ok = web::apply(g_phrases, e);
+    if (ok && !savePhrases()) {
+        g_phrases = before;  // not saved: the panel keeps what's on flash
+        ok = false;
+    }
+    if (ok) rebuildGrid();
+    web_server::editDone(seq, ok);
 }
 
 }  // namespace
@@ -840,7 +882,7 @@ void serialCommands() {
             std::string text = rest + (*rest == ' ');
             for (size_t at; (at = text.find("\\n")) != std::string::npos;) text.replace(at, 2, "\n");
             for (size_t at; (at = text.find("\\t")) != std::string::npos;) text.replace(at, 2, "\t");
-            if (i < g_phrases.size() && g_phrases.edit(i, g_phrases.at(i).label, text)) savePhrases();
+            if (i < g_phrases.size() && g_phrases.edit(i, g_phrases.at(i).label, text) && savePhrases()) rebuildGrid();
         } else if (line == "shot") {
             // The screen, one line per row: "R" then hex (count, RGB565) runs. Copied whole first, so
             // the picture is one moment; one write per row, so log lines land between rows.
@@ -873,12 +915,16 @@ void serialCommands() {
             Preferences p;
             if (p.begin("admin", false, panel_store::kPartition)) p.clear();
             Serial.println("clearpw: done, reboot to load");
-        } else if (line.rfind("add ", 0) == 0) {  // a Button, as the web page would add it; reboot to see it
-            Serial.printf("add: %s\n", g_phrases.add(line.substr(4), line.substr(4)) && savePhrases() ? "added" : "refused");
-        } else if (line.rfind("remove ", 0) == 0) {  // reboot to see it
-            Serial.printf("remove: %s\n", g_phrases.remove(strtoul(line.c_str() + 7, nullptr, 10)) && savePhrases() ? "removed" : "refused");
+        } else if (line.rfind("add ", 0) == 0) {  // a Button, as the web page would add it
+            const bool ok = g_phrases.add(line.substr(4), line.substr(4)) && savePhrases();
+            if (ok) rebuildGrid();
+            Serial.printf("add: %s\n", ok ? "added" : "refused");
+        } else if (line.rfind("remove ", 0) == 0) {
+            const bool ok = g_phrases.remove(strtoul(line.c_str() + 7, nullptr, 10)) && savePhrases();
+            if (ok) rebuildGrid();
+            Serial.printf("remove: %s\n", ok ? "removed" : "refused");
         } else if (line.rfind("page ", 0) == 0 && !g_buttons.empty()) {
-            lv_obj_t* tiles = lv_obj_get_parent(lv_obj_get_parent(g_buttons.front()));
+            lv_obj_t* tiles = g_tiles;
             lv_tileview_set_tile_by_index(tiles, strtoul(line.c_str() + 5, nullptr, 10), 0, LV_ANIM_OFF);
             lv_obj_send_event(tiles, LV_EVENT_VALUE_CHANGED, nullptr);
         } else if (line == "gear") {
@@ -909,6 +955,7 @@ void loop() {
 #endif
     touch_poll();
     showNet();
+    applyWebEdit();
     lv_timer_handler();
     delay(5);
 }

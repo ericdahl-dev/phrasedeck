@@ -179,7 +179,8 @@ the files on the release:
 
 ```sh
 mkdir phrased-bin && cd phrased-bin
-curl -fLO "$base/PKGBUILD" -fLO "$base/phrased-bin.install"
+curl -fLO "$base/PKGBUILD" -fLO "$base/phrased-bin.install" -fLO "$base/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS   # makepkg runs the PKGBUILD, so check it first
 makepkg -si
 ```
 

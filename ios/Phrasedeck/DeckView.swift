@@ -24,6 +24,9 @@ struct DeckView: View {
     /// True while a finger drags; SwiftUI resets it even when a drag is canceled without onEnded.
     @GestureState private var dragging = false
     @State private var shownPage: PersistentIdentifier?
+    /// The Button whose delete is being confirmed, and the Page to keep a gap on in Arrange mode.
+    @State private var deleting: (phrase: Phrase, gapOn: (page: Page, columns: Int)?)?
+    @State private var deleted = 0
     /// Where each Page's grid sits on screen, so a drag can cross Pages (#81, slice 4).
     @State private var gridOrigins: [PersistentIdentifier: CGPoint] = [:]
     @Environment(\.scenePhase) private var scenePhase
@@ -117,6 +120,15 @@ struct DeckView: View {
         .sensoryFeedback(.impact(weight: .light), trigger: carry?.page) { old, new in old != nil && new != nil }
         .sheet(item: $editing) { PhraseEditor(target: $0) }
         .sheet(isPresented: $editingPages) { PageEditor() }
+        .alert(deleting.map { "Delete \u{201C}\($0.phrase.label)\u{201D}?" } ?? "",
+               isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+               presenting: deleting) { d in
+            Button("Delete", role: .destructive) { confirmDelete(d.phrase, gapOn: d.gapOn) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This removes the Button and its Phrase from your Deck on all your phones and iPads.")
+        }
+        .sensoryFeedback(.impact(weight: .medium), trigger: deleted)
         .saveFailureAlert($saveError)
     }
 
@@ -185,7 +197,7 @@ struct DeckView: View {
                         if let phrase = phrases[id] {
                             PhraseButton(phrase: phrase, metrics: DeckSize.metrics(button: size),
                                          pinchGuard: pinchGuard,
-                                         edit: { editing = .existing(phrase) }, delete: { remove(phrase) },
+                                         edit: { editing = .existing(phrase) }, delete: { deleting = (phrase, nil) },
                                          editDeck: Self.arrangeEnabled ? { arranging = true } : nil,
                                          arrange: arranging ? role(phrase, at: spot, on: page, columns: columns) : nil)
                         }
@@ -196,6 +208,7 @@ struct DeckView: View {
                 .frame(width: size.width, height: size.height)
                 // While carried it's drawn above the Pages (carriedButton), so it can cross them.
                 .opacity(carried ? 0 : 1)
+                .transition(.scale.combined(with: .opacity))
                 .offset(x: CGFloat(at.column) * step.width, y: CGFloat(at.row) * step.height)
                 // In Arrange mode a Button drags at once (spec section 4).
                 .highPriorityGesture(carryGesture(spot, size: size, on: page, step: step, columns: columns, deck: deck),
@@ -385,11 +398,22 @@ struct DeckView: View {
             },
             moveToPage: { target in
                 do { try Deck.moveToPage(phrase, target) } catch { saveError = error.localizedDescription }
-            })
+            },
+            delete: { deleting = (phrase, (page, columns)) })
     }
 
-    private func remove(_ phrase: Phrase) {
-        do { try withAnimation { try Deck.delete(phrase, in: context) } } catch {
+    /// Deletes the confirmed Button. In Arrange mode the others stay where they are (spec section 9).
+    private func confirmDelete(_ phrase: Phrase, gapOn gap: (page: Page, columns: Int)?) {
+        do {
+            try withAnimation {
+                if let gap {
+                    try Deck.delete(phrase, keepingGapOn: gap.page, width: layoutWidth, columns: gap.columns, in: context)
+                } else {
+                    try Deck.delete(phrase, in: context)
+                }
+            }
+            deleted += 1
+        } catch {
             saveError = error.localizedDescription
         }
     }

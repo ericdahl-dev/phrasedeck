@@ -124,6 +124,53 @@ final class ArrangeTests: XCTestCase {
         XCTAssertTrue(button.waitForValue("Row 1, column 3"))
     }
 
+    // MARK: Delete (#81, slice 5)
+
+    /// In Arrange mode each Button has a "−" badge. It asks first; Cancel keeps the Button, and Delete
+    /// removes it and leaves a gap (spec section 9).
+    @MainActor
+    func testTheMinusBadgeAsksThenDeletesLeavingAGap() {
+        let app = launch(arrange: true)
+        let button = app.buttons["phrase.agent-status"]
+        let next = app.buttons["phrase.status-table"]
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+        enterArrangeMode(app, from: button)
+        XCTAssertEqual(next.value as? String, "Row 1, column 2")
+        let badge = app.buttons["Delete Agent status"]
+        XCTAssertTrue(badge.exists)
+
+        badge.tap()
+        let alert = app.alerts["Delete \u{201C}Agent status\u{201D}?"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 20))
+        alert.buttons["Cancel"].tap()
+        XCTAssertTrue(button.exists)
+
+        badge.tap()
+        XCTAssertTrue(alert.waitForExistence(timeout: 20))
+        alert.buttons["Delete"].tap()
+
+        XCTAssertTrue(button.waitForNonExistence(timeout: 20))
+        XCTAssertEqual(next.value as? String, "Row 1, column 2", "the others stay put")
+    }
+
+    /// The long-press menu's Delete asks the same way (spec open question 4).
+    @MainActor
+    func testTheMenusDeleteAsksFirst() {
+        let app = launch(arrange: false)
+        let button = app.buttons["phrase.agent-status"]
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+
+        button.press(forDuration: 1)
+        let delete = app.buttons["Delete"]
+        XCTAssertTrue(delete.waitForExistence(timeout: 20))
+        delete.tap()
+        let alert = app.alerts["Delete \u{201C}Agent status\u{201D}?"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 20))
+        alert.buttons["Delete"].tap()
+
+        XCTAssertTrue(button.waitForNonExistence(timeout: 20))
+    }
+
     @MainActor
     func addPages(_ app: XCUIApplication, _ names: [String]) {
         app.buttons["deck.pages"].tap()

@@ -20,6 +20,8 @@ struct PhraseButton: View {
         let otherPages: [Page]
         let nudge: (Arrangement.Nudge) -> Void
         let moveToPage: (Page) -> Void
+        /// Asks before deleting (spec section 9).
+        let delete: () -> Void
     }
 
     @Environment(AppModel.self) private var model
@@ -57,7 +59,6 @@ struct PhraseButton: View {
                 Button("Delete", systemImage: "trash", role: .destructive, action: delete)
             }
         }
-        .modifier(Jiggle(active: arrange != nil && !reduceMotion))
         .overlay {
             // Reduce Motion: a dashed outline instead of the jiggle.
             if arrange != nil && reduceMotion {
@@ -75,8 +76,28 @@ struct PhraseButton: View {
                 ForEach(arrange.otherPages) { page in
                     Button("Move to \(page.name)") { arrange.moveToPage(page) }
                 }
+                Button("Delete", action: arrange.delete)
             }
         }
+        // Outside the Button's own accessibility element, so VoiceOver and Voice Control reach it alone.
+        .overlay(alignment: .topLeading) {
+            if let arrange {
+                Button(action: arrange.delete) {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 22))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, .gray)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                // 44 pt to tap, reaching no further than the 12 pt gap to the neighbors.
+                .offset(x: -12, y: -12)
+                .accessibilityLabel("Delete \(phrase.label)")
+                .transition(.opacity)
+            }
+        }
+        .modifier(Jiggle(active: arrange != nil && !reduceMotion))
         .sensoryFeedback(.impact(weight: .light), trigger: taps)
     }
 

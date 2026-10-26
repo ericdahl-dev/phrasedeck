@@ -418,7 +418,7 @@ void tick(ble_npl_event*) {
         log_w("BLE host resynced: privacy settings applied again");
         const bool advertising = ble_gap_adv_active();
         BLEDevice::stopAdvertising();
-        ble_hs_pvcy_set_resolve_enabled(1);
+        if (ble_hs_pvcy_set_resolve_enabled(1) != 0) log_w("address resolution not turned back on");
         protectComputer();
         if (advertising) advertise(wantAllowList());
     }

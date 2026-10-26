@@ -143,10 +143,7 @@ void handleType(const Request& req, Snapshot& s) {
             port = h.txt.port;
         }
     }
-    JsonDocument doc;
-    doc["text"] = req.text;
-    std::string json;
-    serializeJson(doc, json);
+    const std::string& json = req.text;  // the whole /type body, from send::typeBody
     const auto pinned = [](const std::string& cert) { return pairing::matchesPin(g_pairing.pin, cert); };
     helper_client::Reply r = helper_client::post(address, port, "/type", json, g_pairing.token, pinned);
     // A Bonjour spoofer can claim the paired Computer's fp; the Pin stops it, then try the
@@ -260,6 +257,8 @@ bool pair(const Helper& h, const std::string& code, const std::string& shortPin)
     return enqueue(new Request{Request::Pair, h, code, shortPin, ""});
 }
 
-bool type(const std::string& text) { return enqueue(new Request{Request::Type, Helper{}, "", "", text}); }
+bool type(const std::string& text, const std::string& phrase, uint32_t edit) {
+    return enqueue(new Request{Request::Type, Helper{}, "", "", send::typeBody(text, phrase, edit)});
+}
 
 }  // namespace net

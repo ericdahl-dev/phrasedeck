@@ -93,16 +93,18 @@ bool loadComputer() {
     return true;
 }
 
-void saveComputer(const ble_addr_t& addr) {
-    g_computer = addr;
-    g_hasComputer = true;
+// False if it couldn't be saved: the bond wouldn't survive a restart, so don't trust it.
+bool saveComputer(const ble_addr_t& addr) {
     uint8_t raw[7] = {addr.type};
     memcpy(raw + 1, addr.val, 6);
     Preferences p;
-    // Unsaved, it still reconnects until a restart; after one it has to pair again.
     if (!p.begin("ble", false, panel_store::kPartition) || p.putBytes("computer", raw, sizeof(raw)) != sizeof(raw)) {
         log_e("couldn't save the paired Computer");
+        return false;
     }
+    g_computer = addr;
+    g_hasComputer = true;
+    return true;
 }
 
 // Each connection's time to encrypt, from its connect (host task only).
@@ -229,8 +231,12 @@ class SecurityCallbacks : public BLESecurityCallbacks {
                 reject(*d);
                 return;
             case bt_pairing::Bond::ReplaceOthers:
+                // Saved first: after a power cut in between, the next start forgets the old bonds.
+                if (!saveComputer(d->peer_id_addr)) {
+                    reject(*d);
+                    return;
+                }
                 forgetAllBut(&d->peer_id_addr);
-                saveComputer(d->peer_id_addr);
                 closePairing();
                 break;
             case bt_pairing::Bond::Keep:
@@ -243,16 +249,23 @@ class SecurityCallbacks : public BLESecurityCallbacks {
     }
 };
 
+void pairingClosed() {
+    if (g_started.load() && g_trusted.load() != kNone) BLEDevice::stopAdvertising();
+    bump();
+}
+
 // Once a second on the host task, beside the callbacks that own g_grace: stops advertising when a
 // window runs out, and ends connections that sat unencrypted past their grace (#141).
 ble_npl_callout g_tick;
 
 void tick(ble_npl_event*) {
-    const uint32_t now = millis();
+    // Read, checked and closed under one lock, so an openPairing() on the net task can't be closed.
     portENTER_CRITICAL(&g_windowLock);
-    const bool lapsed = g_window.lapsed(now);
+    const bool lapsed = g_window.lapsed(millis());
+    if (lapsed) g_window.close();
     portEXIT_CRITICAL(&g_windowLock);
-    if (lapsed) closePairing();
+    if (lapsed) pairingClosed();
+    const uint32_t now = millis();
     const bool window = windowOpen();
     for (const auto& [handle, grace] : g_grace) {
         ble_gap_conn_desc d;
@@ -277,7 +290,8 @@ bool start() {
     ble_hs_cfg.sm_sc_only = 1;
     BLEDevice::setSecurityCallbacks(new SecurityCallbacks());
     // No stored Computer (first start, a factory reset, or bonds from #140): no bond is trusted, so
-    // forget them all. Otherwise forget any but the Computer's.
+    // forget them all. Otherwise forget any but the Computer's. The store takes no lock; this is safe
+    // only because nothing is connected or advertising yet.
     g_hasComputer = loadComputer();
     forgetAllBut(g_hasComputer ? &g_computer : nullptr);
 
@@ -297,8 +311,10 @@ bool start() {
     adv->setAppearance(0x03C1);  // HID keyboard
     adv->addServiceUUID(hid->hidService()->getUUID());
     adv->setScanResponse(true);
-    ble_npl_callout_init(&g_tick, nimble_port_get_dflt_eventq(), tick, nullptr);
-    ble_npl_callout_reset(&g_tick, ble_npl_time_ms_to_ticks32(1000));
+    if (ble_npl_callout_init(&g_tick, nimble_port_get_dflt_eventq(), tick, nullptr) != 0 ||
+        ble_npl_callout_reset(&g_tick, ble_npl_time_ms_to_ticks32(1000)) != 0) {
+        return false;
+    }
     BLEDevice::startAdvertising();
     g_started.store(true);
     return true;
@@ -337,8 +353,7 @@ void closePairing() {
     portENTER_CRITICAL(&g_windowLock);
     g_window.close();
     portEXIT_CRITICAL(&g_windowLock);
-    if (g_started.load() && g_trusted.load() != kNone) BLEDevice::stopAdvertising();
-    bump();
+    pairingClosed();
 }
 
 bool pairingOpen() { return windowOpen(); }

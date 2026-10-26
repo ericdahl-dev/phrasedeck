@@ -37,3 +37,4 @@ board's companion chip at I2C 0x30. The display pins are the same on every revis
 [robominds/Crowpanel-Advance-7.0-HMI-Display](https://github.com/robominds/Crowpanel-Advance-7.0-HMI-Display)
 (commit `dd9cee1`, MIT, see `LICENSE.crowpanel-drivers`), with comments changed to American
 spelling. Its `docs/HARDWARE.md` explains each board setting.
+

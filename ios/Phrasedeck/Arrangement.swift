@@ -173,7 +173,8 @@ struct EdgeFlip {
     /// Holding on after a flip flips again this often.
     static let repeatHold: TimeInterval = 0.8
 
-    private var edge: Int?
+    /// The edge being held, -1 for left or 1 for right, when it can flip.
+    private(set) var edge: Int?
     private var since = Date.distantPast
     private var flipped = false
 

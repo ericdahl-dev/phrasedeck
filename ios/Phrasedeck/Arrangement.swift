@@ -1,3 +1,5 @@
+import Foundation
+
 /// Where a Button sits on its Page: the column and row of its top-left Square (#81).
 struct Spot: Hashable, Sendable {
     let column: Int
@@ -137,5 +139,35 @@ private struct Grid {
         if last >= afterLast.row * columns + afterLast.column {
             afterLast = Spot(column: (last + 1) % columns, row: (last + 1) / columns)
         }
+    }
+}
+
+extension Arrangement {
+    /// The Square a dragged Button is headed for: the one nearest its top-left corner, kept on the
+    /// Page and far enough left for its `width`. Below the last row is fine (spec section 5).
+    static func target(topLeft: (x: Double, y: Double), step: (width: Double, height: Double), columns: Int,
+                       width: Int) -> Spot {
+        let column = Int((topLeft.x / step.width).rounded())
+        let row = Int((topLeft.y / step.height).rounded())
+        return Spot(column: min(max(0, column), max(0, columns - width)), row: max(0, row))
+    }
+}
+
+/// A drag target counts once the finger has rested on it for `hold`, so a fast sweep doesn't
+/// shuffle the Page (spec section 5).
+struct Dwell {
+    static let hold: TimeInterval = 0.15
+
+    /// The target the Page has reflowed for.
+    private(set) var accepted: Spot?
+    /// The target under the finger, not yet held long enough.
+    private(set) var candidate: Spot?
+    private var since = Date.distantPast
+
+    mutating func update(_ spot: Spot, at now: Date) {
+        if spot != candidate {
+            (candidate, since) = (spot, now)
+        }
+        if now.timeIntervalSince(since) >= Self.hold { accepted = spot }
     }
 }

@@ -55,11 +55,7 @@ final class ArrangeTests: XCTestCase {
         let app = launch(arrange: true)
         let button = app.buttons["phrase.agent-status"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))
-        button.press(forDuration: 1)
-        let editDeck = app.buttons["Edit Deck"]
-        XCTAssertTrue(editDeck.waitForExistence(timeout: 20))
-        editDeck.tap()
-        XCTAssertTrue(app.buttons["arrange.done"].waitForExistence(timeout: 20))
+        enterArrangeMode(app, from: button)
 
         XCUIDevice.shared.press(.home)
         app.activate()
@@ -67,9 +63,41 @@ final class ArrangeTests: XCTestCase {
         XCTAssertTrue(app.buttons["deck.add"].waitForExistence(timeout: 20))
         XCTAssertFalse(app.buttons["arrange.done"].exists)
     }
+
+    // MARK: Dragging (#81, slice 3)
+
+    @MainActor
+    func enterArrangeMode(_ app: XCUIApplication, from button: XCUIElement) {
+        button.press(forDuration: 1)
+        let editDeck = app.buttons["Edit Deck"]
+        XCTAssertTrue(editDeck.waitForExistence(timeout: 20))
+        editDeck.tap()
+        XCTAssertTrue(app.buttons["arrange.done"].waitForExistence(timeout: 20))
+    }
+
+    /// In Arrange mode a Button drags at once; dropped on another Button it takes that Spot.
+    @MainActor
+    func testInArrangeModeAButtonDragsOntoAnotherAndTakesItsSpot() {
+        let app = launch(arrange: true)
+        let button = app.buttons["phrase.agent-status"]
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+        enterArrangeMode(app, from: button)
+        let target = app.buttons.matching(NSPredicate(format: "value == %@", "Row 2, column 2")).firstMatch
+        XCTAssertTrue(target.exists)
+
+        button.press(forDuration: 0.1, thenDragTo: target, withVelocity: .slow, thenHoldForDuration: 0.5)
+
+        XCTAssertTrue(button.waitForValue("Row 2, column 2"))
+        XCTAssertTrue(app.buttons["arrange.done"].exists, "still in Arrange mode after the drop")
+    }
 }
 
 private extension XCUIElement {
+    func waitForValue(_ value: String, timeout: TimeInterval = 20) -> Bool {
+        let done = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: self)
+        return XCTWaiter().wait(for: [done], timeout: timeout) == .completed
+    }
+
     func waitForLabel(_ label: String, timeout: TimeInterval = 20) -> Bool {
         let done = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", label), object: self)
         return XCTWaiter().wait(for: [done], timeout: timeout) == .completed

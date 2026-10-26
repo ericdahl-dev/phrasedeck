@@ -153,6 +153,28 @@ final class ArrangeTests: XCTestCase {
         XCTAssertEqual(next.value as? String, "Row 1, column 2", "the others stay put")
     }
 
+    // MARK: Auto-scroll (spec section 5)
+
+    /// Held near the bottom of the Page, a dragged Button scrolls it, so the first row goes off the
+    /// top, and lands below what fit on screen.
+    @MainActor
+    func testHoldingNearTheBottomScrollsThePage() {
+        let app = launch(arrange: true)
+        let button = app.buttons["phrase.agent-status"]
+        let first = app.buttons["phrase.status-table"]
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+        enterArrangeMode(app, from: button)
+        let grid = app.scrollViews["deck.grid"].firstMatch
+        let top = grid.frame.minY
+
+        let from = button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let bottom = grid.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1)).withOffset(CGVector(dx: 0, dy: -8))
+        from.press(forDuration: 0.1, thenDragTo: bottom, withVelocity: .slow, thenHoldForDuration: 2.0)
+
+        XCTAssertTrue(app.buttons["arrange.done"].exists)
+        XCTAssertLessThan(first.frame.maxY, top, "the first row scrolled off the top")
+    }
+
     /// The long-press menu's Delete asks the same way (spec open question 4).
     @MainActor
     func testTheMenusDeleteAsksFirst() {

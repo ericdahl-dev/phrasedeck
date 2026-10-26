@@ -8,6 +8,9 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/ericdahl-dev/phrasedeck"
 license=('LicenseRef-Proprietary')
 depends=('wtype' 'wl-clipboard')
+optdepends=('ydotool: typing on GNOME or KDE (Wayland)'
+            'xdotool: typing on X11'
+            'xclip: pasting on X11')
 provides=('phrased')
 conflicts=('phrased')
 install=phrased-bin.install

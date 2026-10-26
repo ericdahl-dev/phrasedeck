@@ -125,7 +125,10 @@ listener (47812) and the app's choice of route.
       board on USB can read the Token, the Pin and, later, the panel's TLS key and admin password
       hash. Revoke the panel (`phrased revoke`) if it leaves the house.
 - [ ] Factory reset (hold the top-left corner from power-on for 10 s) erases the panel NVS, the
-      Buttons and the core dump, but not the Wi-Fi password, which is in the firmware and the
-      default `nvs`. It is not a hand-off wipe: before the panel leaves the house, erase the whole
+      default `nvs` (Bluetooth bonds), the Buttons and the core dump, but not the Wi-Fi password,
+      which is compiled into the firmware. It is not a hand-off wipe: before the panel leaves the house, erase the whole
       flash over USB (`pio run -t erase`). After any reset, `phrased devices` and `phrased revoke`
       the old panel: the Helper still accepts its Token until then.
+- [ ] Bluetooth Mode (#94): the 2-minute pairing window (Settings, behind the admin password)
+      trusts whoever types the shown passkey first, and replaces the paired Computer. If yours
+      didn't connect, someone nearby may have: open pairing again. Done closes the window early.

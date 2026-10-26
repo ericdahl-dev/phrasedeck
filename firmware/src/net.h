@@ -60,5 +60,6 @@ void cancelBluetoothSend();
 
 // Lets a new Computer pair over Bluetooth for ms, replacing the paired one. Bluetooth Mode only.
 void openBluetoothPairing(uint32_t ms);
+void closeBluetoothPairing();
 
 }  // namespace net

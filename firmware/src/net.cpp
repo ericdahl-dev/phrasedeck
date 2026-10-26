@@ -345,4 +345,8 @@ void openBluetoothPairing(uint32_t ms) {
     if (g_bluetooth) ble_keyboard::openPairing(ms);
 }
 
+void closeBluetoothPairing() {
+    if (g_bluetooth) ble_keyboard::closePairing();
+}
+
 }  // namespace net

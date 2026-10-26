@@ -107,6 +107,102 @@ void test_broken_utf8_is_named_by_its_byte() {
     TEST_ASSERT_EQUAL_STRING("\xc3\xa9", hid_keys::plan("\xc3\xa9\xa9", false).bad.c_str());
 }
 
+// Records each report the Sender hands to the BLE stack; fail makes the next n of them fail.
+struct Stack {
+    std::vector<Key> sent;
+    int fail = 0;
+    bool notify(const Key& k) {
+        if (fail > 0) {
+            fail--;
+            return false;
+        }
+        sent.push_back(k);
+        return true;
+    }
+};
+
+static const Key kRelease{0, 0};
+
+// Steps the Sender every ms from 0 to `until`, as the BLE task's loop would.
+static void run(hid_keys::Sender& s, Stack& stack, uint32_t until, uint32_t from = 0) {
+    for (uint32_t t = from; t <= until; t++) s.step(t, [&](const Key& k) { return stack.notify(k); });
+}
+
+void test_each_key_is_a_press_then_a_release_one_report_per_interval() {
+    hid_keys::Sender s(hid_keys::plan("aa", false).keys, 20);
+    Stack stack;
+
+    run(s, stack, 59);
+    TEST_ASSERT_EQUAL(3, stack.sent.size());  // at 0, 20 and 40 ms
+    TEST_ASSERT_FALSE(s.done());
+
+    run(s, stack, 60, 60);
+    const std::vector<Key> want{{0, 0x04}, kRelease, {0, 0x04}, kRelease};
+    TEST_ASSERT_EQUAL(want.size(), stack.sent.size());
+    for (size_t i = 0; i < want.size(); i++) TEST_ASSERT_TRUE(want[i] == stack.sent[i]);
+    TEST_ASSERT_TRUE(s.done());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Sent, s.result());
+}
+
+// ENOMEM from the stack: the same report goes again next interval, so no key is lost or left down.
+void test_a_report_the_stack_refuses_is_sent_again() {
+    hid_keys::Sender s(hid_keys::plan("b", false).keys, 20);
+    Stack stack;
+    stack.fail = 2;
+
+    run(s, stack, 100);
+    const std::vector<Key> want{{0, 0x05}, kRelease};
+    TEST_ASSERT_EQUAL(want.size(), stack.sent.size());
+    for (size_t i = 0; i < want.size(); i++) TEST_ASSERT_TRUE(want[i] == stack.sent[i]);
+    TEST_ASSERT_TRUE(s.done());
+}
+
+// Cancel with a key down: its release still goes, so the Computer isn't left with a held key.
+void test_cancel_releases_a_held_key_then_stops() {
+    hid_keys::Sender s(hid_keys::plan("abc", false).keys, 20);
+    Stack stack;
+    run(s, stack, 40);  // press a, release, press b (at 0, 20, 40 ms): b is down
+    TEST_ASSERT_EQUAL(3, stack.sent.size());
+
+    s.cancel();
+    run(s, stack, 200, 41);
+    TEST_ASSERT_EQUAL(4, stack.sent.size());
+    TEST_ASSERT_TRUE(kRelease == stack.sent.back());
+    TEST_ASSERT_TRUE(s.done());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Stopped, s.result());
+}
+
+// Cancel before anything went: nothing was typed.
+void test_cancel_before_the_first_key_sends_nothing() {
+    hid_keys::Sender s(hid_keys::plan("abc", false).keys, 20);
+    Stack stack;
+    s.cancel();
+    run(s, stack, 200);
+    TEST_ASSERT_EQUAL(0, stack.sent.size());
+    TEST_ASSERT_TRUE(s.done());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::NotSent, s.result());
+}
+
+// The panel can't see what landed over Bluetooth, so it never says Typed (#98 UI review).
+void test_what_the_status_line_says_after_a_bluetooth_send() {
+    using R = hid_keys::Sender::Result;
+    hid_keys::Said said = hid_keys::said(R::Sent);
+    TEST_ASSERT_EQUAL_STRING("Sent as keystrokes", said.message.c_str());
+    TEST_ASSERT_TRUE(said.ok);
+
+    said = hid_keys::said(R::Stopped);
+    TEST_ASSERT_EQUAL_STRING("Stopped partway: some keystrokes were sent", said.message.c_str());
+    TEST_ASSERT_FALSE(said.ok);
+
+    said = hid_keys::said(R::NotSent);
+    TEST_ASSERT_EQUAL_STRING("Not sent", said.message.c_str());
+    TEST_ASSERT_FALSE(said.ok);
+
+    said = hid_keys::refused("\xc3\xa9");
+    TEST_ASSERT_EQUAL_STRING("Not sent: a US keyboard can't type \xc3\xa9", said.message.c_str());
+    TEST_ASSERT_FALSE(said.ok);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_letters_and_digits);
@@ -116,5 +212,10 @@ int main() {
     RUN_TEST(test_pacing);
     RUN_TEST(test_every_printable_character_types_its_us_key);
     RUN_TEST(test_broken_utf8_is_named_by_its_byte);
+    RUN_TEST(test_each_key_is_a_press_then_a_release_one_report_per_interval);
+    RUN_TEST(test_a_report_the_stack_refuses_is_sent_again);
+    RUN_TEST(test_cancel_releases_a_held_key_then_stops);
+    RUN_TEST(test_cancel_before_the_first_key_sends_nothing);
+    RUN_TEST(test_what_the_status_line_says_after_a_bluetooth_send);
     return UNITY_END();
 }

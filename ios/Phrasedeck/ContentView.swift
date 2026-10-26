@@ -8,6 +8,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @State private var showingComputers = false
+    @State private var addingComputer = false
     @State private var pairing: Helper?
     @State private var incomingLink: IncomingLink?
 
@@ -24,12 +25,13 @@ struct ContentView: View {
                 .safeAreaInset(edge: .top) { banner }
                 .toolbar {
                     ToolbarItem(placement: .principal) {
-                        HelperPicker(showComputers: { showingComputers = true })
+                        HelperPicker(showComputers: { showingComputers = true }, addComputer: { addingComputer = true })
                     }
                 }
                 .navigationBarTitleDisplayMode(.inline)
         }
         .sheet(isPresented: $showingComputers) { ComputersView() }
+        .sheet(isPresented: $addingComputer) { AddHelperView() }
         .sheet(item: $pairing) { helper in AddHelperView(pairAgain: helper) }
         .sheet(item: $incomingLink) { incoming in AddHelperView(link: incoming.result) }
         .onOpenURL { url in
@@ -70,6 +72,15 @@ struct ContentView: View {
                     Button("Pair again") { pairing = helper }
                         .buttonStyle(.borderedProminent)
                         .tint(.white.opacity(0.25))
+                }
+                if feedback.addComputer {
+                    Button("Add") {
+                        model.dismissFeedback()
+                        addingComputer = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.white.opacity(0.25))
+                    .accessibilityIdentifier("banner.add")
                 }
                 Button { model.dismissFeedback() } label: {
                     Image(systemName: "xmark")

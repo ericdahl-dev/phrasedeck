@@ -78,6 +78,12 @@ struct DeckView: View {
             }
         }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                let page = pages.first { $0.persistentModelID == shownPage } ?? pages.first
+                Button("Add Button", systemImage: "plus") { page.map { editing = .new($0) } }
+                    .disabled(page == nil)
+                    .accessibilityIdentifier("deck.new")
+            }
             if arranging {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { arranging = false }
@@ -174,7 +180,6 @@ struct DeckView: View {
         .scrollPosition(Binding(get: { scrollPositions[page.persistentModelID] ?? ScrollPosition() },
                                 set: { scrollPositions[page.persistentModelID] = $0 }))
         // Only Arrange mode drags; outside it, scrolling writes no state.
-        // Only Arrange mode drags; outside it, scrolling writes no state.
         .onScrollGeometryChange(for: ScrollGeometry?.self) { arranging ? $0 : nil } action: { _, geometry in
             scrollGeometries[page.persistentModelID] = geometry
         }
@@ -193,10 +198,10 @@ struct DeckView: View {
     }
 
     /// The page's Buttons at their Spots for this Layout width, or packed by Size (#51) when it has
-    /// none, with the "+" tile after them (hidden in Arrange mode).
+    /// none, with the "+" tile after them in Arrange mode (not while carrying, so no preview lands on it).
     private func grid(_ page: Page, columns: Int, cell: CGSize, deck: CGRect) -> some View {
         let phrases = Dictionary(uniqueKeysWithValues: page.sortedPhrases.map { ($0.persistentModelID, $0) })
-        let items = items(page) + (arranging ? [] : [Arrangement.Item(id: Tile.add, columns: 1, rows: 1, spot: nil)])
+        let items = items(page) + (arranging && carry == nil ? [Arrangement.Item(id: Tile.add, columns: 1, rows: 1, spot: nil)] : [])
         let placed = Arrangement.resolve(items, columns: columns)
         let step = CGSize(width: cell.width + DeckSize.spacing, height: cell.height + DeckSize.spacing)
         let rows = CGFloat(Packing.rows(of: placed))

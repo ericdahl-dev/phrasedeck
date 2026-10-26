@@ -14,13 +14,28 @@
 
 #include "admin.h"
 #include "panel_store.h"
+#include "phrases.h"
 #include "web.h"
+#include "web_editor.h"
 
 namespace web_server {
 namespace {
 
-SemaphoreHandle_t g_lock = nullptr;
+// Static, so publish() from setup() works before start(), and creating it can't fail.
+StaticSemaphore_t g_lockBuf;
+SemaphoreHandle_t g_lock = xSemaphoreCreateMutexStatic(&g_lockBuf);
 std::string g_fingerprint;  // under g_lock
+std::string g_listJson;     // under g_lock: the Buttons as the loop last saved them
+// One change at a time from the page to the loop, under g_lock (httpd is one task).
+web::Edit g_edit;
+bool g_editWaiting = false;
+uint32_t g_editSeq = 0, g_doneSeq = 0;
+bool g_doneOk = false;
+
+struct Locked {
+    Locked() { xSemaphoreTake(g_lock, portMAX_DELAY); }
+    ~Locked() { xSemaphoreGive(g_lock); }
+};
 std::string g_key, g_cert;  // PEM, kept for the server's lifetime
 web::Session g_session;     // only touched on the httpd task
 
@@ -112,14 +127,17 @@ esp_err_t reply(httpd_req_t* req, const char* status, const std::string& body) {
     httpd_resp_set_status(req, status);
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     securityHeaders(req);
-    Serial.printf("web: %s %s %s\n", req->method == HTTP_GET ? "GET" : "POST", req->uri, status);
+    Serial.printf("web: %s %s %s, httpd stack left %u\n", req->method == HTTP_GET ? "GET" : "POST", req->uri, status,
+                  static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
     return httpd_resp_send(req, body.data(), body.size());
 }
 
 std::string page(const std::string& title, const std::string& body) {
     return "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content=\"width=device-width\">"
            "<title>Phrasedeck panel</title><style>body{font:18px system-ui;margin:2em auto;max-width:28em;padding:0 1em;"
-           "background:#111418;color:#e6e9ed}input,button{font:inherit;padding:.5em}p.note{color:#f0a020}</style>"
+           "background:#111418;color:#e6e9ed}input,button,textarea{font:inherit;padding:.5em}input,textarea{width:100%;"
+           "box-sizing:border-box}pre{white-space:pre-wrap;background:#1c2026;padding:.5em}summary{font-size:1.2em;"
+           "padding:.4em 0;cursor:pointer}p.note{color:#f0a020}</style>"
            "<h1>" + title + "</h1>" + body;
 }
 
@@ -139,16 +157,42 @@ bool loggedIn(httpd_req_t* req) {
     return true;
 }
 
+// Sent a Button at a time: a full list can escape to ~1 MB, too much to build whole (#137 review).
+esp_err_t editor(httpd_req_t* req, const char* status, const std::string& note) {
+    std::string json;
+    {
+        Locked l;
+        json = g_listJson;
+    }
+    phrases::List list;
+    if (!list.fromJson(json)) return reply(req, "503 Service Unavailable", page("Buttons", "<p>Still starting: reload in a moment.</p>"));
+    json.clear();
+    json.shrink_to_fit();
+    httpd_resp_set_status(req, status);
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    securityHeaders(req);
+    Serial.printf("web: %s %s %s (editor)\n", req->method == HTTP_GET ? "GET" : "POST", req->uri, status);
+    const auto chunk = [req](const std::string& s) { return httpd_resp_send_chunk(req, s.data(), s.size()) == ESP_OK; };
+    bool ok = chunk(page("Buttons", web::editorHead(list, note)));
+    for (size_t i = 0; ok && i < list.size(); ++i) ok = chunk(web::editorButton(list.at(i)));
+    ok = ok && chunk(web::editorTail());
+    return ok ? httpd_resp_send_chunk(req, nullptr, 0) : ESP_FAIL;
+}
+
 esp_err_t getRoot(httpd_req_t* req) {
+    if (req->content_len > 0) return ESP_FAIL;  // a GET has no body; don't drain one
     if (!hostOk(req)) return reply(req, "421 Misdirected Request", page("Wrong address", ""));
     if (!loggedIn(req)) return reply(req, "200 OK", page("Phrasedeck panel", kLoginForm));
-    return reply(req, "200 OK", page("Logged in",
-                                      "<p>The Button editor comes in the next firmware update.</p>"
-                                      "<form method=post action=/logout><button>Log out</button></form>"));
+    return editor(req, "200 OK", "");
 }
 
 // Every POST: our own Host and Origin, a form body, and not too big.
-bool postOk(httpd_req_t* req, std::string& body, esp_err_t& sent) {
+bool postOk(httpd_req_t* req, std::string& body, esp_err_t& sent, size_t maxBody = 256) {
+    // First, before any reply: a reply makes httpd drain the body, which a trickle can drag out.
+    if (req->content_len > maxBody) {
+        sent = ESP_FAIL;  // close without draining, so a trickled huge body can't hold the one httpd task
+        return false;
+    }
     if (!hostOk(req)) {
         sent = reply(req, "421 Misdirected Request", page("Wrong address", ""));
         return false;
@@ -157,18 +201,15 @@ bool postOk(httpd_req_t* req, std::string& body, esp_err_t& sent) {
         sent = reply(req, "403 Forbidden", page("Not from this page", ""));
         return false;
     }
-    if (req->content_len > 256) {
-        sent = ESP_FAIL;  // close without draining, so a trickled huge body can't hold the one httpd task
-        return false;
-    }
     if (header(req, "Content-Type") != "application/x-www-form-urlencoded") {
         sent = reply(req, "400 Bad Request", page("Bad request", ""));
         return false;
     }
     body.assign(req->content_len, '\0');
+    const uint32_t start = millis();
     for (size_t got = 0; got < body.size();) {
-        const int n = httpd_req_recv(req, &body[got], body.size() - got);
-        if (n <= 0) {
+        const int n = millis() - start > 10000 ? -1 : httpd_req_recv(req, &body[got], body.size() - got);
+        if (n <= 0) {  // closed, failed, or trickled past 10 s: a slow body can't hold the one httpd task
             sent = ESP_FAIL;
             return false;
         }
@@ -206,6 +247,54 @@ esp_err_t postLogin(httpd_req_t* req) {
     httpd_resp_set_hdr(req, "Set-Cookie", cookie.c_str());
     httpd_resp_set_hdr(req, "Location", "/");
     return reply(req, "303 See Other", "");
+}
+
+// A Phrase of 2,000 bytes, each byte a %0D%0A Enter at worst, plus a %-escaped label and the fields.
+constexpr size_t kMaxEditBody = 2000 * 6 + 40 * 3 + 256;
+
+esp_err_t postEdit(httpd_req_t* req) {
+    // The session first, before the body is read: without one, close at once (a reply would drain it).
+    if (!loggedIn(req)) {
+        if (req->content_len > 256) return ESP_FAIL;
+        return reply(req, "401 Unauthorized", page("Phrasedeck panel", "<p class=note>Log in again.</p>" + std::string(kLoginForm)));
+    }
+    std::string body;
+    esp_err_t sent = ESP_OK;
+    if (!postOk(req, body, sent, kMaxEditBody)) return sent;
+    web::Edit e;
+    if (!web::editFrom(body, e)) return reply(req, "400 Bad Request", page("Bad request", ""));
+    uint32_t seq;
+    {
+        Locked l;
+        g_edit = e;
+        g_editWaiting = true;
+        seq = ++g_editSeq;
+    }
+    // The loop takes it within a few ms unless a Send or pair is in flight; wait for the result.
+    // Decided under the lock, replied after it: editor() takes the lock too, and it isn't recursive.
+    enum { Waiting, Done, Refused, Withdrawn } outcome = Waiting;
+    for (uint32_t waited = 0; outcome == Waiting; waited += 20) {
+        {
+            Locked l;
+            if (g_doneSeq == seq) {
+                outcome = g_doneOk ? Done : Refused;
+            } else if (waited >= 5000 && g_editWaiting) {
+                g_editWaiting = false;  // withdrawn, so it can't apply after this reply
+                outcome = Withdrawn;
+            }
+        }
+        if (outcome == Waiting) vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (outcome == Done) {
+        httpd_resp_set_hdr(req, "Location", "/");
+        return reply(req, "303 See Other", "");
+    }
+    if (outcome == Withdrawn) {
+        return editor(req, "503 Service Unavailable", "The panel is busy sending or pairing: nothing changed, try again.");
+    }
+    return editor(req, "409 Conflict",
+                  "Nothing changed: that Button was changed or removed meanwhile, or it's over the limits "
+                  "(48 Buttons, a 40-byte label, a 2,000-byte Phrase, neither empty).");
 }
 
 esp_err_t postLogout(httpd_req_t* req) {
@@ -246,6 +335,7 @@ void serve() {
         {"/", HTTP_GET, getRoot, nullptr},
         {"/login", HTTP_POST, postLogin, nullptr},
         {"/logout", HTTP_POST, postLogout, nullptr},
+        {"/edit", HTTP_POST, postEdit, nullptr},
     };
     for (const httpd_uri_t& r : routes) {
         if (httpd_register_uri_handler(server, &r) != ESP_OK) {
@@ -255,9 +345,8 @@ void serve() {
         }
     }
     const std::string fp = certFingerprint(g_cert);  // published only once the server is up
-    xSemaphoreTake(g_lock, portMAX_DELAY);
+    Locked l;
     g_fingerprint = fp;
-    xSemaphoreGive(g_lock);
     Serial.printf("web: serving https://%s/, internal heap %u -> %u, stack left %u\n", ip().c_str(),
                   static_cast<unsigned>(before), static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
                   static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
@@ -271,16 +360,32 @@ void run(void*) {
 }  // namespace
 
 bool start() {
-    g_lock = xSemaphoreCreateMutex();
-    return g_lock != nullptr && xTaskCreate(run, "web", 8192, nullptr, 1, nullptr) == pdPASS;
+    return xTaskCreate(run, "web", 8192, nullptr, 1, nullptr) == pdPASS;
 }
 
 std::string fingerprint() {
-    if (g_lock == nullptr) return "";
-    xSemaphoreTake(g_lock, portMAX_DELAY);
-    std::string fp = g_fingerprint;
-    xSemaphoreGive(g_lock);
-    return fp;
+    Locked l;
+    return g_fingerprint;
+}
+
+void publish(const std::string& json) {
+    Locked l;
+    g_listJson = json;
+}
+
+bool takeEdit(web::Edit& e, uint32_t& seq) {
+    Locked l;
+    if (!g_editWaiting) return false;
+    g_editWaiting = false;
+    e = g_edit;
+    seq = g_editSeq;
+    return true;
+}
+
+void editDone(uint32_t seq, bool ok) {
+    Locked l;
+    g_doneSeq = seq;
+    g_doneOk = ok;
 }
 
 }  // namespace web_server

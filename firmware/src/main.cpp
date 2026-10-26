@@ -860,7 +860,11 @@ void factoryResetIfHeld() {
         lv_label_set_text(label, "Erasing...");
         lv_timer_handler();
         const bool nvs = panel_store::erase();
-        const bool fs = LittleFS.format();  // erases the blocks too; Buttons are all that's on it
+        // The whole Buttons partition, not LittleFS.format(): that only rewrites the superblock.
+        // loadPhrases() then makes a fresh filesystem.
+        const esp_partition_t* buttons =
+            esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
+        const bool fs = buttons != nullptr && esp_partition_erase_range(buttons, 0, buttons->size) == ESP_OK;
         // A crash dump can hold a Token or password from RAM.
         const esp_partition_t* dump =
             esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);

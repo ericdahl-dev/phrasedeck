@@ -127,7 +127,8 @@ esp_err_t reply(httpd_req_t* req, const char* status, const std::string& body) {
     httpd_resp_set_status(req, status);
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     securityHeaders(req);
-    Serial.printf("web: %s %s %s\n", req->method == HTTP_GET ? "GET" : "POST", req->uri, status);
+    Serial.printf("web: %s %s %s, httpd stack left %u\n", req->method == HTTP_GET ? "GET" : "POST", req->uri, status,
+                  static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
     return httpd_resp_send(req, body.data(), body.size());
 }
 
@@ -156,6 +157,7 @@ bool loggedIn(httpd_req_t* req) {
     return true;
 }
 
+// Sent a Button at a time: a full list can escape to ~1 MB, too much to build whole (#137 review).
 esp_err_t editor(httpd_req_t* req, const char* status, const std::string& note) {
     std::string json;
     {
@@ -164,7 +166,17 @@ esp_err_t editor(httpd_req_t* req, const char* status, const std::string& note) 
     }
     phrases::List list;
     if (!list.fromJson(json)) return reply(req, "503 Service Unavailable", page("Buttons", "<p>Still starting: reload in a moment.</p>"));
-    return reply(req, status, page("Buttons", web::editorPage(list, note)));
+    json.clear();
+    json.shrink_to_fit();
+    httpd_resp_set_status(req, status);
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    securityHeaders(req);
+    Serial.printf("web: %s %s %s (editor)\n", req->method == HTTP_GET ? "GET" : "POST", req->uri, status);
+    const auto chunk = [req](const std::string& s) { return httpd_resp_send_chunk(req, s.data(), s.size()) == ESP_OK; };
+    bool ok = chunk(page("Buttons", web::editorHead(list, note)));
+    for (size_t i = 0; ok && i < list.size(); ++i) ok = chunk(web::editorButton(list.at(i)));
+    ok = ok && chunk(web::editorTail());
+    return ok ? httpd_resp_send_chunk(req, nullptr, 0) : ESP_FAIL;
 }
 
 esp_err_t getRoot(httpd_req_t* req) {
@@ -194,9 +206,10 @@ bool postOk(httpd_req_t* req, std::string& body, esp_err_t& sent, size_t maxBody
         return false;
     }
     body.assign(req->content_len, '\0');
+    const uint32_t start = millis();
     for (size_t got = 0; got < body.size();) {
-        const int n = httpd_req_recv(req, &body[got], body.size() - got);
-        if (n <= 0) {
+        const int n = millis() - start > 10000 ? -1 : httpd_req_recv(req, &body[got], body.size() - got);
+        if (n <= 0) {  // closed, failed, or trickled past 10 s: a slow body can't hold the one httpd task
             sent = ESP_FAIL;
             return false;
         }
@@ -236,14 +249,18 @@ esp_err_t postLogin(httpd_req_t* req) {
     return reply(req, "303 See Other", "");
 }
 
-// A Phrase of 2,000 bytes, every byte %-escaped, plus the label and fields.
-constexpr size_t kMaxEditBody = 8192;
+// A Phrase of 2,000 bytes, each byte a %0D%0A Enter at worst, plus a %-escaped label and the fields.
+constexpr size_t kMaxEditBody = 2000 * 6 + 40 * 3 + 256;
 
 esp_err_t postEdit(httpd_req_t* req) {
+    // The session first, before the body is read: without one, close at once (a reply would drain it).
+    if (!loggedIn(req)) {
+        if (req->content_len > 256) return ESP_FAIL;
+        return reply(req, "401 Unauthorized", page("Phrasedeck panel", "<p class=note>Log in again.</p>" + std::string(kLoginForm)));
+    }
     std::string body;
     esp_err_t sent = ESP_OK;
     if (!postOk(req, body, sent, kMaxEditBody)) return sent;
-    if (!loggedIn(req)) return reply(req, "401 Unauthorized", page("Phrasedeck panel", "<p class=note>Log in again.</p>" + std::string(kLoginForm)));
     web::Edit e;
     if (!web::editFrom(body, e)) return reply(req, "400 Bad Request", page("Bad request", ""));
     uint32_t seq;
@@ -253,21 +270,27 @@ esp_err_t postEdit(httpd_req_t* req) {
         g_editWaiting = true;
         seq = ++g_editSeq;
     }
-    // The loop takes it within a few ms unless a Send is in flight; it waits for the result.
-    for (uint32_t waited = 0;; waited += 20) {
+    // The loop takes it within a few ms unless a Send or pair is in flight; wait for the result.
+    // Decided under the lock, replied after it: editor() takes the lock too, and it isn't recursive.
+    enum { Waiting, Done, Refused, Withdrawn } outcome = Waiting;
+    for (uint32_t waited = 0; outcome == Waiting; waited += 20) {
         {
             Locked l;
             if (g_doneSeq == seq) {
-                if (!g_doneOk) break;
-                httpd_resp_set_hdr(req, "Location", "/");
-                return reply(req, "303 See Other", "");
-            }
-            if (waited >= 5000 && g_editWaiting) {
+                outcome = g_doneOk ? Done : Refused;
+            } else if (waited >= 5000 && g_editWaiting) {
                 g_editWaiting = false;  // withdrawn, so it can't apply after this reply
-                return editor(req, "503 Service Unavailable", "The panel is busy sending: nothing changed, try again.");
+                outcome = Withdrawn;
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(20));
+        if (outcome == Waiting) vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (outcome == Done) {
+        httpd_resp_set_hdr(req, "Location", "/");
+        return reply(req, "303 See Other", "");
+    }
+    if (outcome == Withdrawn) {
+        return editor(req, "503 Service Unavailable", "The panel is busy sending or pairing: nothing changed, try again.");
     }
     return editor(req, "409 Conflict",
                   "Nothing changed: that Button was changed or removed meanwhile, or it's over the limits "

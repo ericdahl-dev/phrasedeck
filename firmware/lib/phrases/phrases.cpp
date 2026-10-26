@@ -6,8 +6,18 @@
 namespace phrases {
 namespace {
 
+// No control bytes: a NUL would hide the rest from "Send?" while the Helper types it all (#137).
+// A Phrase may hold Enter and Tab; a label nothing.
+bool printable(const std::string& s, bool enterAndTab) {
+    for (unsigned char c : s) {
+        if (c == 0x7F || (c < 0x20 && !(enterAndTab && (c == '\n' || c == '\t')))) return false;
+    }
+    return true;
+}
+
 bool fits(const std::string& label, const std::string& text) {
-    return !label.empty() && label.size() <= kMaxLabel && !text.empty() && text.size() <= kMaxText;
+    return !label.empty() && label.size() <= kMaxLabel && !text.empty() && text.size() <= kMaxText &&
+           printable(label, false) && printable(text, true);
 }
 
 }  // namespace

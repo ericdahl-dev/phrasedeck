@@ -31,5 +31,9 @@ std::string html(const std::string& s);
 // The editor: each Button with its Phrase (Enter shown as ↵) and a form to change, move or
 // delete it, then a form to add one. note, if any, shows on top (already plain text).
 std::string editorPage(const phrases::List& list, const std::string& note = "");
+// The same page in parts, so the server sends it a Button at a time instead of building it whole.
+std::string editorHead(const phrases::List& list, const std::string& note);
+std::string editorButton(const phrases::Button& b);
+std::string editorTail();
 
 }  // namespace web

@@ -44,6 +44,7 @@ unsigned g_message_seq = 0;
 std::vector<lv_obj_t*> g_buttons;  // the grid's Buttons, by phrase index
 lv_obj_t* g_dots = nullptr;        // one dot per Page, when there's more than one
 lv_obj_t* g_tiles = nullptr;       // the Pages of Buttons, rebuilt when the web page changes them
+uint32_t g_rebuiltMs = 0;          // taps just after a rebuild are ignored: the Button under the finger may have moved
 lv_obj_t* g_sending = nullptr;  // the Button whose Send is in flight, dimmed until its result
 lv_obj_t* g_maybe = nullptr;    // a Maybe typed Button stays orange until the next tap
 lv_timer_t* g_flash = nullptr;  // ends the 700 ms result color on g_flashed
@@ -351,10 +352,11 @@ void sendResult(const net::Snapshot& s) {
     lv_obj_t* b = g_sending;
     g_sending = nullptr;
     clearResult();
-    lv_obj_remove_state(b, LV_STATE_DISABLED);
+    if (b == nullptr) return;  // its Button was rebuilt away meanwhile (a dev serial edit): no color to clear later
     const lv_color_t c = lv_palette_main(s.ok ? LV_PALETTE_GREEN : s.maybe ? LV_PALETTE_ORANGE : LV_PALETTE_RED);
-    lv_obj_set_style_bg_color(b, c, 0);
     lv_obj_set_style_text_color(g_status, c, 0);
+    lv_obj_remove_state(b, LV_STATE_DISABLED);
+    lv_obj_set_style_bg_color(b, c, 0);
     if (s.maybe) {
         g_maybe = b;
         return;
@@ -441,6 +443,7 @@ void openConfirm(size_t i) {
 }
 
 void tap(size_t i) {
+    if (millis() - g_rebuiltMs < 300) return;  // the grid just changed under the finger
     clearResult();
     if (g_busy) {
         lv_label_set_text(g_status, "Still sending the last one: wait for it");
@@ -796,11 +799,19 @@ void buildGrid() {
 // After the list changes: a fresh grid, with no result color or dimmed Button left on a deleted one.
 void rebuildGrid() {
     clearResult();
+    g_sending = nullptr;  // its result then colors nothing (sendResult checks)
+    lv_obj_t* tile = lv_tileview_get_tile_active(g_tiles);
+    const int32_t page = tile != nullptr ? lv_obj_get_index(tile) : 0;
     lv_obj_delete(g_tiles);
     if (g_dots != nullptr) lv_obj_delete(g_dots);
     g_tiles = g_dots = nullptr;
     g_buttons.clear();
     buildGrid();
+    // Stay on the Page that was showing (or the last one, if it's gone), not jump back to the first.
+    const int32_t last = static_cast<int32_t>(lv_obj_get_child_count(g_tiles)) - 1;
+    lv_tileview_set_tile_by_index(g_tiles, static_cast<uint32_t>(page < last ? page : last), 0, LV_ANIM_OFF);
+    lv_obj_send_event(g_tiles, LV_EVENT_VALUE_CHANGED, nullptr);
+    g_rebuiltMs = millis();
 }
 
 // One change from the web page, applied here on the LVGL loop. Waits while a Send is in flight, as

@@ -155,6 +155,22 @@ void test_the_preview_shows_enter_and_tab_and_counts() {
     TEST_ASSERT_EQUAL(2, phrases::lines("ends with Enter\n"));
 }
 
+// AppSec (#137): a NUL hides the rest of a Phrase from "Send?" (c_str stops there) while the Helper
+// still types it; other control bytes draw as nothing. Only Enter and Tab are allowed.
+void test_control_characters_are_refused() {
+    phrases::List l;
+    TEST_ASSERT_FALSE(l.add("Hi", std::string("echo hi\0rm -rf ~", 17)));
+    TEST_ASSERT_FALSE(l.add("Hi", "esc\x1b[2J"));
+    TEST_ASSERT_FALSE(l.add("Hi", "del\x7f"));
+    TEST_ASSERT_FALSE(l.add("H\ni", "label with Enter"));
+    TEST_ASSERT_FALSE(l.add(std::string("H\0i", 3), "x"));
+    TEST_ASSERT_TRUE(l.add("Sig", "Line\nTab\there"));
+    TEST_ASSERT_FALSE(l.edit(0, "Sig", "bell\a"));
+    TEST_ASSERT_EQUAL_STRING("Line\nTab\there", l.at(0).text.c_str());
+    phrases::List loaded;
+    TEST_ASSERT_FALSE(loaded.fromJson("{\"next\":2,\"buttons\":[{\"id\":1,\"edit\":1,\"label\":\"x\",\"text\":\"a\\u001bb\"}]}"));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_buttons_can_be_added_edited_moved_and_deleted);
@@ -166,5 +182,6 @@ int main() {
     RUN_TEST(test_counters_never_wrap);
     RUN_TEST(test_a_confirm_finds_only_the_edit_it_showed);
     RUN_TEST(test_the_preview_shows_enter_and_tab_and_counts);
+    RUN_TEST(test_control_characters_are_refused);
     return UNITY_END();
 }

@@ -76,29 +76,38 @@ std::string html(const std::string& s) {
     return out;
 }
 
-std::string editorPage(const phrases::List& list, const std::string& note) {
+std::string editorHead(const phrases::List& list, const std::string& note) {
     std::string p;
     if (!note.empty()) p += "<p class=note>" + html(note) + "</p>";
     p += "<p>" + std::to_string(list.size()) + " of " + std::to_string(phrases::kMaxButtons) +
          ". A Button added or changed here shows its Phrase on the panel and asks before its first Send.</p>";
-    for (size_t i = 0; i < list.size(); ++i) {
-        const phrases::Button& b = list.at(i);
-        p += "<details><summary>" + html(b.label) + "</summary><pre>" +
-             html(phrases::visible(b.text, "\xE2\x86\xB5", "\xE2\x86\x92")) + "</pre>"
-             "<form method=post action=/edit><input type=hidden name=id value=" + std::to_string(b.id) +
-             "><input type=hidden name=edit value=" + std::to_string(b.edit) + ">"
-             "<p><label>Label<br><input name=label maxlength=40 value=\"" + html(b.label) + "\"></label></p>"
-             // The newline after <textarea> is dropped by the browser, so a Phrase starting with Enter keeps it.
-             "<p><label>Phrase<br><textarea name=text rows=4 maxlength=2000>\n" + html(b.text) + "</textarea></label></p>"
-             "<p><button name=do value=change>Save</button> <button name=do value=up>Up</button> "
-             "<button name=do value=down>Down</button> <button name=do value=remove>Delete</button></p></form></details>";
-    }
-    p += "<h2>Add a Button</h2><form method=post action=/edit><input type=hidden name=do value=add>"
-         "<p><label>Label<br><input name=label maxlength=40 required></label></p>"
-         "<p><label>Phrase<br><textarea name=text rows=4 maxlength=2000 required></textarea></label></p>"
-         "<p><button>Add</button></p></form>"
-         "<form method=post action=/logout><p><button>Log out</button></p></form>";
     return p;
+}
+
+std::string editorButton(const phrases::Button& b) {
+    return "<details><summary>" + html(b.label) + "</summary><pre>" +
+           html(phrases::visible(b.text, "\xE2\x86\xB5", "\xE2\x86\x92")) + "</pre>"
+           "<form method=post action=/edit><input type=hidden name=id value=" + std::to_string(b.id) +
+           "><input type=hidden name=edit value=" + std::to_string(b.edit) + ">"
+           "<p><label>Label<br><input name=label maxlength=40 value=\"" + html(b.label) + "\"></label></p>"
+           // The newline after <textarea> is dropped by the browser, so a Phrase starting with Enter keeps it.
+           "<p><label>Phrase<br><textarea name=text rows=4 maxlength=2000>\n" + html(b.text) + "</textarea></label></p>"
+           "<p><button name=do value=change>Save</button> <button name=do value=up>Up</button> "
+           "<button name=do value=down>Down</button> <button name=do value=remove>Delete</button></p></form></details>";
+}
+
+std::string editorTail() {
+    return "<h2>Add a Button</h2><form method=post action=/edit><input type=hidden name=do value=add>"
+           "<p><label>Label<br><input name=label maxlength=40 required></label></p>"
+           "<p><label>Phrase<br><textarea name=text rows=4 maxlength=2000 required></textarea></label></p>"
+           "<p><button>Add</button></p></form>"
+           "<form method=post action=/logout><p><button>Log out</button></p></form>";
+}
+
+std::string editorPage(const phrases::List& list, const std::string& note) {
+    std::string p = editorHead(list, note);
+    for (size_t i = 0; i < list.size(); ++i) p += editorButton(list.at(i));
+    return p + editorTail();
 }
 
 }  // namespace web

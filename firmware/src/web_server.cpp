@@ -168,6 +168,7 @@ esp_err_t editor(httpd_req_t* req, const char* status, const std::string& note) 
 }
 
 esp_err_t getRoot(httpd_req_t* req) {
+    if (req->content_len > 0) return ESP_FAIL;  // a GET has no body; don't drain one
     if (!hostOk(req)) return reply(req, "421 Misdirected Request", page("Wrong address", ""));
     if (!loggedIn(req)) return reply(req, "200 OK", page("Phrasedeck panel", kLoginForm));
     return editor(req, "200 OK", "");
@@ -175,16 +176,17 @@ esp_err_t getRoot(httpd_req_t* req) {
 
 // Every POST: our own Host and Origin, a form body, and not too big.
 bool postOk(httpd_req_t* req, std::string& body, esp_err_t& sent, size_t maxBody = 256) {
+    // First, before any reply: a reply makes httpd drain the body, which a trickle can drag out.
+    if (req->content_len > maxBody) {
+        sent = ESP_FAIL;  // close without draining, so a trickled huge body can't hold the one httpd task
+        return false;
+    }
     if (!hostOk(req)) {
         sent = reply(req, "421 Misdirected Request", page("Wrong address", ""));
         return false;
     }
     if (!web::originAllowed(header(req, "Origin"), ip())) {
         sent = reply(req, "403 Forbidden", page("Not from this page", ""));
-        return false;
-    }
-    if (req->content_len > maxBody) {
-        sent = ESP_FAIL;  // close without draining, so a trickled huge body can't hold the one httpd task
         return false;
     }
     if (header(req, "Content-Type") != "application/x-www-form-urlencoded") {

@@ -179,8 +179,9 @@ Each version tag (`vX.Y.Z`) builds Linux packages for amd64 and arm64 and attach
 tag's [GitHub Release](https://github.com/ericdahl-dev/phrasedeck/releases), with `SHA256SUMS`:
 
 - `phrased_<version>_<arch>.deb` for Ubuntu and Debian.
-- `phrased-<version>-linux-<arch>.tar.gz`, plus `PKGBUILD`, `phrased-bin.install` and `.SRCINFO` for
-  the AUR package `phrased-bin`.
+- `phrased-<version>-linux-<arch>.tar.gz`, plus `PKGBUILD`, `phrased-bin.install` and `SRCINFO` for
+  the AUR package `phrased-bin`. `SRCINFO` is the AUR's `.SRCINFO`; a release asset's name can't
+  start with a dot, so rename it when pushing to the AUR.
 
 Either package installs `/usr/bin/phrased` and the user unit
 `/usr/lib/systemd/user/phrased.service`. Installing turns nothing on; each user does that once

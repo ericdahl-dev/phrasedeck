@@ -78,4 +78,26 @@ bool List::fromJson(const std::string& json) {
     return true;
 }
 
+std::string visible(const std::string& text, const char* enterMark, const char* tabMark) {
+    std::string out;
+    for (char ch : text) {
+        if (ch == '\n') out += enterMark;
+        if (ch == '\t') out += tabMark;
+        else out += ch;
+    }
+    return out;
+}
+
+size_t characters(const std::string& text) {
+    size_t n = 0;
+    for (unsigned char ch : text) n += (ch & 0xC0) != 0x80 ? 1 : 0;
+    return n;
+}
+
+size_t lines(const std::string& text) {
+    size_t n = 1;
+    for (char ch : text) n += ch == '\n' ? 1 : 0;
+    return n;
+}
+
 }  // namespace phrases

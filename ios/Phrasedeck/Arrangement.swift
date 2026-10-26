@@ -40,6 +40,32 @@ enum Arrangement {
         return items.compactMap { placed[$0.id] }
     }
 
+    /// A move action: one Square in a direction (spec section 11).
+    enum Nudge: CaseIterable {
+        case left, right, up, down
+
+        func target<ID>(from p: Packing.Placement<ID>) -> Spot {
+            switch self {
+            case .left: Spot(column: p.x - 1, row: p.y)
+            case .right: Spot(column: p.x + 1, row: p.y)
+            case .up: Spot(column: p.x, row: p.y - 1)
+            case .down: Spot(column: p.x, row: p.y + 1)
+            }
+        }
+    }
+
+    /// The move actions that apply where the Button is shown. Rows are unbounded, so down always does.
+    static func nudges<ID>(for p: Packing.Placement<ID>, columns: Int) -> [Nudge] {
+        Nudge.allCases.filter {
+            switch $0 {
+            case .left: p.x > 0
+            case .right: p.x + p.columns < columns
+            case .up: p.y > 0
+            case .down: true
+            }
+        }
+    }
+
     /// Every Button's Spot after `id` is dropped on `target`. Starts from `pickup`, the layout when
     /// the Button was picked up, so moving back to where it started puts every neighbor back.
     static func move<ID: Hashable>(_ id: ID, to target: Spot, from pickup: [Packing.Placement<ID>],

@@ -135,6 +135,29 @@ struct ArrangementTests {
         #expect(Self.spots(after) == [0: [1, 3]])
     }
 
+    // MARK: Move actions (spec section 11): one Square each way, left out where they can't apply.
+
+    @Test func moveActionsAreLeftOutAtTheLeftAndTopEdges() {
+        let corner = Placement(id: 0, x: 0, y: 0, columns: 1, rows: 1)
+
+        #expect(Arrangement.nudges(for: corner, columns: 3) == [.right, .down])
+    }
+
+    /// A Button already touching the right edge can't move right; any Button can move down, since
+    /// rows are unbounded.
+    @Test func aButtonAtTheRightEdgeCantMoveRight() {
+        let wide = Placement(id: 0, x: 1, y: 2, columns: 2, rows: 1)
+
+        #expect(Arrangement.nudges(for: wide, columns: 3) == [.left, .up, .down])
+    }
+
+    @Test func aNudgeTargetsTheNextSquare() {
+        let p = Placement(id: 0, x: 1, y: 1, columns: 1, rows: 1)
+
+        #expect(Arrangement.Nudge.allCases.map { $0.target(from: p) }
+            == [Spot(column: 0, row: 1), Spot(column: 2, row: 1), Spot(column: 1, row: 0), Spot(column: 1, row: 2)])
+    }
+
     /// A pickup layout wider than the Page (taken before a pinch to fewer columns) used to hang:
     /// a displaced 3-wide Button never fit 2 columns, so the search for a free Spot never ended.
     @Test(.timeLimit(.minutes(1)))

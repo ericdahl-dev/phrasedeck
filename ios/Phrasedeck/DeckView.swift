@@ -29,6 +29,10 @@ struct DeckView: View {
     @State private var deleted = 0
     /// Where each Page's grid sits on screen, so a drag can cross Pages (#81, slice 4).
     @State private var gridOrigins: [PersistentIdentifier: CGPoint] = [:]
+    /// Each Page's scroll state and place on screen, for auto-scroll while dragging (spec section 5).
+    @State private var scrollPositions: [PersistentIdentifier: ScrollPosition] = [:]
+    @State private var scrollGeometries: [PersistentIdentifier: ScrollGeometry] = [:]
+    @State private var scrollFrames: [PersistentIdentifier: CGRect] = [:]
     @Environment(\.scenePhase) private var scenePhase
 
 
@@ -51,19 +55,7 @@ struct DeckView: View {
                     let deck = geo.frame(in: .global)
                     TabView(selection: $shownPage) {
                         ForEach(pages) { page in
-                            ScrollView {
-                                grid(page, columns: columns, cell: cell, deck: deck)
-                                    .padding(DeckSize.padding)
-                                    .animation(.snappy, value: columns)
-                                    .frame(maxWidth: .infinity, alignment: .top)
-                                    // A tap on empty space ends Arrange mode; Buttons take their own taps.
-                                    .contentShape(.rect)
-                                    .onTapGesture { if arranging { arranging = false } }
-                            }
-                            .accessibilityIdentifier("deck.grid")
-                            .accessibilityValue("\(columns) columns")
-                            .navigationTitle(page.name)
-                            .tag(Optional(page.persistentModelID))
+                            pageScroll(page, columns: columns, cell: cell, deck: deck)
                         }
                     }
                     .tabViewStyle(.page(indexDisplayMode: pages.count > 1 ? .always : .never))
@@ -77,6 +69,12 @@ struct DeckView: View {
             }
         }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                let page = pages.first { $0.persistentModelID == shownPage } ?? pages.first
+                Button("Add Button", systemImage: "plus") { page.map { editing = .new($0) } }
+                    .disabled(page == nil)
+                    .accessibilityIdentifier("deck.new")
+            }
             if arranging {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { arranging = false }
@@ -159,16 +157,42 @@ struct DeckView: View {
             }
     }
 
+    /// One Page's scrolling grid. Its own function, so the type-checker doesn't time out on body.
+    private func pageScroll(_ page: Page, columns: Int, cell: CGSize, deck: CGRect) -> some View {
+        ScrollView {
+            grid(page, columns: columns, cell: cell, deck: deck)
+                .padding(DeckSize.padding)
+                .animation(.snappy, value: columns)
+                .frame(maxWidth: .infinity, alignment: .top)
+                // A tap on empty space ends Arrange mode; Buttons take their own taps.
+                .contentShape(.rect)
+                .onTapGesture { if arranging { arranging = false } }
+        }
+        .scrollPosition(Binding(get: { scrollPositions[page.persistentModelID] ?? ScrollPosition() },
+                                set: { scrollPositions[page.persistentModelID] = $0 }))
+        // Only Arrange mode drags; outside it, scrolling writes no state.
+        .onScrollGeometryChange(for: ScrollGeometry?.self) { arranging ? $0 : nil } action: { _, geometry in
+            scrollGeometries[page.persistentModelID] = geometry
+        }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+            scrollFrames[page.persistentModelID] = $0
+        }
+        .accessibilityIdentifier("deck.grid")
+        .accessibilityValue("\(columns) columns")
+        .navigationTitle(page.name)
+        .tag(Optional(page.persistentModelID))
+    }
+
     private enum Tile: Hashable {
         case phrase(PersistentIdentifier)
         case add
     }
 
     /// The page's Buttons at their Spots for this Layout width, or packed by Size (#51) when it has
-    /// none, with the "+" tile after them (hidden in Arrange mode).
+    /// none, with the "+" tile after them in Arrange mode (not while carrying, so no preview lands on it).
     private func grid(_ page: Page, columns: Int, cell: CGSize, deck: CGRect) -> some View {
         let phrases = Dictionary(uniqueKeysWithValues: page.sortedPhrases.map { ($0.persistentModelID, $0) })
-        let items = items(page) + (arranging ? [] : [Arrangement.Item(id: Tile.add, columns: 1, rows: 1, spot: nil)])
+        let items = items(page) + (arranging && carry == nil ? [Arrangement.Item(id: Tile.add, columns: 1, rows: 1, spot: nil)] : [])
         let placed = Arrangement.resolve(items, columns: columns)
         let step = CGSize(width: cell.width + DeckSize.spacing, height: cell.height + DeckSize.spacing)
         let rows = CGFloat(Packing.rows(of: placed))
@@ -265,6 +289,7 @@ struct DeckView: View {
             (c.dwell, c.target, c.preview) = (Dwell(), nil, [:])
             withAnimation { shownPage = c.page }
         }
+        autoScroll(c)
         // A Page just flipped to may not be laid out yet; aim once it is (the next tick).
         guard let grid = gridOrigins[c.page] else {
             carry = c
@@ -272,7 +297,8 @@ struct DeckView: View {
         }
         let target = Arrangement.target(
             topLeft: (c.finger.x - c.grab.width - grid.x, c.finger.y - c.grab.height - grid.y),
-            step: (c.step.width, c.step.height), columns: c.columnCount, width: c.columns)
+            step: (c.step.width, c.step.height), columns: c.columnCount, width: c.columns,
+            maxRow: c.pickup.filter { $0.id != c.tile }.map { $0.y + $0.rows }.max() ?? 0)
         c.target = target
         let before = c.dwell.accepted
         c.dwell.update(target, at: .now)
@@ -282,6 +308,20 @@ struct DeckView: View {
         } else {
             carry = c
         }
+    }
+
+    /// Scrolls the Page under the finger when it's near the top or bottom. The Page grows a row at a
+    /// time as the target goes below its last row, so holding at the bottom keeps scrolling.
+    private func autoScroll(_ c: Carry) {
+        guard let frame = scrollFrames[c.page], let geometry = scrollGeometries[c.page] else { return }
+        let step = AutoScroll.step(fingerY: c.finger.y, top: frame.minY, bottom: frame.maxY)
+        guard step != 0 else { return }
+        let lowest = -geometry.contentInsets.top
+        let highest = max(lowest, geometry.contentSize.height - geometry.containerSize.height
+                          + geometry.contentInsets.bottom)
+        let y = min(max(lowest, geometry.contentOffset.y + step), highest)
+        guard y != geometry.contentOffset.y else { return }
+        scrollPositions[c.page, default: ScrollPosition()].scrollTo(y: y)
     }
 
     /// Saves the carried Button where the finger let go, on the Page it's over.

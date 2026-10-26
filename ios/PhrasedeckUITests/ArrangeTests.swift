@@ -36,20 +36,34 @@ final class ArrangeTests: XCTestCase {
 
         let done = app.buttons["arrange.done"]
         XCTAssertTrue(done.waitForExistence(timeout: 20))
-        XCTAssertFalse(app.buttons["deck.add"].exists, "the + tile is hidden in Arrange mode")
-        XCTAssertFalse(app.buttons["deck.pages"].exists, "only Done is in the toolbar")
+        XCTAssertTrue(app.buttons["deck.add"].exists, "the + tile shows only in Arrange mode")
+        XCTAssertTrue(app.buttons["deck.new"].exists, "the toolbar + is always there")
+        XCTAssertFalse(app.buttons["deck.pages"].exists, "Pages leaves the toolbar")
         XCTAssertEqual(button.value as? String, "Row 1, column 1")
 
         button.tap()
         XCTAssertEqual(app.staticTexts["stub.sendCount"].label, "0", "taps never type in Arrange mode")
 
         done.tap()
-        XCTAssertTrue(app.buttons["deck.add"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["deck.pages"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["deck.add"].exists, "no + tile in normal mode")
         button.tap()
         XCTAssertTrue(app.staticTexts["stub.sendCount"].waitForLabel("1"))
     }
 
     /// Leaving the app ends Arrange mode, so coming back never finds Buttons that won't type.
+    /// The toolbar "+" adds a Button to the Page shown, in normal mode too.
+    @MainActor
+    func testTheToolbarPlusAddsAButton() {
+        let app = launch(arrange: false)
+        XCTAssertTrue(app.buttons["phrase.agent-status"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["deck.add"].exists, "no + tile in normal mode")
+
+        app.buttons["deck.new"].tap()
+
+        XCTAssertTrue(app.navigationBars.buttons["Cancel"].waitForExistence(timeout: 20), "the add sheet opens")
+    }
+
     @MainActor
     func testLeavingTheAppEndsArrangeMode() {
         let app = launch()
@@ -60,7 +74,7 @@ final class ArrangeTests: XCTestCase {
         XCUIDevice.shared.press(.home)
         app.activate()
 
-        XCTAssertTrue(app.buttons["deck.add"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["deck.pages"].waitForExistence(timeout: 20))
         XCTAssertFalse(app.buttons["arrange.done"].exists)
     }
 
@@ -151,6 +165,41 @@ final class ArrangeTests: XCTestCase {
 
         XCTAssertTrue(button.waitForNonExistence(timeout: 20))
         XCTAssertEqual(next.value as? String, "Row 1, column 2", "the others stay put")
+    }
+
+    // MARK: Auto-scroll (spec section 5)
+
+    /// Held near the bottom of a Page taller than the screen, a dragged Button scrolls it, so the
+    /// first row goes off the top.
+    @MainActor
+    func testHoldingNearTheBottomScrollsThePage() {
+        let app = launch(arrange: true)
+        let button = app.buttons["phrase.agent-status"]
+        let first = app.buttons["phrase.status-table"]
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+        let grid = app.scrollViews["deck.grid"].firstMatch
+        // Two columns and a 1 by 3 Button at the end run the Page past the bottom of the screen.
+        grid.pinch(withScale: 4, velocity: 2)
+        XCTAssertEqual(grid.value as? String, "2 columns")
+        app.buttons["deck.new"].tap()
+        let label = app.textFields["editor.label"]
+        XCTAssertTrue(label.waitForExistence(timeout: 20))
+        label.tap()
+        label.typeText("Tall")
+        app.textViews["editor.text"].firstMatch.tap()
+        app.textViews["editor.text"].firstMatch.typeText("tall")
+        app.buttons["editor.size.1x3"].tap()
+        app.buttons["editor.save"].tap()
+        XCTAssertTrue(app.buttons["phrase.Tall"].waitForExistence(timeout: 20))
+        enterArrangeMode(app, from: button)
+        let top = grid.frame.minY
+
+        let from = button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let bottom = grid.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1)).withOffset(CGVector(dx: 0, dy: -8))
+        from.press(forDuration: 0.1, thenDragTo: bottom, withVelocity: .slow, thenHoldForDuration: 2.0)
+
+        XCTAssertTrue(app.buttons["arrange.done"].exists)
+        XCTAssertLessThan(first.frame.maxY, top, "the first row scrolled off the top")
     }
 
     /// The long-press menu's Delete asks the same way (spec open question 4).

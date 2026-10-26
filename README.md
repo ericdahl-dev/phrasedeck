@@ -1,19 +1,31 @@
 # phrasedeck
 
-A Stream Deck-style iOS app for Eric's own use. Each button types an often-used phrase into the
-focused window on his Mac or on omarchy-laptop, usually a Claude Code terminal.
+A Stream Deck-style iOS app for Eric's own use. Each Button types an often-used Phrase into the
+focused window on a Computer, usually a Claude Code terminal. The Helper runs on macOS, on
+Arch/Omarchy (Hyprland), and on Ubuntu with GNOME, KDE or X11.
 
-- `helper/`: `phrased`, the Go helper that receives a phrase over the tailnet and types it.
-- `ios/`: the SwiftUI app (in progress).
+- `helper/`: `phrased`, the Go Helper that receives a Phrase and types it.
+- `ios/`: the SwiftUI app, shipped to Eric's devices through internal TestFlight.
+- `firmware/`: the desk panel, an ESP32 CrowPanel that is also a Device.
+- `contract/`: `pairing.json`, the pairing contract that both the Go and Swift tests read.
+- `design/`: the app icon's source, `icon.svg`.
 - `docs/plans/`: the design and the implementation plan.
+- `docs/launch/`: the Home network route threat checklist and the product name shortlist.
+- `docs/adr/`: decisions, starting with ADR 0001 on how the Mac Helper is distributed.
+- `CONTEXT.md`: the glossary (Helper, Device, Phrase, Button, Page, Deck, Pin, Route and so on).
+- `CLAUDE.md`: the rules for agents working here.
 
 ## The helper (`phrased`)
 
 `phrased` listens on port 47811 but only answers Tailscale peers (`100.64.0.0/10` and
 `fd7a:115c:a1e0::/48`), and only for a `Host` that is this machine's tailnet name, MagicDNS name or
-tailnet IP. There is no LAN access.
+tailnet IP. It answers on the home network only when you turn that on with `-lan` (see
+[Home network without Tailscale](#home-network-without-tailscale-optional)).
 
 ### Build (Mac)
+
+The Mac Helper is planned to ship as a Developer ID, notarized direct download plus a Homebrew
+cask ([ADR 0001](docs/adr/0001-helper-distribution.md)). For now, build it from source:
 
 ```sh
 cd helper
@@ -42,6 +54,35 @@ the new binary and reloads the agent.
 - It reads `~/.config/phrased`, the same as running `./phrased` by hand.
 - **Stop it** with `launchctl bootout gui/$(id -u)/dev.ericdahl.phrased`; remove the plist too to
   keep it from starting at the next login.
+
+### Install with Homebrew (Mac)
+
+Not available yet: this needs the first signed release and the `ericdahl-dev/homebrew-tap` repository.
+
+```sh
+brew install --cask ericdahl-dev/tap/phrased
+```
+
+This installs a universal `phrased` (Apple Silicon and Intel, macOS 12 or later), signed with
+Developer ID and notarized, so Gatekeeper lets it run. Grant it Accessibility (see "Grant
+Accessibility"). After `brew upgrade`, if typing stops, remove `phrased` from the Accessibility list
+and add it again: each version lives at its own path under the Caskroom, which macOS may treat as a
+new app.
+
+**Run at login.** The cask installs the binary only. To start it at login and keep it running, add
+the LaunchAgent:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ericdahl-dev/phrasedeck/main/helper/install/dev.ericdahl.phrased.plist |
+  sed -e "s|__HOME__/.local/bin/phrased|$(brew --prefix)/bin/phrased|" -e "s|__HOME__|$HOME|g" \
+  > ~/Library/LaunchAgents/dev.ericdahl.phrased.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.ericdahl.phrased.plist
+```
+
+`brew upgrade` swaps in the new binary. Restart it with
+`launchctl kickstart -k gui/$(id -u)/dev.ericdahl.phrased`. To uninstall, run
+`launchctl bootout gui/$(id -u)/dev.ericdahl.phrased`, delete the plist, then
+`brew uninstall --cask phrased`.
 
 ### Let it through the macOS firewall
 
@@ -116,7 +157,7 @@ Ubuntu with GNOME (Wayland):
 ```sh
 sudo apt install ydotool wl-clipboard
 sudo usermod -aG input "$USER"   # the package's udev rule gives the input group /dev/uinput
-# log out and back in so the group applies, then:
+# restart the computer so the group applies (see below), then:
 systemctl --user enable --now ydotool   # ydotoold, the daemon ydotool talks to
 cd helper
 make install-linux
@@ -124,16 +165,88 @@ make install-linux
 
 - The Helper isn't Ready until `ydotoold` is running: it checks for its socket at
   `$XDG_RUNTIME_DIR/.ydotool_socket` (or `$YDOTOOL_SOCKET`).
+- Restart rather than log out. The user services (`systemctl --user`) keep the groups you had when
+  they started, and an ssh session or a second login keeps them running across a logout, so
+  `ydotool.service` still can't open `/dev/uinput`. A restart (or
+  `sudo systemctl restart user@$(id -u)`, which ends that user's sessions) picks the group up.
 - On an X11 session, install `xdotool xclip` instead; no daemon or group is needed.
 - Pasting works as on omarchy: it serves the phrase once, sends Ctrl+Shift+V (the terminal
   paste key), and puts the old clipboard text back.
 
-### Pair a device
+### Install from a package (Ubuntu, Debian, Arch)
 
-Each phone or tablet gets its own token. On the computer running `phrased`:
+Each version tag (`vX.Y.Z`) builds Linux packages for amd64 and arm64 and attaches them to that
+tag's [GitHub Release](https://github.com/ericdahl-dev/phrasedeck/releases), with `SHA256SUMS`:
+
+- `phrased_<version>_<arch>.deb` for Ubuntu and Debian.
+- `phrased-<version>-linux-<arch>.tar.gz`, plus `PKGBUILD`, `phrased-bin.install` and `.SRCINFO` for
+  the AUR package `phrased-bin`.
+
+Either package installs `/usr/bin/phrased` and the user unit
+`/usr/lib/systemd/user/phrased.service`. Installing turns nothing on; each user does that once
+(below). Set the release first (the version without the `v`, and `arm64` on an ARM machine):
 
 ```sh
-./phrased pair
+v=1.2.3 arch=amd64
+base=https://github.com/ericdahl-dev/phrasedeck/releases/download/v$v
+```
+
+**Ubuntu or Debian.** GNOME and KDE type through `ydotool`, which needs Ubuntu 26.04 or later (see
+the table above).
+
+```sh
+curl -fLO "$base/phrased_${v}_$arch.deb" -fLO "$base/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+sudo apt install "./phrased_${v}_$arch.deb"
+```
+
+- The .deb recommends `wl-clipboard`, `ydotool` and `libnotify-bin` (for the panel's notice when
+  an edited Phrase is first typed), so `apt` installs them unless you pass
+  `--no-install-recommends`. It only suggests `wtype`.
+- On GNOME or KDE, add yourself to the `input` group, restart, and start `ydotoold`, as in
+  [Install on Ubuntu, GNOME or KDE](#install-on-ubuntu-gnome-or-kde):
+
+  ```sh
+  sudo usermod -aG input "$USER"
+  # restart the computer, then:
+  systemctl --user enable --now ydotool
+  ```
+
+- On Sway or another wlroots compositor, `sudo apt install wtype`. On X11,
+  `sudo apt install xdotool xclip`.
+
+**Arch or Omarchy (`phrased-bin`).** `phrased-bin` isn't on the AUR yet; until it is, build it from
+the files on the release:
+
+```sh
+mkdir phrased-bin && cd phrased-bin
+curl -fLO "$base/PKGBUILD" -fLO "$base/phrased-bin.install" -fLO "$base/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS   # makepkg runs the PKGBUILD, so check it first
+makepkg -si
+```
+
+- `makepkg` downloads the tarball for your architecture and checks it against the SHA-256 in the
+  `PKGBUILD`.
+- It needs `wtype` and `wl-clipboard`. Optional: `ydotool` (GNOME or KDE, with the `input` group
+  and `ydotool.service` steps above), `xdotool` and `xclip` (X11), and `libnotify` (the panel's
+  notice).
+
+**Turn it on.** As your user, not root:
+
+```sh
+systemctl --user enable --now phrased
+```
+
+It starts with your graphical session from then on. `systemctl --user status phrased` shows
+whether it's running, and `curl http://<tailnet-name>:47811/health` whether it's Ready. Then pair a
+phone with `phrased pair` (next section).
+
+### Pair a device
+
+Each Device (a phone, an iPad or the panel) gets its own token. On the computer running `phrased`:
+
+```sh
+phrased pair   # ./phrased pair from a build directory
 ```
 
 It prints a 6-digit code, valid for 2 minutes, and on the Mac also shows it as a notification.
@@ -260,6 +373,35 @@ Limits:
 curl -sk https://<lan-ip>:47812/health   # -k: the app pins the certificate instead
 ```
 
+## Using the app
+
+- **Buttons on Pages.** Tap a Button to type its Phrase. Swipe between Pages; pinch to change how
+  big a Square is on this phone or iPad. "Pages" (top left) adds, renames, reorders and deletes
+  Pages.
+- **Choose a Computer** from the picker at the top. "Computers…" in it lists them, and its "+" pairs
+  a new one. A dot shows whether the Helper is Ready, and a label shows the Route it last took.
+- **Add a Button** with "+" in the top bar, at any time. Long-press a Button to edit or delete it.
+- **Arrange Buttons** with Edit Deck in the long-press menu. Buttons jiggle and taps don't type.
+  Drag a Button to a new Spot; hold it at a screen edge to flip to the next Page. "−" deletes a
+  Button, and a "+" tile after the Buttons adds one. Done, or a tap on empty space, ends it.
+  For now Edit Deck only shows in Debug builds launched with `-arrangeEnabled`, until PR #108
+  ships Arrange mode.
+
+## The panel (ESP32)
+
+The panel is an Elecrow CrowPanel Advance 7" (ESP32-S3, 800×480 touch screen), hardware V1.4. It's
+a Device: it pairs with a Helper over the Home network route, so the Helper needs `-lan`.
+
+- **To pair,** run `phrased pair`, open the panel's Pair screen, pick the Nearby Computer, and enter
+  the Pairing code and the `Pin for a panel:` line that `phrased pair` prints (the panel has no
+  camera for the QR code). The panel checks the Helper's certificate against the Pin before it
+  sends anything.
+- **Today** it shows a fixed Page of Buttons; a tap sends its Phrase.
+- **In progress (#98):** the panel's own Phrase list, edited from its web page.
+- **Planned (#94):** a Bluetooth keyboard mode.
+
+Build, flash, Wi-Fi and factory restore are in [firmware/README.md](firmware/README.md).
+
 ## The iOS app on TestFlight
 
 Installs on Eric's iPhone and iPad go through internal TestFlight only: no external testers, no
@@ -306,6 +448,9 @@ git tag v0.2.0 && git push origin v0.2.0
   contents), `DEVELOPMENT_TEAM`, `DIST_CERT_P12_BASE64` (the certificate and its key as a `.p12`,
   run through `base64`) and `DIST_CERT_PASSWORD`. The repository is public, but only a tag pushed
   here runs the workflow, never a pull request or a fork, so the secrets never reach outside code.
+- **The same tag** also runs `.github/workflows/helper-release.yml`, which builds the Linux Helper
+  packages (a .deb, a tarball per arch and the AUR `PKGBUILD`) and attaches them to the tag's
+  GitHub Release.
 - **If it fails**, open the run's Archive or Upload step; the logs are also attached to the run as
   `release-logs`.
 

@@ -20,6 +20,19 @@ bool matchesShortPin(const std::string& typed, const std::string& certSha256) {
     return diff == 0;
 }
 
+size_t pinDigits(const std::string& typed) {
+    size_t n = 0;
+    for (char ch : typed) n += std::isxdigit(static_cast<unsigned char>(ch)) ? 1 : 0;
+    return n;
+}
+
+bool readyToPair(const std::string& code, const std::string& shortPin) {
+    for (char ch : code) {
+        if (!std::isdigit(static_cast<unsigned char>(ch))) return false;
+    }
+    return code.size() == 6 && pinDigits(shortPin) == 16;
+}
+
 bool matchesPin(const std::string& pin, const std::string& certSha256) {
     if (pin.size() != 64 || certSha256.size() != 64) return false;
     unsigned char diff = 0;

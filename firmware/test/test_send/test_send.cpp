@@ -1,6 +1,7 @@
 #include <unity.h>
 
 #include <initializer_list>
+#include <string>
 
 #include "send.h"
 
@@ -29,9 +30,18 @@ void test_no_reply_is_not_typed_unless_the_request_was_sent() {
     TEST_ASSERT_EQUAL(Outcome::NotTyped, send::outcome(false, -1));
 }
 
+// /type's body: the text, plus which panel Phrase and edit it is, so the Helper can show its
+// edit notice (#98). A Send without a Phrase (the dev serial `type`) carries the text alone.
+void test_the_type_body_names_the_phrase_and_its_edit() {
+    TEST_ASSERT_EQUAL_STRING("{\"text\":\"Ship it\\n\",\"phrase\":\"a1b2:7\",\"edit\":3}",
+                             send::typeBody("Ship it\n", "a1b2:7", 3).c_str());
+    TEST_ASSERT_EQUAL_STRING("{\"text\":\"hi\"}", send::typeBody("hi", "", 0).c_str());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_status_codes_map_to_typed_not_typed_or_maybe_typed);
     RUN_TEST(test_no_reply_is_not_typed_unless_the_request_was_sent);
+    RUN_TEST(test_the_type_body_names_the_phrase_and_its_edit);
     return UNITY_END();
 }

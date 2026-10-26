@@ -2,6 +2,7 @@
 // network (#91 review). The UI reads a snapshot.
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,7 @@ struct Snapshot {
     std::string paired;   // the paired Computer's name, empty when not paired
     std::string message;  // the last pairing or Send result, for the status line
     unsigned messageSeq = 0;  // bumps once per handled request, even when message repeats
+    bool ok = false;          // the last request worked: paired, or Typed
     bool wifiConfigured = false;
     bool wifiUp = false;
     std::string ip;
@@ -40,7 +42,8 @@ Snapshot snapshot();
 // False if the request couldn't be queued.
 bool pair(const Helper& h, const std::string& code, const std::string& shortPin);
 
-// Types text on the paired Computer, checked against its whole Pin. False if not queued.
-bool type(const std::string& text);
+// Types text on the paired Computer, checked against its whole Pin. phrase and edit name the
+// panel Phrase for the Helper's edit notice; leave phrase empty for none. False if not queued.
+bool type(const std::string& text, const std::string& phrase = "", uint32_t edit = 0);
 
 }  // namespace net

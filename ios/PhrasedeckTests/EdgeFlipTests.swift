@@ -49,3 +49,28 @@ struct EdgeFlipTests {
         #expect(update(&left, x: 10, 2, page: 0) == nil)
     }
 }
+
+/// Near the top or bottom of the visible Page, a drag scrolls it (#81, spec section 5).
+struct AutoScrollTests {
+    /// The visible Page runs from y 100 to 900 on screen.
+    func step(_ y: Double) -> Double { AutoScroll.step(fingerY: y, top: 100, bottom: 900) }
+
+    @Test func inTheMiddleNothingScrolls() {
+        #expect(step(500) == 0)
+        #expect(step(145) == 0)
+        #expect(step(855) == 0)
+    }
+
+    @Test func within44PointsOfAnEdgeItScrollsThatWayFasterNearerTheEdge() {
+        #expect(step(890) > 0)
+        #expect(step(120) < 0)
+        #expect(step(899) > step(870))
+        #expect(step(101) < step(130))
+    }
+
+    /// Past the edge (the finger off the Page) it scrolls at full speed, not faster.
+    @Test func pastTheEdgeItScrollsAtFullSpeed() {
+        #expect(step(990) == AutoScroll.maxStep)
+        #expect(step(10) == -AutoScroll.maxStep)
+    }
+}

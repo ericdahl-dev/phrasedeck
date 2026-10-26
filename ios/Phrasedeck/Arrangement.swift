@@ -144,12 +144,13 @@ private struct Grid {
 
 extension Arrangement {
     /// The Square a dragged Button is headed for: the one nearest its top-left corner, kept on the
-    /// Page and far enough left for its `width`. Below the last row is fine (spec section 5).
+    /// Page and far enough left for its `width`. Below the last row is fine (spec section 5), down to
+    /// `maxRow`.
     static func target(topLeft: (x: Double, y: Double), step: (width: Double, height: Double), columns: Int,
-                       width: Int) -> Spot {
+                       width: Int, maxRow: Int = .max) -> Spot {
         let column = Int((topLeft.x / step.width).rounded())
         let row = Int((topLeft.y / step.height).rounded())
-        return Spot(column: min(max(0, column), max(0, columns - width)), row: max(0, row))
+        return Spot(column: min(max(0, column), max(0, columns - width)), row: min(max(0, row), max(0, maxRow)))
     }
 }
 
@@ -194,5 +195,19 @@ struct EdgeFlip {
         guard let side, now.timeIntervalSince(since) >= (flipped ? Self.repeatHold : Self.hold) else { return nil }
         (since, flipped) = (now, true)
         return page + side
+    }
+}
+
+/// A drag near the top or bottom of the visible Page scrolls it (spec section 5), faster the nearer
+/// the finger is to the edge.
+enum AutoScroll {
+    static let zone = 44.0
+    /// Points per tick at the edge and beyond.
+    static let maxStep = 24.0
+
+    /// Points to scroll this tick: negative up, positive down, 0 away from the edges.
+    static func step(fingerY y: Double, top: Double, bottom: Double) -> Double {
+        let depth = y < top + zone ? -(top + zone - y) : y > bottom - zone ? y - (bottom - zone) : 0
+        return max(-1, min(1, depth / zone)) * maxStep
     }
 }

@@ -248,7 +248,8 @@ Snapshot snapshot() {
 namespace {
 
 bool enqueue(Request* req) {
-    if (g_requests != nullptr && xQueueSend(g_requests, &req, 0) == pdTRUE) return true;
+    // No Wi-Fi in this build: the net task is gone, so nothing would ever answer the request.
+    if (sizeof(WIFI_SSID) > 1 && g_requests != nullptr && xQueueSend(g_requests, &req, 0) == pdTRUE) return true;
     delete req;
     return false;
 }

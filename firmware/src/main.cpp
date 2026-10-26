@@ -84,7 +84,11 @@ bool startRequest(bool queued, const std::string& sending) {
 void submitPair(lv_event_t*) {
     const std::string code = lv_textarea_get_text(g_code);
     const std::string pin = lv_textarea_get_text(g_pin);
-    if (code.size() != 6 || g_pair_index >= g_pair_helpers.size() || g_busy) return;
+    if (code.size() != 6 || g_pair_index >= g_pair_helpers.size()) return;
+    if (g_busy) {
+        lv_label_set_text(g_status, "Busy: try again in a moment");
+        return;
+    }
     const net::Helper& h = g_pair_helpers[g_pair_index];
     startRequest(net::pair(h, code, pin), "Pairing with " + h.name + "...");
     closePair(nullptr);

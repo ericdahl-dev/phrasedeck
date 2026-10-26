@@ -126,6 +126,7 @@ func run(o options) error {
 		Typer:    backend,
 		Hostname: hostname,
 		OS:       runtime.GOOS,
+		Notice:   desktopNotice,
 	}
 	lanLn, err := listenLAN(o, prefixes)
 	if err != nil {

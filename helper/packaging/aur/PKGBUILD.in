@@ -10,7 +10,8 @@ license=('LicenseRef-Proprietary')
 depends=('wtype' 'wl-clipboard')
 optdepends=('ydotool: typing on GNOME or KDE (Wayland)'
             'xdotool: typing on X11'
-            'xclip: pasting on X11')
+            'xclip: pasting on X11'
+            'libnotify: the notice when a Phrase edited on a panel is first typed')
 provides=('phrased')
 conflicts=('phrased')
 install=phrased-bin.install

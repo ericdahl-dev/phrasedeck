@@ -248,6 +248,47 @@ void test_while_running_the_status_line_says_sending() {
     TEST_ASSERT_EQUAL_STRING("Sending", hid_keys::said(hid_keys::Sender::Result::Running).message.c_str());
 }
 
+// The give-up is a second of time, not a count: a refused release is retried every step, so a count
+// would give up in milliseconds with the key still down (#131 review).
+void test_a_refused_release_keeps_trying_for_a_second() {
+    hid_keys::Sender s(hid_keys::plan("a", false).keys, 20);
+    Stack stack;
+    run(s, stack, 19);  // the press at 0
+    stack.fail = 1000000;
+    run(s, stack, 100, 20);
+    TEST_ASSERT_FALSE(s.done());
+    run(s, stack, 1030, 101);
+    TEST_ASSERT_TRUE(s.done());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Stopped, s.result());
+}
+
+// A disconnect then a Cancel before the next step: the drop wins, so it doesn't wait on a release
+// that can't go.
+void test_drop_wins_over_a_later_cancel() {
+    hid_keys::Sender s(hid_keys::plan("abc", false).keys, 20);
+    Stack stack;
+    run(s, stack, 40);  // b is down
+    s.drop();
+    s.cancel();
+    run(s, stack, 200, 41);
+    TEST_ASSERT_EQUAL(3, stack.sent.size());
+    TEST_ASSERT_TRUE(s.done());
+}
+
+// After a retried release, the next press still waits a whole interval.
+void test_the_next_press_waits_a_whole_interval_after_a_retried_release() {
+    hid_keys::Sender s(hid_keys::plan("ab", false).keys, 20);
+    Stack stack;
+    run(s, stack, 19);  // press a at 0
+    stack.fail = 3;
+    run(s, stack, 23, 20);  // release fails at 20, 21, 22, goes at 23
+    TEST_ASSERT_EQUAL(2, stack.sent.size());
+    run(s, stack, 42, 24);
+    TEST_ASSERT_EQUAL_MESSAGE(2, stack.sent.size(), "b waits until 43");
+    run(s, stack, 43, 43);
+    TEST_ASSERT_EQUAL(3, stack.sent.size());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_letters_and_digits);
@@ -267,5 +308,8 @@ int main() {
     RUN_TEST(test_a_refused_release_is_retried_at_once);
     RUN_TEST(test_an_empty_plan_is_not_sent);
     RUN_TEST(test_while_running_the_status_line_says_sending);
+    RUN_TEST(test_a_refused_release_keeps_trying_for_a_second);
+    RUN_TEST(test_drop_wins_over_a_later_cancel);
+    RUN_TEST(test_the_next_press_waits_a_whole_interval_after_a_retried_release);
     return UNITY_END();
 }

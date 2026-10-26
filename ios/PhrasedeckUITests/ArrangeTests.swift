@@ -103,7 +103,7 @@ final class ArrangeTests: XCTestCase {
         let from = button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let to = from.withOffset(CGVector(dx: size.width + 12, dy: size.height + 12))
 
-        from.press(forDuration: 1.0, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.5)
+        from.press(forDuration: 1.0, thenDragTo: to)
 
         XCTAssertTrue(app.buttons["arrange.done"].waitForExistence(timeout: 20))
         XCTAssertTrue(button.waitForValue("Row 2, column 2"))

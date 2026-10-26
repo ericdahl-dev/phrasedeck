@@ -169,14 +169,12 @@ private struct Jiggle: ViewModifier {
     let active: Bool
     @State private var phase = Double.random(in: 0..<1)
 
+    // One structure whether jiggling or not: swapping views mid-drag would end a system drag that
+    // just switched Arrange mode on.
     func body(content: Content) -> some View {
-        if active {
-            TimelineView(.animation) { timeline in
-                let t = timeline.date.timeIntervalSinceReferenceDate / 0.26 + phase
-                content.rotationEffect(.degrees(1.5 * sin(t * 2 * .pi)))
-            }
-        } else {
-            content
+        TimelineView(.animation(paused: !active)) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate / 0.26 + phase
+            content.rotationEffect(.degrees(active ? 1.5 * sin(t * 2 * .pi) : 0))
         }
     }
 }

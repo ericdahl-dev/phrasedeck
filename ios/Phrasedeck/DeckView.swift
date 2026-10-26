@@ -1,5 +1,7 @@
 import SwiftData
 import SwiftUI
+import os
+let dbg = Logger(subsystem: "dbg.phrasedeck", category: "drag") // DBG
 
 /// One page per swipe, each a grid of phrase buttons and a "+" tile. Long-press a button to
 /// edit or delete it; pinch to change how many columns there are.
@@ -171,9 +173,14 @@ struct DeckView: View {
                                          edit: { editing = .existing(phrase) }, delete: { remove(phrase) },
                                          editDeck: Self.arrangeEnabled ? { arranging = true } : nil,
                                          arrange: arranging ? role(phrase, at: spot, on: page, columns: columns) : nil,
-                                         startDrag: Self.arrangeEnabled && !arranging ? {
-                                             carry = Carry(tile: spot.id, width: spot.columns, pickup: pickup)
-                                             arranging = true
+                                         // Kept in Arrange mode too: the drag source must outlive the
+                                         // switch into it, or the system drag loses its source.
+                                         startDrag: Self.arrangeEnabled ? {
+                                             dbg.notice("DBG startDrag")
+                                             if carry == nil {
+                                                 carry = Carry(tile: spot.id, width: spot.columns, pickup: pickup)
+                                             }
+                                             //EXP arranging = true
                                          } : nil)
                         }
                     case .add:
@@ -185,8 +192,8 @@ struct DeckView: View {
                         y: CGFloat(at.row) * step.height + (carried ? carry?.offset?.height ?? 0 : 0))
                 .zIndex(carried ? 1 : 0)
                 // In Arrange mode a Button drags at once (spec section 4).
-                .highPriorityGesture(carryGesture(spot, pickup: pickup, on: page, step: step, columns: columns),
-                                     including: arranging && spot.id != .add ? .all : .subviews)
+                /*EXP2 .highPriorityGesture(carryGesture(spot, pickup: pickup, on: page, step: step, columns: columns),
+                                     including: arranging && spot.id != .add ? .all : .subviews) EXP2*/
                 // VoiceOver reads Buttons as they're shown, row by row, not in order.
                 .accessibilitySortPriority(-Double(spot.y * columns + spot.x))
             }
@@ -259,6 +266,7 @@ struct DeckView: View {
 
     /// Saves the carried Button where the finger let go.
     private func drop(on page: Page, columns: Int) -> Bool {
+        dbg.notice("DBG drop carry=\(carry != nil) target=\(String(describing: carry?.target))")
         defer { withAnimation(.snappy) { carry = nil } }
         guard let c = carry, let target = c.target, case .phrase(let id) = c.tile,
               let phrase = page.sortedPhrases.first(where: { $0.persistentModelID == id }) else { return false }
@@ -343,12 +351,14 @@ private struct CarryDrop: DropDelegate {
     let dropped: () -> Bool
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        dbg.notice("DBG updated \(info.location.x) \(info.location.y)")
         moved(info.location)
         return DropProposal(operation: .move)
     }
 
-    func dropExited(info: DropInfo) { exited() }
-    func performDrop(info: DropInfo) -> Bool { dropped() }
+    func dropEntered(info: DropInfo) { dbg.notice("DBG entered") }
+    func dropExited(info: DropInfo) { dbg.notice("DBG exited"); exited() }
+    func performDrop(info: DropInfo) -> Bool { dbg.notice("DBG perform"); return dropped() }
 }
 
 /// How many columns the deck shows and how big its buttons are. Pinching changes the column

@@ -56,15 +56,28 @@ void test_only_a_window_pairing_saves_keys() {
     TEST_ASSERT_TRUE(bt_pairing::saveToStore(!keys, !windowPairing));
 }
 
-// A Computer that sent a real IRK is matched by the private addresses made from it only, not by its
-// identity address sent in the clear, which anyone can copy (#144). One with no IRK, or an all-zero
-// one, can only be matched by its address.
-void test_a_computer_with_an_irk_is_matched_by_it_only() {
+// A resolvable private address: random, its top two bits 01. Little-endian, so the top byte is
+// last. A Mac connects from these; black2, with BlueZ's privacy off, from its public address.
+void test_a_resolvable_private_address() {
+    const uint8_t rpa[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x5a};     // 0x5a = 0b01011010
+    const uint8_t stat[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0xda};    // static random: 11
+    const uint8_t nrpa[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x1a};    // non-resolvable: 00
+    TEST_ASSERT_TRUE(bt_pairing::isRpa(1, rpa));
+    TEST_ASSERT_FALSE(bt_pairing::isRpa(0, rpa));  // public
+    TEST_ASSERT_FALSE(bt_pairing::isRpa(1, stat));
+    TEST_ASSERT_FALSE(bt_pairing::isRpa(1, nrpa));
+}
+
+// The Computer is matched only by private addresses made from its IRK once it has been seen using
+// them: a Computer that sent an IRK but connects from its public address would be locked out (#144).
+void test_a_computer_seen_on_private_addresses_is_matched_by_them_only() {
     const uint8_t irk[16] = {0x5a, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
     const uint8_t zero[16] = {};
-    TEST_ASSERT_TRUE(bt_pairing::networkPrivacy(true, irk));
-    TEST_ASSERT_FALSE(bt_pairing::networkPrivacy(true, zero));
-    TEST_ASSERT_FALSE(bt_pairing::networkPrivacy(false, irk));
+    const bool present = true, seenRpa = true;
+    TEST_ASSERT_TRUE(bt_pairing::networkPrivacy(present, irk, seenRpa));
+    TEST_ASSERT_FALSE(bt_pairing::networkPrivacy(present, irk, !seenRpa));
+    TEST_ASSERT_FALSE(bt_pairing::networkPrivacy(present, zero, seenRpa));
+    TEST_ASSERT_FALSE(bt_pairing::networkPrivacy(!present, irk, seenRpa));
 }
 
 // A window that runs out without a pairing or Cancel has lapsed, once, so the panel can stop
@@ -112,6 +125,7 @@ int main() {
     RUN_TEST(test_what_the_panel_shows);
     RUN_TEST(test_only_the_computer_may_connect_outside_a_window);
     RUN_TEST(test_only_a_window_pairing_saves_keys);
-    RUN_TEST(test_a_computer_with_an_irk_is_matched_by_it_only);
+    RUN_TEST(test_a_resolvable_private_address);
+    RUN_TEST(test_a_computer_seen_on_private_addresses_is_matched_by_them_only);
     return UNITY_END();
 }

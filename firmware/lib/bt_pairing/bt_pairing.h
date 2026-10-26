@@ -33,11 +33,15 @@ inline bool dropIdle(bool encrypted, bool showingPasskey, bool windowOpen, bool 
 // window is open, so a new Computer can pair.
 inline bool allowListOnly(bool hasComputer, bool windowOpen) { return hasComputer && !windowOpen; }
 
+// A resolvable private address: random (type 1), its top two bits 01. val is little-endian.
+inline bool isRpa(uint8_t type, const uint8_t val[6]) { return type == 1 && (val[5] >> 6) == 1; }
+
 // Whether the stored Computer is matched only by the private addresses its IRK makes (network
 // privacy), not also by its identity address sent in the clear, which anyone can copy (#144). Needs
-// a real IRK: with none, or an all-zero one, its address is all there is to go by.
-inline bool networkPrivacy(bool irkPresent, const uint8_t irk[16]) {
-    if (!irkPresent) return false;
+// a real IRK, and the Computer seen connecting from such addresses: many stacks send an IRK yet
+// connect from their public address, and network mode would lock those out.
+inline bool networkPrivacy(bool irkPresent, const uint8_t irk[16], bool seenRpa) {
+    if (!irkPresent || !seenRpa) return false;
     for (int i = 0; i < 16; ++i) {
         if (irk[i] != 0) return true;
     }

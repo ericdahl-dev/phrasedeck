@@ -84,6 +84,7 @@ void bump() { g_version.fetch_add(1); }
 // bond with this address reconnects (#141). Set in start(), then on the host task only.
 ble_addr_t g_computer{};
 bool g_hasComputer = false;
+bool g_seenRpa = false;  // the Computer has connected from a resolvable private address (#144)
 
 bool loadComputer() {
     Preferences p;
@@ -92,6 +93,7 @@ bool loadComputer() {
     if (p.getBytes("computer", raw, sizeof(raw)) != sizeof(raw)) return false;
     g_computer.type = raw[0];
     memcpy(g_computer.val, raw + 1, 6);
+    g_seenRpa = p.getBool("private", false);
     return true;
 }
 
@@ -100,12 +102,14 @@ bool saveComputer(const ble_addr_t& addr) {
     uint8_t raw[7] = {addr.type};
     memcpy(raw + 1, addr.val, 6);
     Preferences p;
-    if (!p.begin("ble", false, panel_store::kPartition) || p.putBytes("computer", raw, sizeof(raw)) != sizeof(raw)) {
+    if (!p.begin("ble", false, panel_store::kPartition) || p.putBytes("computer", raw, sizeof(raw)) != sizeof(raw) ||
+        p.putBool("private", false) == 0) {
         log_e("couldn't save the paired Computer");
         return false;
     }
     g_computer = addr;
     g_hasComputer = true;
+    g_seenRpa = false;
     return true;
 }
 
@@ -138,6 +142,22 @@ std::map<uint16_t, bt_pairing::Window> g_grace;
 // ENC_CHANGE callback, so deleting there would leave orphans that can evict the Computer's bond.
 // Host task only (connect, security and disconnect callbacks all run there).
 std::map<uint16_t, ble_addr_t> g_forget;
+// Each connection's address as it arrived. After a fresh pairing NimBLE replaces the connection's
+// address with the identity, so a private address is only visible here.
+std::map<uint16_t, ble_addr_t> g_arrivedFrom;
+
+// Records that the Computer connected from a private address, once. Returns whether that's new.
+// Host task only.
+bool notePrivacy(uint16_t handle) {
+    const auto from = g_arrivedFrom.find(handle);
+    if (g_seenRpa || from == g_arrivedFrom.end() || !bt_pairing::isRpa(from->second.type, from->second.val)) {
+        return false;
+    }
+    Preferences p;
+    if (!p.begin("ble", false, panel_store::kPartition) || p.putBool("private", true) == 0) return false;
+    g_seenRpa = true;
+    return true;
+}
 
 // Connections onPassKeyNotify ended (host task only). Pairing can go on until the disconnect lands,
 // so one of them must never be trusted, even if it finishes (#141).
@@ -206,10 +226,19 @@ void protectComputer() {
     key.peer_addr = g_computer;
     ble_store_value_sec value{};
     if (!g_hasComputer || ble_store_read_peer_sec(&key, &value) != 0) return;
-    if (bt_pairing::networkPrivacy(value.irk_present, value.irk) &&
+    if (bt_pairing::networkPrivacy(value.irk_present, value.irk, g_seenRpa) &&
         ble_gap_set_priv_mode(&g_computer, BLE_GAP_PRIVATE_MODE_NETWORK) != 0) {
         log_w("Computer's privacy mode not set");
     }
+}
+
+// NimBLE's sync callback, wrapped so a resync after a controller reset is seen: the reset turns
+// address resolution off and puts the Computer back in device mode.
+ble_hs_sync_fn* g_syncCb = nullptr;
+std::atomic<bool> g_resynced{false};
+void onSync() {
+    if (g_syncCb != nullptr) g_syncCb();
+    g_resynced.store(true);
 }
 
 // Host task only.
@@ -226,6 +255,7 @@ class DeviceCallbacks : public BLEDeviceCallbacks {
 class ServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer*, ble_gap_conn_desc* d) override {
         g_grace[d->conn_handle].open(millis(), bt_pairing::kGraceMs);
+        g_arrivedFrom[d->conn_handle] = d->peer_ota_addr;
         // NimBLE stops advertising on a connect. Keep it up while no paired Computer is here, so a
         // stranger who connects and sits can't lock the paired one out, and while a window is open.
         if (g_trusted.load() == kNone || windowOpen()) advertise(wantAllowList());
@@ -243,6 +273,7 @@ class ServerCallbacks : public BLEServerCallbacks {
         g_canceled.compare_exchange_strong(expected, kNone);
         g_notifying.erase(d->conn_handle);
         g_grace.erase(d->conn_handle);
+        g_arrivedFrom.erase(d->conn_handle);
         g_doomed.erase(d->conn_handle);
         const auto forget = g_forget.find(d->conn_handle);
         if (forget != g_forget.end()) {
@@ -355,9 +386,12 @@ class SecurityCallbacks : public BLESecurityCallbacks {
         }
         g_trusted.store(d->conn_handle);
         if (g_notifying.count(d->conn_handle)) g_subscribed.store(d->conn_handle);
+        const bool private_ = notePrivacy(d->conn_handle);
         if (!windowOpen()) {
             BLEDevice::stopAdvertising();  // one Computer: nobody else needs to find it
-            if (replaced) protectComputer();
+            // shortcut: with a window open it waits for the next start; a Computer reconnecting
+            // during a window is rare.
+            if (replaced || private_) protectComputer();
         }
         bump();
     }
@@ -379,6 +413,14 @@ void tick(ble_npl_event*) {
     if (lapsed) g_window.close();
     portEXIT_CRITICAL(&g_windowLock);
     if (lapsed) pairingClosed();
+    if (g_resynced.exchange(false)) {
+        log_w("BLE host resynced: privacy settings applied again");
+        const bool advertising = ble_gap_adv_active();
+        BLEDevice::stopAdvertising();
+        ble_hs_pvcy_set_resolve_enabled(1);
+        protectComputer();
+        if (advertising) advertise(wantAllowList());
+    }
     // A window that lapsed or was canceled leaves advertising open to anyone; put the filter back.
     if (ble_gap_adv_active() && g_allowListOnly.load() != wantAllowList()) advertise(wantAllowList());
     const uint32_t now = millis();
@@ -404,6 +446,8 @@ bool start() {
     // only for a panel using a private address itself, which this one doesn't. Without it a Mac
     // reconnecting from a new private address is a stranger: no key, and blocked by the allow list.
     if (ble_hs_pvcy_set_resolve_enabled(1) != 0) return false;
+    g_syncCb = ble_hs_cfg.sync_cb;
+    ble_hs_cfg.sync_cb = onSync;
     BLESecurity* sec = new BLESecurity();
     sec->setCapability(ESP_IO_CAP_OUT);               // the panel displays a passkey
     sec->setAuthenticationMode(true, true, true);     // bond, MITM, Secure Connections

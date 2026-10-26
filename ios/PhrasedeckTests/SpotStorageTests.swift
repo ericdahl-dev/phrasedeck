@@ -85,7 +85,10 @@ struct SpotStorageTests {
         context.insert(old)
         try context.save()
 
-        #expect(Deck.spots(on: page, width: .compact, in: context) == [p[0].uid: Spot(column: 2, row: 1)])
+        // Flaky on CI's iOS 26.4.1 Simulator (#90): the message shows each row's date when it fails.
+        let saved = try rows(p[0].uid).map { "\($0.spot) @ \($0.updated.timeIntervalSince1970)" }
+        #expect(Deck.spots(on: page, width: .compact, in: context) == [p[0].uid: Spot(column: 2, row: 1)],
+                "rows: \(saved)")
 
         try Deck.saveSpots([p[0].uid: Spot(column: 0, row: 0)], width: .compact, in: context)
         #expect(try rows(p[0].uid).map(\.spot) == [Spot(column: 0, row: 0)])

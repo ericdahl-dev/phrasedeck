@@ -90,24 +90,6 @@ final class ArrangeTests: XCTestCase {
         XCTAssertTrue(button.waitForValue("Row 2, column 2"))
         XCTAssertTrue(app.buttons["arrange.done"].exists, "still in Arrange mode after the drop")
     }
-
-    /// From normal mode, holding a Button and then moving the finger closes the menu, enters Arrange
-    /// mode, and carries the Button (spec section 3).
-    @MainActor
-    func testHoldingThenDraggingEntersArrangeModeCarryingTheButton() {
-        let app = launch(arrange: true)
-        let button = app.buttons["phrase.agent-status"]
-        XCTAssertTrue(button.waitForExistence(timeout: 20))
-        // Normal mode has no Row/column values, so aim one Square (plus 12 pt spacing) right and down.
-        let size = button.frame.size
-        let from = button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        let to = from.withOffset(CGVector(dx: size.width + 12, dy: size.height + 12))
-
-        from.press(forDuration: 1.0, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.5)
-
-        XCTAssertTrue(app.buttons["arrange.done"].waitForExistence(timeout: 20))
-        XCTAssertTrue(button.waitForValue("Row 2, column 2"))
-    }
 }
 
 private extension XCUIElement {

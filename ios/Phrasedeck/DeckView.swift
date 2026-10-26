@@ -24,7 +24,7 @@ struct DeckView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     /// Arrange mode is reachable only in DEBUG builds launched with -arrangeEnabled until dragging
-    /// works (#81, slice 3), so a release never shows half of it.
+    /// works, including holding then dragging (#81, slice 3b), so a release never shows half of it.
     static var arrangeEnabled: Bool {
         #if DEBUG
         ProcessInfo.processInfo.arguments.contains("-arrangeEnabled")
@@ -160,7 +160,7 @@ struct DeckView: View {
                 let size = CGSize(width: CGFloat(spot.columns) * step.width - DeckSize.spacing,
                                   height: CGFloat(spot.rows) * step.height - DeckSize.spacing)
                 let carried = carry?.tile == spot.id
-                let at = carried && carry?.offset != nil ? Spot(column: spot.x, row: spot.y)
+                let at = carried ? Spot(column: spot.x, row: spot.y)
                     : carry?.preview[spot.id] ?? Spot(column: spot.x, row: spot.y)
                 Group {
                     switch spot.id {
@@ -170,19 +170,15 @@ struct DeckView: View {
                                          pinchGuard: pinchGuard,
                                          edit: { editing = .existing(phrase) }, delete: { remove(phrase) },
                                          editDeck: Self.arrangeEnabled ? { arranging = true } : nil,
-                                         arrange: arranging ? role(phrase, at: spot, on: page, columns: columns) : nil,
-                                         startDrag: Self.arrangeEnabled && !arranging ? {
-                                             carry = Carry(tile: spot.id, width: spot.columns, pickup: pickup)
-                                             arranging = true
-                                         } : nil)
+                                         arrange: arranging ? role(phrase, at: spot, on: page, columns: columns) : nil)
                         }
                     case .add:
                         addTile(page)
                     }
                 }
                 .frame(width: size.width, height: size.height)
-                .offset(x: CGFloat(at.column) * step.width + (carried ? carry?.offset?.width ?? 0 : 0),
-                        y: CGFloat(at.row) * step.height + (carried ? carry?.offset?.height ?? 0 : 0))
+                .offset(x: CGFloat(at.column) * step.width + (carried ? carry?.offset.width ?? 0 : 0),
+                        y: CGFloat(at.row) * step.height + (carried ? carry?.offset.height ?? 0 : 0))
                 .zIndex(carried ? 1 : 0)
                 // In Arrange mode a Button drags at once (spec section 4).
                 .highPriorityGesture(carryGesture(spot, pickup: pickup, on: page, step: step, columns: columns),
@@ -196,17 +192,6 @@ struct DeckView: View {
                height: max(0, max(rows, CGFloat(previewRows)) * step.height - DeckSize.spacing),
                alignment: .topLeading)
         .coordinateSpace(.named(Self.gridSpace))
-        // A Button carried by a system drag, from normal mode (spec section 3).
-        .onDrop(of: [.plainText], delegate: CarryDrop(
-            moved: { location in
-                guard let c = carry, let from = c.pickup.first(where: { $0.id == c.tile }) else { return }
-                // The drop location is the finger; aim from the Button's top-left as if held by its middle.
-                carry(to: CGPoint(x: location.x - (CGFloat(from.columns) * step.width - DeckSize.spacing) / 2,
-                                  y: location.y - (CGFloat(from.rows) * step.height - DeckSize.spacing) / 2),
-                      step: step, columns: columns)
-            },
-            exited: { carry?.leave() },
-            dropped: { drop(on: page, columns: columns) }))
     }
 
     private static let gridSpace = "deck.grid.space"
@@ -272,7 +257,7 @@ struct DeckView: View {
         return true
     }
 
-    /// A Button being dragged, by finger in Arrange mode or by a system drag from normal mode.
+    /// A Button being dragged in Arrange mode.
     private struct Carry {
         let tile: Tile
         let width: Int
@@ -283,13 +268,8 @@ struct DeckView: View {
         var target: Spot?
         /// Every Button's Spot for the accepted target.
         var preview: [Tile: Spot] = [:]
-        /// The finger's travel in Arrange mode. A system drag draws its own preview, so nil.
-        var offset: CGSize?
-
-        /// A system drag left the Page: show it as it was until the drag comes back.
-        mutating func leave() {
-            (dwell, target, preview) = (Dwell(), nil, [:])
-        }
+        /// The finger's travel from where it picked the Button up.
+        var offset: CGSize = .zero
     }
 
     private func addTile(_ page: Page) -> some View {
@@ -334,21 +314,6 @@ struct DeckView: View {
             saveError = error.localizedDescription
         }
     }
-}
-
-/// Passes a system drag's live location and drop to the Deck (#81).
-private struct CarryDrop: DropDelegate {
-    let moved: (CGPoint) -> Void
-    let exited: () -> Void
-    let dropped: () -> Bool
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        moved(info.location)
-        return DropProposal(operation: .move)
-    }
-
-    func dropExited(info: DropInfo) { exited() }
-    func performDrop(info: DropInfo) -> Bool { dropped() }
 }
 
 /// How many columns the deck shows and how big its buttons are. Pinching changes the column

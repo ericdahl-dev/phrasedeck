@@ -103,7 +103,7 @@ namespace {
 // (#150: 4/10 restarts). Stopping both first: 0/10.
 void stopLcdOnRestart() {
     LCD_CAM.lcd_user.lcd_start = 0;
-    esp_rom_delay_us(50000);  // the frame in progress ends (one frame is about 30 ms)
+    esp_rom_delay_us(50000);  // the frame in progress ends (one frame is about 26 ms)
     periph_module_reset(PERIPH_LCD_CAM_MODULE);
     periph_module_reset(PERIPH_GDMA_MODULE);
 }
@@ -172,7 +172,9 @@ bool display_init() {
                   board::LCD_WIDTH, board::LCD_HEIGHT,
                   static_cast<unsigned>(board::LCD_PCLK_HZ),
                   internal ? "internal RAM" : "PSRAM (expect jitter)");
-    esp_register_shutdown_handler(stopLcdOnRestart);
+    if (esp_register_shutdown_handler(stopLcdOnRestart) != ESP_OK) {
+        Serial.println("display: couldn't register the restart handler (#150)");
+    }
     return true;
 }
 

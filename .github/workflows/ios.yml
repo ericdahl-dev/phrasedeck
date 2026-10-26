@@ -39,9 +39,7 @@ jobs:
           echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
       - name: Unit and UI tests
         if: steps.changes.outputs.run == 'true'
-        # A failing test is rerun once (only that test): SpotStorageTests flakes on this runner's
-        # iOS 26.4.1 Simulator and not locally (#90). Drop the retry when #90 is fixed.
-        run: xcodebuild test -scheme Phrasedeck -destination "id=$SIM_UDID" -quiet -resultBundlePath "$RUNNER_TEMP/tests.xcresult" -retry-tests-on-failure -test-iterations 2
+        run: xcodebuild test -scheme Phrasedeck -destination "id=$SIM_UDID" -quiet -resultBundlePath "$RUNNER_TEMP/tests.xcresult"
       # -quiet hides why a test failed; the result bundle has the assertion and screenshots.
       - name: Keep the test results when something failed
         if: steps.changes.outputs.run == 'true' && failure()

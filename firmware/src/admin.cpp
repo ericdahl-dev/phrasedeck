@@ -19,14 +19,15 @@ admin_password::Record g_record;
 bool g_set = false;
 lockout::State g_lockout;
 
-void pbkdf2(const std::string& password, const uint8_t* salt, size_t saltLen, uint32_t iterations, uint8_t* out) {
-    mbedtls_pkcs5_pbkdf2_hmac_ext(MBEDTLS_MD_SHA256, reinterpret_cast<const unsigned char*>(password.data()),
-                                  password.size(), salt, saltLen, iterations, admin_password::kHashLen, out);
+bool pbkdf2(const std::string& password, const uint8_t* salt, size_t saltLen, uint32_t iterations, uint8_t* out) {
+    return mbedtls_pkcs5_pbkdf2_hmac_ext(MBEDTLS_MD_SHA256, reinterpret_cast<const unsigned char*>(password.data()),
+                                         password.size(), salt, saltLen, iterations, admin_password::kHashLen,
+                                         out) == 0;
 }
 
-void saveFailures() {
+bool saveFailures() {
     Preferences p;
-    if (p.begin("admin", false, panel_store::kPartition)) p.putUInt("failures", g_lockout.failures);
+    return p.begin("admin", false, panel_store::kPartition) && p.putUInt("failures", g_lockout.failures) == 4;
 }
 
 }  // namespace
@@ -58,22 +59,26 @@ bool set(const std::string& password) {
     }
     g_record = r;
     g_set = true;
+    lockout::clear(g_lockout);  // tries made before a password existed don't count against it
+    saveFailures();
     return true;
 }
 
 Check check(const std::string& password, uint32_t& waitMs) {
     waitMs = lockout::waitMs(g_lockout, millis());
     if (waitMs > 0) return Check::Wait;
-    if (g_set && admin_password::check(g_record, password, pbkdf2)) {
-        if (g_lockout.failures > 0) {
-            lockout::clear(g_lockout);
-            saveFailures();
-        }
-        return Check::Ok;
-    }
+    if (!g_set) return Check::Wrong;
+    // Counted as wrong before the check and cleared after, so a power cut mid-check still counts,
+    // and a count that can't be saved fails closed: a reboot must not hand out free tries.
     lockout::failed(g_lockout, millis());
+    if (!saveFailures()) {
+        waitMs = 30000;
+        return Check::Wait;
+    }
+    if (!admin_password::check(g_record, password, pbkdf2)) return Check::Wrong;
+    lockout::clear(g_lockout);
     saveFailures();
-    return Check::Wrong;
+    return Check::Ok;
 }
 
 }  // namespace admin

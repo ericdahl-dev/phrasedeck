@@ -16,7 +16,8 @@ constexpr size_t kSaltLen = 16;
 constexpr size_t kHashLen = 32;
 constexpr size_t kBlobLen = kSaltLen + 4 + kHashLen;
 
-using Kdf = void (*)(const std::string& password, const uint8_t* salt, size_t saltLen, uint32_t iterations,
+// False if it failed; out is then not to be trusted.
+using Kdf = bool (*)(const std::string& password, const uint8_t* salt, size_t saltLen, uint32_t iterations,
                      uint8_t* out /* kHashLen */);
 
 struct Record {
@@ -31,7 +32,7 @@ inline bool make(const std::string& password, const uint8_t* salt, uint32_t iter
     Record next;
     std::memcpy(next.salt, salt, kSaltLen);
     next.iterations = iterations;
-    kdf(password, next.salt, kSaltLen, iterations, next.hash);
+    if (!kdf(password, next.salt, kSaltLen, iterations, next.hash)) return false;
     r = next;
     return true;
 }
@@ -40,7 +41,7 @@ inline bool make(const std::string& password, const uint8_t* salt, uint32_t iter
 inline bool check(const Record& r, const std::string& password, Kdf kdf) {
     if (r.iterations < kMinIterations || r.iterations > kMaxIterations) return false;
     uint8_t h[kHashLen];
-    kdf(password, r.salt, kSaltLen, r.iterations, h);
+    if (!kdf(password, r.salt, kSaltLen, r.iterations, h)) return false;
     uint8_t diff = 0;
     for (size_t i = 0; i < kHashLen; ++i) diff |= static_cast<uint8_t>(h[i] ^ r.hash[i]);
     return diff == 0;

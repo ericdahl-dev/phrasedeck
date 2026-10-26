@@ -450,6 +450,9 @@ lv_obj_t* g_settings = nullptr;
 
 void closeLock(lv_event_t*) {
     if (g_lock == nullptr) return;
+    // Overwrite the typed password before LVGL frees its buffers.
+    lv_textarea_set_text(g_pw, "");
+    if (g_pw_again != nullptr) lv_textarea_set_text(g_pw_again, "");
     lv_obj_delete_async(g_lock);
     g_lock = nullptr;
 }

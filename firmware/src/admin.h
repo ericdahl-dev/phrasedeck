@@ -18,8 +18,8 @@ bool set(const std::string& password);
 
 enum class Check { Ok, Wrong, Wait };
 
-// Ok clears the lockout. Wait means too many wrong tries: waitMs says how long; the password
-// isn't even checked.
+// Ok clears the lockout. Wait means too many wrong tries, or the try couldn't be counted in NVS:
+// waitMs says how long, and the password isn't even checked. Wrong when no password is set.
 Check check(const std::string& password, uint32_t& waitMs);
 
 }  // namespace admin

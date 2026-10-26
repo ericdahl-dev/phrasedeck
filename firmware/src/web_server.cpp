@@ -22,7 +22,6 @@ namespace {
 SemaphoreHandle_t g_lock = nullptr;
 std::string g_fingerprint;  // under g_lock
 std::string g_key, g_cert;  // PEM, kept for the server's lifetime
-std::string g_ip;           // the address the server answers to
 web::Session g_session;     // only touched on the httpd task
 
 int random(void*, unsigned char* out, size_t len) {
@@ -39,7 +38,7 @@ bool makeCert(std::string& keyPem, std::string& certPem) {
     static unsigned char buf[2048];
     unsigned char serial[16];
     esp_fill_random(serial, sizeof serial);
-    serial[0] &= 0x7F;  // positive
+    serial[0] = (serial[0] & 0x7F) | 0x01;  // positive, and no leading zero byte (non-minimal DER)
     const bool ok =
         mbedtls_pk_setup(&key, mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY)) == 0 &&
         mbedtls_ecp_gen_key(MBEDTLS_ECP_DP_SECP256R1, mbedtls_pk_ec(key), random, nullptr) == 0 &&
@@ -128,7 +127,10 @@ const char* kLoginForm =
     "<form method=post action=/login><p><label>Admin password<br><input type=password name=password "
     "autocomplete=current-password required></label></p><p><button>Log in</button></p></form>";
 
-bool hostOk(httpd_req_t* req) { return web::hostAllowed(header(req, "Host"), g_ip); }
+// Read per request, so a new DHCP lease doesn't lock the browser out until a reboot.
+std::string ip() { return WiFi.localIP().toString().c_str(); }
+
+bool hostOk(httpd_req_t* req) { return web::hostAllowed(header(req, "Host"), ip()); }
 
 bool loggedIn(httpd_req_t* req) {
     const std::string token = web::cookieToken(header(req, "Cookie"));
@@ -151,11 +153,15 @@ bool postOk(httpd_req_t* req, std::string& body, esp_err_t& sent) {
         sent = reply(req, "421 Misdirected Request", page("Wrong address", ""));
         return false;
     }
-    if (!web::originAllowed(header(req, "Origin"), g_ip)) {
+    if (!web::originAllowed(header(req, "Origin"), ip())) {
         sent = reply(req, "403 Forbidden", page("Not from this page", ""));
         return false;
     }
-    if (header(req, "Content-Type") != "application/x-www-form-urlencoded" || req->content_len > 256) {
+    if (req->content_len > 256) {
+        sent = ESP_FAIL;  // close without draining, so a trickled huge body can't hold the one httpd task
+        return false;
+    }
+    if (header(req, "Content-Type") != "application/x-www-form-urlencoded") {
         sent = reply(req, "400 Bad Request", page("Bad request", ""));
         return false;
     }
@@ -181,7 +187,7 @@ esp_err_t postLogin(httpd_req_t* req) {
         return reply(req, "403 Forbidden", page("No admin password yet", "<p>Set one on the panel first.</p>"));
     }
     uint32_t wait = 0;
-    const admin::Check c = admin::check(password, wait);
+    const admin::Check c = admin::check(password, wait, admin::From::Web);
     mbedtls_platform_zeroize(&password[0], password.size());
     if (c == admin::Check::Wait) {
         return reply(req, "429 Too Many Requests",
@@ -212,18 +218,13 @@ esp_err_t postLogout(httpd_req_t* req) {
     return reply(req, "303 See Other", "");
 }
 
-void run(void*) {
+// Returns instead of deleting itself mid-way, so locals are destroyed (run deletes the task).
+void serve() {
     while (WiFi.status() != WL_CONNECTED) vTaskDelay(pdMS_TO_TICKS(500));
-    g_ip = WiFi.localIP().toString().c_str();
     if (!loadOrMakeCert()) {
         Serial.println("web: no key or cert, not serving");
-        vTaskDelete(nullptr);
+        return;
     }
-    const std::string fp = certFingerprint(g_cert);
-    xSemaphoreTake(g_lock, portMAX_DELAY);
-    g_fingerprint = fp;
-    xSemaphoreGive(g_lock);
-
     httpd_ssl_config_t conf = HTTPD_SSL_CONFIG_DEFAULT();
     conf.servercert = reinterpret_cast<const uint8_t*>(g_cert.c_str());
     conf.servercert_len = g_cert.size() + 1;
@@ -232,21 +233,38 @@ void run(void*) {
     conf.httpd.max_open_sockets = 2;  // each TLS session holds ~32 KB of buffers
     conf.httpd.lru_purge_enable = true;
     conf.httpd.stack_size = 12 * 1024;  // TLS handshake and PBKDF2 run on it
+    conf.httpd.task_priority = 1;       // like the net task: TLS and PBKDF2 never preempt the UI
+    conf.httpd.core_id = 0;             // the LVGL loop runs on core 1
     conf.httpd.max_uri_handlers = 4;
     httpd_handle_t server = nullptr;
     const size_t before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     if (httpd_ssl_start(&server, &conf) != ESP_OK) {
         Serial.println("web: server didn't start");
-        vTaskDelete(nullptr);
+        return;
     }
     const httpd_uri_t routes[] = {
         {"/", HTTP_GET, getRoot, nullptr},
         {"/login", HTTP_POST, postLogin, nullptr},
         {"/logout", HTTP_POST, postLogout, nullptr},
     };
-    for (const httpd_uri_t& r : routes) httpd_register_uri_handler(server, &r);
-    Serial.printf("web: serving https://%s/, internal heap %u -> %u\n", g_ip.c_str(), static_cast<unsigned>(before),
-                  static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
+    for (const httpd_uri_t& r : routes) {
+        if (httpd_register_uri_handler(server, &r) != ESP_OK) {
+            Serial.printf("web: couldn't register %s\n", r.uri);
+            httpd_ssl_stop(server);
+            return;
+        }
+    }
+    const std::string fp = certFingerprint(g_cert);  // published only once the server is up
+    xSemaphoreTake(g_lock, portMAX_DELAY);
+    g_fingerprint = fp;
+    xSemaphoreGive(g_lock);
+    Serial.printf("web: serving https://%s/, internal heap %u -> %u, stack left %u\n", ip().c_str(),
+                  static_cast<unsigned>(before), static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+                  static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+}
+
+void run(void*) {
+    serve();
     vTaskDelete(nullptr);
 }
 

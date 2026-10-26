@@ -1,5 +1,7 @@
 #include "web.h"
 
+#include <algorithm>
+
 namespace web {
 namespace {
 
@@ -29,24 +31,29 @@ bool originAllowed(const std::string& origin, const std::string& ip) {
 }
 
 std::string formValue(const std::string& body, const std::string& name) {
+    // Decodes straight from body into one reserved buffer, so no stray copy of a password is left.
+    const std::string key = name + "=";
     size_t start = 0;
     while (start <= body.size()) {
         size_t end = body.find('&', start);
         if (end == std::string::npos) end = body.size();
-        const std::string pair = body.substr(start, end - start);
-        if (pair.compare(0, name.size() + 1, name + "=") == 0) {
+        if (body.compare(start, key.size(), key) == 0 && start + key.size() <= end) {
             std::string out;
-            for (size_t i = name.size() + 1; i < pair.size(); ++i) {
-                if (pair[i] == '+') {
+            out.reserve(end - start);
+            for (size_t i = start + key.size(); i < end; ++i) {
+                if (body[i] == '+') {
                     out += ' ';
-                } else if (pair[i] == '%') {
-                    if (i + 2 >= pair.size()) return "";
-                    const int hi = hexValue(pair[i + 1]), lo = hexValue(pair[i + 2]);
-                    if (hi < 0 || lo < 0) return "";
+                } else if (body[i] == '%') {
+                    const int hi = i + 2 < end ? hexValue(body[i + 1]) : -1;
+                    const int lo = i + 2 < end ? hexValue(body[i + 2]) : -1;
+                    if (hi < 0 || lo < 0) {
+                        std::fill(out.begin(), out.end(), '\0');
+                        return "";
+                    }
                     out += static_cast<char>(hi * 16 + lo);
                     i += 2;
                 } else {
-                    out += pair[i];
+                    out += body[i];
                 }
             }
             return out;

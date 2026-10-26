@@ -500,7 +500,7 @@ void webEditorInfo(lv_obj_t* parent) {
     std::string fp = web_server::fingerprint();
     if (fp.size() == 95) fp.insert(48, "\n");  // two lines of 16 bytes
     tabText(parent, ("Open " + url + " in a browser on your home network and log in with the admin password.\n"
-                     "The browser warns about the certificate: check its SHA-256 fingerprint is\n" +
+                     "The browser warns about the certificate. Its SHA-256 fingerprint must be this; if not, don't log in:\n" +
                      (fp.empty() ? std::string("(still being made: open this again in a moment)") : fp)).c_str());
     lv_obj_t* qr = lv_qrcode_create(parent);
     lv_qrcode_set_size(qr, 180);

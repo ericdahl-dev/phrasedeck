@@ -35,6 +35,8 @@ void test_a_form_field_is_decoded() {
     TEST_ASSERT_EQUAL_STRING("a&b=c%", web::formValue("x=1&password=a%26b%3Dc%25", "password").c_str());
     TEST_ASSERT_EQUAL_STRING("", web::formValue("passwordx=1", "password").c_str());
     TEST_ASSERT_EQUAL_STRING("", web::formValue("password=%zz", "password").c_str());  // bad escape
+    TEST_ASSERT_EQUAL_STRING("", web::formValue("password=a%4&x=1", "password").c_str());  // cut-off escape
+    TEST_ASSERT_EQUAL_STRING("", web::formValue("password=", "password").c_str());
 }
 
 // The session cookie: only "s", only 32 lowercase hex.

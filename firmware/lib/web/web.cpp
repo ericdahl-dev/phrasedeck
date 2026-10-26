@@ -79,19 +79,19 @@ std::string cookieToken(const std::string& cookieHeader) {
     return "";
 }
 
-void startSession(Session& s, const std::string& token, uint32_t nowMs) {
+void startSession(Session& s, const std::string& token, uint64_t nowMs) {
     s.token = token;
     s.lastMs = s.startMs = nowMs;
 }
 
 void endSession(Session& s) { s = Session{}; }
 
-void touch(Session& s, uint32_t nowMs) { s.lastMs = nowMs; }
+void touch(Session& s, uint64_t nowMs) { s.lastMs = nowMs; }
 
-bool sessionValid(const Session& s, const std::string& token, uint32_t nowMs) {
+bool sessionValid(const Session& s, const std::string& token, uint64_t nowMs) {
     if (!isToken(s.token) || !isToken(token) || nowMs - s.lastMs >= kSessionMs ||
         nowMs - s.startMs >= kSessionMaxMs)
-        return false;  // wrap-safe
+        return false;
     unsigned char diff = 0;
     for (size_t i = 0; i < kTokenLen; ++i) diff |= static_cast<unsigned char>(s.token[i] ^ token[i]);
     return diff == 0;

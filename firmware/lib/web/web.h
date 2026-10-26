@@ -26,16 +26,16 @@ std::string cookieToken(const std::string& cookieHeader);
 // One session at a time: a new login replaces the old one.
 struct Session {
     std::string token;  // empty: none
-    uint32_t lastMs = 0;
-    uint32_t startMs = 0;
+    uint64_t lastMs = 0;  // a 64-bit clock: a 32-bit one wraps and revives an old cookie
+    uint64_t startMs = 0;
 };
 
-void startSession(Session& s, const std::string& token, uint32_t nowMs);
+void startSession(Session& s, const std::string& token, uint64_t nowMs);
 void endSession(Session& s);
-void touch(Session& s, uint32_t nowMs);
+void touch(Session& s, uint64_t nowMs);
 
 // Constant time in the token; false once kSessionMs have passed since the last touch, or
 // kSessionMaxMs since login.
-bool sessionValid(const Session& s, const std::string& token, uint32_t nowMs);
+bool sessionValid(const Session& s, const std::string& token, uint64_t nowMs);
 
 }  // namespace web

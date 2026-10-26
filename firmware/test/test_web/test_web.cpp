@@ -64,10 +64,10 @@ void test_a_session_matches_its_token_until_it_expires() {
     web::touch(s, 2000);
     TEST_ASSERT_TRUE(web::sessionValid(s, t, 2000 + web::kSessionMs - 1));
     TEST_ASSERT_FALSE(web::sessionValid(s, t, 2000 + web::kSessionMs));
-    web::startSession(s, t, 0xFFFFFF00u);  // millis() wraps
-    TEST_ASSERT_TRUE(web::sessionValid(s, t, 0x100u));
+    web::startSession(s, t, 0xFFFFFF00u);  // across where a 32-bit clock would wrap
+    TEST_ASSERT_TRUE(web::sessionValid(s, t, 0x100000100ull));
     web::endSession(s);
-    TEST_ASSERT_FALSE(web::sessionValid(s, t, 0x100u));
+    TEST_ASSERT_FALSE(web::sessionValid(s, t, 0x100000100ull));
 }
 
 // Requests keep a session alive, but never past kSessionMaxMs from login: a stolen cookie in
@@ -75,15 +75,26 @@ void test_a_session_matches_its_token_until_it_expires() {
 void test_activity_does_not_keep_a_session_past_its_cap() {
     web::Session s;
     const std::string t = "0123456789abcdef0123456789abcdef";
-    const uint32_t start = 0xFFFFF000u;  // millis() wraps during the session
+    const uint64_t start = 0xFFFFF000u;  // past where a 32-bit millis() would wrap
     web::startSession(s, t, start);
-    for (uint32_t now = start; now - start < web::kSessionMaxMs - 1000; now += web::kSessionMs / 2) {
+    for (uint64_t now = start; now - start < web::kSessionMaxMs - 1000; now += web::kSessionMs / 2) {
         web::touch(s, now);
         TEST_ASSERT_TRUE(web::sessionValid(s, t, now));
     }
     web::touch(s, start + web::kSessionMaxMs - 1);
     TEST_ASSERT_TRUE(web::sessionValid(s, t, start + web::kSessionMaxMs - 1));
     TEST_ASSERT_FALSE(web::sessionValid(s, t, start + web::kSessionMaxMs));
+}
+
+// A 32-bit clock comes back around after 49.7 days: a cookie left unused that long must not look
+// fresh again.
+void test_a_session_left_unused_for_49_days_stays_ended() {
+    web::Session s;
+    const std::string t = "0123456789abcdef0123456789abcdef";
+    const uint64_t hour = 60ull * 60 * 1000;
+    web::startSession(s, t, 1000);
+    web::touch(s, 1000 + hour);
+    TEST_ASSERT_FALSE(web::sessionValid(s, t, 1000 + hour + (1ull << 32) + 60000));
 }
 
 int main() {
@@ -94,5 +105,6 @@ int main() {
     RUN_TEST(test_the_session_token_comes_from_its_cookie);
     RUN_TEST(test_a_session_matches_its_token_until_it_expires);
     RUN_TEST(test_activity_does_not_keep_a_session_past_its_cap);
+    RUN_TEST(test_a_session_left_unused_for_49_days_stays_ended);
     return UNITY_END();
 }

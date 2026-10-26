@@ -156,6 +156,7 @@ bool notePrivacy(uint16_t handle) {
     Preferences p;
     if (!p.begin("ble", false, panel_store::kPartition) || p.putBool("private", true) == 0) return false;
     g_seenRpa = true;
+    log_i("the Computer uses private addresses: network privacy");
     return true;
 }
 

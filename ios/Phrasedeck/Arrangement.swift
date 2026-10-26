@@ -196,3 +196,17 @@ struct EdgeFlip {
         return page + side
     }
 }
+
+/// A drag near the top or bottom of the visible Page scrolls it (spec section 5), faster the nearer
+/// the finger is to the edge.
+enum AutoScroll {
+    static let zone = 44.0
+    /// Points per tick at the edge and beyond.
+    static let maxStep = 24.0
+
+    /// Points to scroll this tick: negative up, positive down, 0 away from the edges.
+    static func step(fingerY y: Double, top: Double, bottom: Double) -> Double {
+        let depth = y < top + zone ? -(top + zone - y) : y > bottom - zone ? y - (bottom - zone) : 0
+        return max(-1, min(1, depth / zone)) * maxStep
+    }
+}

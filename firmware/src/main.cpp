@@ -11,6 +11,7 @@
 #include "board_pins.h"
 #include "display_driver.h"
 #include "net.h"
+#include "panel_store.h"
 #include "panel_mcu.h"
 #include "touch.h"
 
@@ -28,8 +29,8 @@ unsigned g_net_version = 0;
 
 // Shows Wi-Fi and the Nearby Helpers; runs on the LVGL loop, reading the net task's snapshot.
 void showNet() {
+    if (net::version() == g_net_version) return;
     const net::Snapshot s = net::snapshot();
-    if (s.version == g_net_version) return;
     g_net_version = s.version;
     std::string text;
     if (!s.wifiConfigured) {
@@ -113,7 +114,8 @@ void setup() {
     }
     touch_init();
     buildPage();
-    net::start();
+    if (!panel_store::begin()) Serial.println("phrasedeck panel: panel NVS unavailable");
+    if (!net::start()) Serial.println("phrasedeck panel: net task didn't start");
     lv_timer_handler();
     panel_mcu::backlightOn();  // last, so the screen doesn't flash on boot
     Serial.printf("phrasedeck panel: ready, internal heap free %u, PSRAM free %u\n",

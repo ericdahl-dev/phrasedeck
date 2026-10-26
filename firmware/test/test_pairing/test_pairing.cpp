@@ -43,10 +43,42 @@ void test_a_digest_is_lowercase_hex() {
                              pairing::hexLower(digest).c_str());
 }
 
+// A 200 from /pair gives the Token. Its certSHA256 must be the cert the panel just checked, or
+// the reply came from somewhere else and nothing is stored.
+void test_a_pair_reply_gives_the_token_for_the_checked_cert() {
+    const std::string fp = "5597416a434cd222035b408fa54b84ab02cc0e190f3ca4dc251c67233bf1cfaa";
+    std::string token;
+    TEST_ASSERT_TRUE(pairing::readPairReply(
+        200, "{\"token\":\"tok-123\",\"certSHA256\":\"" + fp + "\",\"lanPort\":47812}", fp, token));
+    TEST_ASSERT_EQUAL_STRING("tok-123", token.c_str());
+
+    std::string other = fp;
+    other[63] = '0';
+    TEST_ASSERT_FALSE(pairing::readPairReply(
+        200, "{\"token\":\"tok-123\",\"certSHA256\":\"" + other + "\"}", fp, token));
+    TEST_ASSERT_FALSE(pairing::readPairReply(200, "{\"token\":\"tok-123\"}", fp, token));
+    TEST_ASSERT_FALSE(pairing::readPairReply(200, "{\"certSHA256\":\"" + fp + "\"}", fp, token));
+    TEST_ASSERT_FALSE(pairing::readPairReply(401, "{\"error\":\"wrong code\"}", fp, token));
+    TEST_ASSERT_FALSE(pairing::readPairReply(200, "not json", fp, token));
+}
+
+// Every later request compares the whole Pin, not the short one.
+void test_later_requests_need_the_whole_pin() {
+    const std::string fp = "5597416a434cd222035b408fa54b84ab02cc0e190f3ca4dc251c67233bf1cfaa";
+    std::string other = fp;
+    other[63] = '0';
+    TEST_ASSERT_TRUE(pairing::matchesPin(fp, fp));
+    TEST_ASSERT_FALSE(pairing::matchesPin(fp, other));
+    TEST_ASSERT_FALSE(pairing::matchesPin(fp, fp.substr(0, 16)));
+    TEST_ASSERT_FALSE(pairing::matchesPin("", ""));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_the_keypad_builds_a_six_digit_code);
     RUN_TEST(test_the_code_goes_only_to_a_cert_matching_the_short_pin);
     RUN_TEST(test_a_digest_is_lowercase_hex);
+    RUN_TEST(test_a_pair_reply_gives_the_token_for_the_checked_cert);
+    RUN_TEST(test_later_requests_need_the_whole_pin);
     return UNITY_END();
 }

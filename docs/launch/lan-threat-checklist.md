@@ -109,3 +109,6 @@ listener (47812) and the app's choice of route.
       `fp`. The fingerprint stored afterward must equal the QR's `fp`, or the pairing is rejected.
 - [ ] Unpaired nearby computers from Bonjour can only prompt "Scan its QR code to pair". Never pair
       from a Bonjour result alone.
+- [ ] Known limitation: the panel's NVS isn't encrypted (no flash encryption), so anyone with the
+      board on USB can read the Token, the Pin and, later, the panel's TLS key and admin password
+      hash. Revoke the panel (`phrased revoke`) if it leaves the house.

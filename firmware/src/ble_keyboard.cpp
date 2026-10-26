@@ -422,7 +422,10 @@ void closePairing() {
     const int pairing = g_pairing.load();
     if (g_started.load() && pairing != kNone) {
         g_canceled.store(pairing);
-        ble_gap_terminate(static_cast<uint16_t>(pairing), BLE_ERR_REM_USER_CONN_TERM);
+        if (ble_gap_terminate(static_cast<uint16_t>(pairing), BLE_ERR_REM_USER_CONN_TERM) != 0) {
+            int expected = pairing;  // already gone: don't let the handle's next connection inherit it
+            g_canceled.compare_exchange_strong(expected, kNone);
+        }
     }
     pairingClosed();
 }

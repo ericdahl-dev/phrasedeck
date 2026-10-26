@@ -10,14 +10,14 @@ namespace ble_keyboard {
 // Starts the stack, the HID service and advertising. False if it couldn't.
 bool start();
 
-// A paired Computer is connected over an encrypted link, alone: keystrokes can go.
+// The paired Computer is connected over an encrypted link and subscribed: keystrokes can go.
 bool ready();
 
 // Sends one keyboard report (mod, code) and returns whether the stack took it. False when not
 // ready(). Call from one task only (the net task).
 bool send(uint8_t mod, uint8_t code);
 
-// Bumps on every disconnect, so a send loop can drop() its Sender.
+// Bumps when the paired Computer disconnects, so a send loop can drop() its Sender.
 unsigned disconnects();
 
 // Lets a new Computer pair for ms, replacing the one paired now. Advertises meanwhile.

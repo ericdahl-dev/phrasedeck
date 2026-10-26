@@ -6,6 +6,7 @@
 #include <BLESecurity.h>
 #include <BLEServer.h>
 #include <host/ble_gap.h>
+#include <host/ble_hs.h>
 #include <host/ble_hs_mbuf.h>
 #include <host/ble_store.h>
 
@@ -99,12 +100,12 @@ class ServerCallbacks : public BLEServerCallbacks {
     void onDisconnect(BLEServer*, ble_gap_conn_desc* d) override {
         int handle = d->conn_handle;
         int expected = handle;
-        g_trusted.compare_exchange_strong(expected, kNone);
+        // Only the Computer leaving stops a Send: a stranger's disconnect mustn't.
+        if (g_trusted.compare_exchange_strong(expected, kNone)) g_disconnects.fetch_add(1);
         expected = handle;
         if (g_pairing.compare_exchange_strong(expected, kNone)) g_passkey.store(kNone);
         expected = handle;
         g_subscribed.compare_exchange_strong(expected, kNone);
-        g_disconnects.fetch_add(1);
         bump();
     }
 };
@@ -113,6 +114,10 @@ class InputCallbacks : public BLECharacteristicCallbacks {
     // Also called when NimBLE restores a bonded Computer's subscription on reconnect.
     void onSubscribe(BLECharacteristic*, ble_gap_conn_desc* d, uint16_t subValue) override {
         if (subValue & 1) {
+            // A stranger's subscription mustn't take the slot. NimBLE restores the Computer's after
+            // encryption, so it still lands here.
+            const auto& sec = d->sec_state;
+            if (!sec.encrypted || !sec.authenticated || !sec.bonded) return;
             g_subscribed.store(d->conn_handle);
         } else {
             int expected = d->conn_handle;
@@ -156,7 +161,8 @@ class SecurityCallbacks : public BLESecurityCallbacks {
         bump();
         if (!d->sec_state.encrypted) return;  // failed: the link stays unencrypted and never trusted
         // Just Works or no bond: never trusted, whatever the window says.
-        if (!d->sec_state.authenticated || !d->sec_state.bonded || (unmatched && !pairedNow)) {
+        if (!d->sec_state.authenticated || !d->sec_state.bonded || d->sec_state.key_size != 16 ||
+            (unmatched && !pairedNow)) {
             reject(*d);
             return;
         }
@@ -186,6 +192,8 @@ bool start() {
     sec->setAuthenticationMode(true, true, true);     // bond, MITM, Secure Connections
     sec->setPassKey(false);                           // random
     sec->regenPassKeyOnConnect(true);                 // a new one for every pairing
+    // Secure Connections only: a sniffed legacy passkey pairing gives up its key in seconds.
+    ble_hs_cfg.sm_sc_only = 1;
     BLEDevice::setSecurityCallbacks(new SecurityCallbacks());
 
     g_server = BLEDevice::createServer();
@@ -217,7 +225,7 @@ bool ready() {
 
 bool send(uint8_t mod, uint8_t code) {
     const int handle = g_trusted.load();
-    if (!ready() || g_input == nullptr) return false;
+    if (handle == kNone || g_subscribed.load() != handle || g_input == nullptr) return false;
     // Notify only the paired Computer's connection. NimBLE ignores the input report's encryption
     // permission, so a plain notify() would also reach a stranger who connected and subscribed.
     const uint8_t report[8] = {mod, 0, code, 0, 0, 0, 0, 0};

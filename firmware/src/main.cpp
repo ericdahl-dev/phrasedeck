@@ -94,16 +94,10 @@ void sendResult(const net::Snapshot& s);
 // Shows Wi-Fi and the paired Computer; runs on the LVGL loop, reading the net task's snapshot.
 // Nearby Computers are listed on the Pair screen, not here.
 void showNet() {
-    // The Bluetooth window closes on a timer without a version bump: recheck while it shows open.
-    static bool pairingShown = false;
-    static uint32_t checkedMs = 0;
-    const bool recheck = pairingShown && millis() - checkedMs >= 500;
-    const unsigned v = net::version();  // includes Bluetooth changes, which s.version doesn't
-    if (v == g_net_version && !recheck) return;
-    checkedMs = millis();
+    const unsigned v = net::version();  // bumps on Bluetooth changes too, the window running out included
+    if (v == g_net_version) return;
     const net::Snapshot s = net::snapshot();
     g_net_version = v;
-    pairingShown = s.blePairing;
     std::string text = LV_SYMBOL_WIFI " ";
     if (s.bluetooth) {
         text = LV_SYMBOL_BLUETOOTH " " + std::string(bt_pairing::status(s.bleReady, s.blePairing));

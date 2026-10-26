@@ -16,7 +16,7 @@ lv_display_t* g_disp = nullptr;
 
 // Ten lines of partial rendering. Full double buffering at this size would be
 // 1.5 MB, which PSRAM could afford but which buys nothing here: the UI redraws
-// small regions - two numbers and two charts - not whole frames.
+// small regions (a pressed Button, the status line), not whole frames.
 constexpr int   DRAW_LINES = 10;
 constexpr size_t DRAW_PIXELS =
     static_cast<size_t>(board::LCD_WIDTH) * DRAW_LINES;

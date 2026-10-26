@@ -57,7 +57,7 @@ bool begin() {
     Serial.printf("panel_mcu: found at 0x%02X, driving it as V%d.%d\n",
                   board::PANEL_MCU_ADDR, g_revision / 100, (g_revision / 10) % 10);
     Serial.println("panel_mcu: if the screen stays dark, check the silkscreen and");
-    Serial.println("panel_mcu: set CROWPANEL_ADVANCE_REV in board_pins.h.");
+    Serial.println("panel_mcu: set CROWPANEL_ADVANCE_REV in platformio.ini.");
     return true;
 }
 

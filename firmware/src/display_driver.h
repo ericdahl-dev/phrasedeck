@@ -1,7 +1,7 @@
 // Panel bring-up for the Elecrow CrowPanel Advance 7.0-HMI.
 //
 // Wraps the 800x480 16-bit RGB565 IPS panel in a LovyanGFX device and hands
-// LVGL 9 a pair of PSRAM draw buffers.
+// LVGL 9 a pair of draw buffers (internal RAM, PSRAM if that's short).
 //
 // This driver does NOT own the backlight. On this board the backlight is an
 // I2C command to a companion microcontroller; see panel_mcu.h. Elecrow's own
@@ -36,7 +36,7 @@ class LGFX : public lgfx::LGFX_Device {
 // The single panel instance. Defined in display_driver.cpp.
 extern LGFX display_lcd;
 
-// Initializes LVGL, brings up the panel, allocates the PSRAM draw buffers and
+// Initializes LVGL, brings up the panel, allocates the draw buffers and
 // registers the LVGL display. Also installs a millis()-backed LVGL tick source,
 // so the caller only has to pump lv_timer_handler().
 //

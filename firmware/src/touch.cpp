@@ -10,6 +10,7 @@
 #include <lvgl.h>
 
 #include "board_pins.h"
+#include "gt911.h"
 #include "panel_mcu.h"
 
 namespace {
@@ -109,29 +110,14 @@ void touch_poll() {
     // long, and this bus is shared with the panel's companion MCU while the RGB
     // DMA is scanning - which is Elecrow's own issue #8, visible as jitter
     // while a finger is down.
-    uint8_t buf[6];
-    if (!readRegs(REG_STATUS, buf, sizeof(buf))) return;
-
-    const uint8_t status = buf[0];
-
-    // Bit 7 means the controller has a fresh result; the low nibble is the
-    // number of points.
-    if ((status & 0x80) == 0) return;
-
-    if ((status & 0x0F) > 0) {
-        const int16_t x =
-            static_cast<int16_t>(buf[2] | (static_cast<uint16_t>(buf[3]) << 8));
-        const int16_t y =
-            static_cast<int16_t>(buf[4] | (static_cast<uint16_t>(buf[5]) << 8));
-
-        // Clamp rather than trust. A glitched read that lands off-screen would
-        // otherwise send LVGL a pointer outside every object.
-        g_x = x < 0 ? 0 : (x >= board::LCD_WIDTH ? board::LCD_WIDTH - 1 : x);
-        g_y = y < 0 ? 0 : (y >= board::LCD_HEIGHT ? board::LCD_HEIGHT - 1 : y);
-        g_pressed = true;
-    } else {
-        g_pressed = false;
-    }
+    uint8_t buf[6] = {};
+    const bool ok = readRegs(REG_STATUS, buf, sizeof(buf));
+    gt911::Touch t{g_pressed, g_x, g_y};
+    gt911::decode(buf, ok, board::LCD_WIDTH, board::LCD_HEIGHT, t);
+    g_pressed = t.pressed;
+    g_x = t.x;
+    g_y = t.y;
+    if (!ok || (buf[0] & 0x80) == 0) return;
 
     // The status register must be cleared or the controller stops reporting.
     writeReg(REG_STATUS, 0);

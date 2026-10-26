@@ -94,6 +94,24 @@ func TestPairQRWithTailscaleOffUsesTheLANAddress(t *testing.T) {
 	}
 }
 
+// A panel (#68) can't scan the QR code, so it takes the Pairing code plus the first 16 hex of
+// the Pin, typed by hand, and sends the code only to a Helper whose certificate matches.
+func TestPairPrintsTheShortPinForAPanel(t *testing.T) {
+	dir, fp := lanConfig(t)
+	notify = func(string) {}
+	tailscaleStatus = func(string) ([]byte, error) { return nil, errors.New("not running") }
+	t.Cleanup(func() { notify = macNotify; tailscaleStatus = runTailscaleStatus })
+
+	out, err := runCmd(t, "pair", "-config", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Pin for a panel: " + fp[0:4] + " " + fp[4:8] + " " + fp[8:12] + " " + fp[12:16] + "\n"
+	if !strings.Contains(out, want) {
+		t.Fatalf("want %q in %q", want, out)
+	}
+}
+
 func TestSubnetsComeFromTheFileAndFlags(t *testing.T) {
 	dir := t.TempDir()
 	// lan-subnets is the documented, hand-edited list.

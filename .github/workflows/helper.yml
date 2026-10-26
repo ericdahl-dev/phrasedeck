@@ -98,6 +98,7 @@ jobs:
         if: steps.changes.outputs.run == 'true'
         run: make plist AGENT="$RUNNER_TEMP/dev.ericdahl.phrased.plist"
       - name: Universal zip and Homebrew cask build and pass their checks (#66)
+        if: steps.changes.outputs.run == 'true'
         run: |
           packaging/build-mac.sh 0.0.0 "$RUNNER_TEMP/mac"
           packaging/check-mac.sh "$RUNNER_TEMP/mac/phrased-0.0.0-macos.zip"

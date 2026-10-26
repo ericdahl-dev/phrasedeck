@@ -316,7 +316,9 @@ bool start() {
     if (g_server == nullptr) return false;
     g_server->setCallbacks(new ServerCallbacks());
     BLEHIDDevice* hid = new BLEHIDDevice(g_server);
-    hid->manufacturer("Phrasedeck");
+    // manufacturer(String) only sets the characteristic that manufacturer() creates: alone, it
+    // dereferences null and the net task panics at every boot in Bluetooth Mode.
+    hid->manufacturer()->setValue("Phrasedeck");
     hid->pnp(0x02, 0x303A, 0x1001, 0x0100);  // USB vendor: Espressif
     hid->hidInfo(0x00, 0x01);
     hid->reportMap(const_cast<uint8_t*>(kReportMap), sizeof(kReportMap));

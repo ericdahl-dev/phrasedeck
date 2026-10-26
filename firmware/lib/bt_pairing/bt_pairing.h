@@ -4,6 +4,8 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdio>
+#include <string>
 
 namespace bt_pairing {
 
@@ -44,5 +46,18 @@ class Window {
     uint32_t ms_ = 0;
     bool open_ = false;
 };
+
+// The passkey as the Computer asks for it: 6 digits, leading zeros kept. Empty for none (-1).
+inline std::string passkeyText(int32_t passkey) {
+    if (passkey < 0) return "";
+    char s[8];
+    snprintf(s, sizeof s, "%06ld", static_cast<long>(passkey % 1000000));
+    return s;
+}
+
+// The link in one word or two, for the status line.
+inline const char* status(bool ready, bool pairing) {
+    return ready ? "Connected" : pairing ? "Pairing" : "Not connected";
+}
 
 }  // namespace bt_pairing

@@ -60,11 +60,24 @@ void test_an_idle_unencrypted_connection_is_dropped() {
     TEST_ASSERT_FALSE(bt_pairing::dropIdle(encrypted, !passkey, !window, !grace));
 }
 
+// What the panel shows: the passkey as typed on the Computer (6 digits, leading zeros kept), and
+// the link in one word for the status line.
+void test_what_the_panel_shows() {
+    TEST_ASSERT_EQUAL_STRING("", bt_pairing::passkeyText(-1).c_str());
+    TEST_ASSERT_EQUAL_STRING("004217", bt_pairing::passkeyText(4217).c_str());
+    TEST_ASSERT_EQUAL_STRING("999999", bt_pairing::passkeyText(999999).c_str());
+    TEST_ASSERT_EQUAL_STRING("Connected", bt_pairing::status(true, false));
+    TEST_ASSERT_EQUAL_STRING("Connected", bt_pairing::status(true, true));
+    TEST_ASSERT_EQUAL_STRING("Pairing", bt_pairing::status(false, true));
+    TEST_ASSERT_EQUAL_STRING("Not connected", bt_pairing::status(false, false));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_who_may_pair);
     RUN_TEST(test_the_pairing_window);
     RUN_TEST(test_a_window_lapses_when_it_runs_out);
     RUN_TEST(test_an_idle_unencrypted_connection_is_dropped);
+    RUN_TEST(test_what_the_panel_shows);
     return UNITY_END();
 }

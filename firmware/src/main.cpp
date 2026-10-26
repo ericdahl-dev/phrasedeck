@@ -7,6 +7,7 @@
 #include <Wire.h>
 #include <esp_heap_caps.h>
 #include <esp_partition.h>
+#include <nvs_flash.h>
 #include <lvgl.h>
 
 #include <string>
@@ -15,6 +16,7 @@
 #include "admin.h"
 #include "admin_password.h"
 #include "board_pins.h"
+#include "bt_pairing.h"
 #include "display_driver.h"
 #include "factory_reset.h"
 #include "net.h"
@@ -40,6 +42,16 @@ lv_obj_t* g_confirm = nullptr;  // the "Send?" overlay
 uint32_t g_confirm_id = 0, g_confirm_edit = 0;  // the edit it shows, not an index that can shift
 
 lv_obj_t* g_status = nullptr;
+lv_obj_t* g_stop = nullptr;  // stops a Bluetooth Send partway
+
+constexpr int32_t kStatusWidth = board::LCD_WIDTH - 16 - 112 - 240 - 16;  // the header's fixed widths
+
+// While shown, the status line ends short of it.
+void showStop(bool on) {
+    if (on) lv_obj_remove_flag(g_stop, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(g_stop, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_width(g_status, on ? kStatusWidth - 96 - 8 : kStatusWidth);
+}
 lv_obj_t* g_net = nullptr;
 unsigned g_net_version = 0;
 unsigned g_message_seq = 0;
@@ -74,16 +86,27 @@ void wizardWeb();
 
 void closePair(lv_event_t*);
 void pairResult(const net::Snapshot& s);
+lv_obj_t* g_bt_pair = nullptr;  // the Bluetooth pairing screen
+void btPairShow(const net::Snapshot& s);
 void sendResult(const net::Snapshot& s);
 
 // Shows Wi-Fi and the paired Computer; runs on the LVGL loop, reading the net task's snapshot.
 // Nearby Computers are listed on the Pair screen, not here.
 void showNet() {
-    if (net::version() == g_net_version) return;
+    // The Bluetooth window closes on a timer without a version bump: recheck while it shows open.
+    static bool pairingShown = false;
+    static uint32_t checkedMs = 0;
+    const bool recheck = pairingShown && millis() - checkedMs >= 500;
+    const unsigned v = net::version();  // includes Bluetooth changes, which s.version doesn't
+    if (v == g_net_version && !recheck) return;
+    checkedMs = millis();
     const net::Snapshot s = net::snapshot();
-    g_net_version = s.version;
+    g_net_version = v;
+    pairingShown = s.blePairing;
     std::string text = LV_SYMBOL_WIFI " ";
-    if (!s.wifiConfigured) {
+    if (s.bluetooth) {
+        text = LV_SYMBOL_BLUETOOTH " " + std::string(bt_pairing::status(s.bleReady, s.blePairing));
+    } else if (!s.wifiConfigured) {
         text += "Not set up";
     } else if (!s.wifiUp) {
         text += "Connecting";
@@ -91,9 +114,11 @@ void showNet() {
         text += s.paired.empty() ? "Not paired" : s.paired;
     }
     lv_label_set_text(g_net, text.c_str());
+    if (g_bt_pair != nullptr) btPairShow(s);
     if (s.messageSeq != g_message_seq) {
         g_message_seq = s.messageSeq;
         g_busy = false;
+        showStop(false);
         lv_obj_remove_local_style_prop(g_status, LV_STYLE_TEXT_COLOR, 0);  // only Send results are colored
         if (g_pairing_now) {  // also after Cancel and reopen, so a reopened screen still gets its result
             g_pairing_now = false;
@@ -284,6 +309,60 @@ void openPair(lv_event_t*) {
     pairInputChanged(nullptr);
 }
 
+lv_obj_t* g_bt_passkey = nullptr;
+lv_obj_t* g_bt_note = nullptr;
+
+void closeBtPair(lv_event_t*) {
+    if (g_bt_pair == nullptr) return;
+    net::closeBluetoothPairing();  // Done or skipped: no one else may pair now
+    lv_obj_delete_async(g_bt_pair);  // not during its own event
+    g_bt_pair = nullptr;
+    if (g_wizard == Wizard::Pair) wizardWeb();  // paired or skipped
+}
+
+void btPairShow(const net::Snapshot& s) {
+    const std::string key = bt_pairing::passkeyText(s.passkey);
+    lv_label_set_text(g_bt_passkey, key.empty() ? "(appears when your Computer connects)" : key.c_str());
+    lv_label_set_text(g_bt_note, s.blePairing ? "Pairing is open for 2 minutes."
+                                 : s.bleReady  ? "A Computer is connected. If it isn't yours, pair again."
+                                               : "Pairing has closed. Open it again to pair.");
+}
+
+// Bluetooth Mode (#94): a new Computer may pair for 2 minutes, replacing any paired now. The
+// Computer asks for the passkey shown here.
+void openBtPair() {
+    if (g_bt_pair != nullptr) return;
+    net::openBluetoothPairing(120000);
+    g_bt_pair = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(g_bt_pair, board::LCD_WIDTH, board::LCD_HEIGHT);
+    lv_obj_set_style_radius(g_bt_pair, 0, 0);
+    lv_obj_remove_flag(g_bt_pair, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t* title = lv_label_create(g_bt_pair);
+    lv_obj_set_width(title, board::LCD_WIDTH - 48);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(title, (std::string(g_wizard == Wizard::Pair ? "Step 2 of 3: " : "") +
+                              "On the Computer, open Bluetooth settings and connect \"Phrasedeck panel\". "
+                              "It replaces any Computer paired now. When it asks, type this passkey:")
+                                 .c_str());
+    g_bt_passkey = lv_label_create(g_bt_pair);
+    lv_obj_set_style_text_font(g_bt_passkey, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_letter_space(g_bt_passkey, 12, 0);
+    lv_obj_align(g_bt_passkey, LV_ALIGN_TOP_MID, 0, 120);
+    g_bt_note = lv_label_create(g_bt_pair);
+    lv_obj_align(g_bt_note, LV_ALIGN_TOP_LEFT, 0, 200);
+    lv_obj_t* done = textButton(g_bt_pair, g_wizard == Wizard::Pair ? "Next" : "Done", closeBtPair, nullptr);
+    lv_obj_align(done, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    btPairShow(net::snapshot());
+}
+
+// "Paired" by Mode: Wi-Fi pairing with phrased, or a Computer connected over Bluetooth.
+bool noComputer(const net::Snapshot& s) { return s.bluetooth ? !s.bleReady : s.paired.empty(); }
+
+void pairComputer() {
+    if (net::snapshot().bluetooth) openBtPair();
+    else openPair(nullptr);
+}
+
 // Written to a temporary file, then renamed over the old one, so a power cut never leaves half a list.
 bool savePhrases() {
     File f = LittleFS.open("/phrases.tmp", "w");
@@ -373,7 +452,14 @@ void sendPhrase(size_t i) {
     if (!startRequest(net::type(b.text, phraseKey(b.id), b.edit), "Sending: " + b.label)) return;
     g_sending = g_buttons[i];
     lv_obj_add_state(g_sending, LV_STATE_DISABLED);  // dimmed while it sends
+    if (net::snapshot().bluetooth) showStop(true);  // a long one takes a while
     Serial.printf("tap: %u at %d,%d\n", static_cast<unsigned>(i), touch_x(), touch_y());  // never the text
+}
+
+void stopSend(lv_event_t*) {
+    net::cancelBluetoothSend();
+    showStop(false);
+    lv_label_set_text(g_status, "Stopping...");
 }
 
 void closeConfirm(lv_event_t*) {
@@ -408,10 +494,12 @@ void openConfirm(size_t i) {
     lv_obj_set_style_radius(g_confirm, 0, 0);
     lv_obj_remove_flag(g_confirm, LV_OBJ_FLAG_SCROLLABLE);
 
-    const std::string computer = net::snapshot().paired;
+    const net::Snapshot s = net::snapshot();
     lv_obj_t* title = lv_label_create(g_confirm);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
-    lv_label_set_text(title, computer.empty() ? "Send? No Computer is paired" : ("Send to " + computer + "?").c_str());
+    lv_label_set_text(title, s.bluetooth    ? (s.bleReady ? "Send over Bluetooth?" : "Send? No Computer is connected")
+                             : s.paired.empty() ? "Send? No Computer is paired"
+                                                : ("Send to " + s.paired + "?").c_str());
     lv_obj_set_width(title, board::LCD_WIDTH - 48);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -489,7 +577,25 @@ void openLock(bool setting);
 
 void changePassword(lv_event_t*) { openLock(true); }
 
-void choosePair(lv_event_t*) { openPair(nullptr); }
+void choosePair(lv_event_t*) { pairComputer(); }
+
+lv_obj_t* g_mode_note = nullptr;
+
+// Mode is read once at boot (net::start), so a switch restarts the panel.
+void switchMode(lv_event_t*) {
+    if (g_busy) {  // a restart would cut a Send or a pairing off partway
+        lv_label_set_text(g_mode_note, "Wait for the Send or pairing to finish");
+        return;
+    }
+    if (!net::setBluetooth(!net::snapshot().bluetooth)) {
+        lv_label_set_text(g_mode_note, "Couldn't save it: try again");
+        return;
+    }
+    lv_label_set_text(g_mode_note, "Restarting...");
+    lv_refr_now(nullptr);
+    delay(300);
+    esp_restart();
+}
 
 lv_obj_t* tabText(lv_obj_t* tab, const char* text) {
     lv_obj_t* l = lv_label_create(tab);
@@ -558,7 +664,11 @@ void openSettings() {
 
     lv_obj_t* computer = lv_tabview_add_tab(tabs, "Computer");
     lv_obj_set_flex_flow(computer, LV_FLEX_FLOW_COLUMN);
-    tabText(computer, s.paired.empty() ? "Not paired with a Computer." : ("Paired with " + s.paired + ".").c_str());
+    if (s.bluetooth) {
+        tabText(computer, (std::string("Bluetooth keyboard: ") + bt_pairing::status(s.bleReady, s.blePairing) + ".").c_str());
+    } else {
+        tabText(computer, s.paired.empty() ? "Not paired with a Computer." : ("Paired with " + s.paired + ".").c_str());
+    }
     textButton(computer, "Pair a Computer", choosePair, nullptr);
 
     webEditorInfo(lv_tabview_add_tab(tabs, "Web editor"));
@@ -570,8 +680,10 @@ void openSettings() {
 
     lv_obj_t* mode = lv_tabview_add_tab(tabs, "Mode");
     lv_obj_set_flex_flow(mode, LV_FLEX_FLOW_COLUMN);
-    tabText(mode, "How the panel types:\n" LV_SYMBOL_OK "  Over Wi-Fi, through phrased on the Computer\n"
-                  "     As a Bluetooth keyboard: coming in a later update (#94)");
+    tabText(mode, s.bluetooth ? "The panel types as a Bluetooth keyboard on the paired Computer. phrased isn't needed."
+                              : "The panel types over Wi-Fi, through phrased on the Computer.");
+    textButton(mode, s.bluetooth ? "Switch to Wi-Fi" : "Switch to Bluetooth keyboard", switchMode, nullptr);
+    g_mode_note = tabText(mode, "The panel restarts to switch.");
 
     lv_obj_t* close = textButton(g_settings, LV_SYMBOL_CLOSE, closeSettings, nullptr);
     lv_obj_set_size(close, 64, 64);
@@ -600,9 +712,9 @@ void submitLock(lv_event_t*) {
             closeLock(nullptr);
             if (g_wizard != Wizard::Password) {
                 openSettings();
-            } else if (net::snapshot().paired.empty()) {
+            } else if (noComputer(net::snapshot())) {
                 g_wizard = Wizard::Pair;
-                openPair(nullptr);
+                pairComputer();
             } else {
                 wizardWeb();
             }
@@ -729,11 +841,16 @@ void buildPage() {
     lv_obj_align(g_net, LV_ALIGN_TOP_RIGHT, -112, 12);
 
     g_status = lv_label_create(screen);
-    lv_obj_set_width(g_status, board::LCD_WIDTH - 16 - 112 - 240 - 16);
+    lv_obj_set_width(g_status, kStatusWidth);
     lv_label_set_long_mode(g_status, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_color(g_status, lv_color_hex(0xC8CDD4), 0);
     lv_label_set_text(g_status, "Tap a Button");
     lv_obj_align(g_status, LV_ALIGN_TOP_LEFT, 16, 12);
+
+    g_stop = textButton(screen, "Stop", stopSend, nullptr);
+    lv_obj_set_size(g_stop, 96, 44);
+    lv_obj_align(g_stop, LV_ALIGN_TOP_RIGHT, -(112 + 240 + 8), 4);
+    lv_obj_add_flag(g_stop, LV_OBJ_FLAG_HIDDEN);
 
     buildGrid();
 }
@@ -834,7 +951,8 @@ void applyWebEdit() {
 }
 
 // A finger on the top-left corner at power-on: count down on screen, and after 10 s erase the
-// panel NVS (admin password, lockouts, web key and cert, pairing) and the saved Buttons.
+// panel NVS (admin password, lockouts, web key and cert, pairing, Mode), the saved Buttons and the
+// default NVS (Bluetooth bonds, so the last owner's Computer can't reconnect).
 void factoryResetIfHeld() {
     using factory_reset::Hold;
     auto inCorner = [] { return factory_reset::check(touch_pressed(), touch_x(), touch_y(), 0) == Hold::Holding; };
@@ -859,7 +977,8 @@ void factoryResetIfHeld() {
     if (hold == Hold::Reset) {
         lv_label_set_text(label, "Erasing...");
         lv_timer_handler();
-        const bool nvs = panel_store::erase();
+        // The default NVS holds the Bluetooth bonds; nothing in it is needed (Wi-Fi is compiled in).
+        const bool nvs = panel_store::erase() && nvs_flash_erase() == ESP_OK && nvs_flash_init() == ESP_OK;
         // The whole Buttons partition, not LittleFS.format(): that only rewrites the superblock.
         // loadPhrases() then makes a fresh filesystem.
         const esp_partition_t* buttons =
@@ -998,6 +1117,10 @@ void serialCommands() {
             submitLock(nullptr);
         } else if (line.rfind("tab ", 0) == 0 && g_settings != nullptr) {
             lv_tabview_set_active(lv_obj_get_child(g_settings, 0), strtoul(line.c_str() + 4, nullptr, 10), LV_ANIM_OFF);
+        } else if (line == "mode" && g_settings != nullptr) {  // the Mode tab's switch; restarts
+            switchMode(nullptr);
+        } else if (line == "btpair") {
+            openBtPair();
         } else if (line == "pairscreen") {
             openPair(nullptr);
         } else if (line.rfind("key ", 0) == 0 && g_pair != nullptr) {  // as the on-screen keys would

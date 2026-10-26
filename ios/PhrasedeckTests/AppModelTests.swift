@@ -165,6 +165,7 @@ struct AppModelTests {
         let feedback = await model.send(text: "yes", enter: true)
 
         #expect(feedback.tone == .success)
+        #expect(feedback.message?.hasPrefix("Typed: sent over the tailnet") == true)
         #expect(feedback.message?.contains("certificate") == true)
         #expect(lan.typed.count == 1 && api.typed.count == 1)
         #expect(routes.log == [Self.lanRoute, .tailnet])
@@ -178,7 +179,7 @@ struct AppModelTests {
         let feedback = await model.send(text: "yes", enter: true)
 
         #expect(feedback.tone == .red)
-        #expect(feedback.message?.contains("nothing was sent") == true)
+        #expect(feedback.message?.hasPrefix("Not typed:") == true)
     }
 
     @Test(arguments: ["192.168.1.20", "10.0.0.5", "fe80::1", "169.254.1.1", "8.8.8.8", "mac.local", "Mac.local."])
@@ -457,7 +458,7 @@ struct AppModelTests {
         let feedback = await model.send(text: "x", enter: false)
 
         #expect(feedback.tone == .red)
-        #expect(feedback.message == "Add a computer first.")
+        #expect(feedback.message == "Not typed: add a computer first.")
         #expect(api.typed.isEmpty)
     }
 

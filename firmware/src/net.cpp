@@ -159,6 +159,7 @@ void handleType(const Request& req, Snapshot& s) {
             break;
         case send::Outcome::MaybeTyped:
             s.message = "Maybe typed: check the Computer before tapping again";
+            s.maybe = true;
             break;
         case send::Outcome::NotTyped: {
             std::string why = r.pinMismatch ? "Pin doesn't match" : errorText(r.body);
@@ -172,7 +173,7 @@ void handleType(const Request& req, Snapshot& s) {
 void handleRequests(Snapshot& s, TickType_t wait) {
     Request* req = nullptr;
     while (xQueueReceive(g_requests, &req, wait) == pdTRUE) {
-        s.ok = false;
+        s.ok = s.maybe = false;
         if (req->kind == Request::Pair) handlePair(*req, s);
         else handleType(*req, s);
         Serial.printf("net: %s: %s\n", req->kind == Request::Pair ? "pair" : "type", s.message.c_str());

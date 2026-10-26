@@ -5,10 +5,12 @@
 #include <BLEHIDDevice.h>
 #include <BLESecurity.h>
 #include <BLEServer.h>
+#include <Preferences.h>
 #include <host/ble_gap.h>
 #include <host/ble_hs.h>
 #include <host/ble_hs_mbuf.h>
 #include <host/ble_store.h>
+#include <nimble/nimble_port.h>
 
 #include <atomic>
 #include <map>
@@ -16,6 +18,7 @@
 #include <vector>
 
 #include "bt_pairing.h"
+#include "panel_store.h"
 
 namespace ble_keyboard {
 namespace {
@@ -75,6 +78,36 @@ bool windowOpen() {
 
 void bump() { g_version.fetch_add(1); }
 
+// The paired Computer's identity address, in the panel NVS so a factory reset forgets it. Only a
+// bond with this address reconnects (#141). Set in start(), then on the host task only.
+ble_addr_t g_computer{};
+bool g_hasComputer = false;
+
+bool loadComputer() {
+    Preferences p;
+    uint8_t raw[7];
+    if (!p.begin("ble", true, panel_store::kPartition)) return false;
+    if (p.getBytes("computer", raw, sizeof(raw)) != sizeof(raw)) return false;
+    g_computer.type = raw[0];
+    memcpy(g_computer.val, raw + 1, 6);
+    return true;
+}
+
+void saveComputer(const ble_addr_t& addr) {
+    g_computer = addr;
+    g_hasComputer = true;
+    uint8_t raw[7] = {addr.type};
+    memcpy(raw + 1, addr.val, 6);
+    Preferences p;
+    // Unsaved, it still reconnects until a restart; after one it has to pair again.
+    if (!p.begin("ble", false, panel_store::kPartition) || p.putBytes("computer", raw, sizeof(raw)) != sizeof(raw)) {
+        log_e("couldn't save the paired Computer");
+    }
+}
+
+// Each connection's time to encrypt, from its connect (host task only).
+std::map<uint16_t, bt_pairing::Window> g_grace;
+
 // Rejected connections whose keys go at disconnect: NimBLE writes the peer's CCCDs after the
 // ENC_CHANGE callback, so deleting there would leave orphans that can evict the Computer's bond.
 // Host task only (connect, security and disconnect callbacks all run there).
@@ -90,13 +123,13 @@ void reject(const ble_gap_conn_desc& d) {
     ble_gap_terminate(d.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
 }
 
-// Forgets every bonded Computer but this one, and drops any of them still connected.
-void forgetOthers(const ble_gap_conn_desc& keep) {
+// Forgets every bonded Computer but keep (all of them for nullptr), and drops any still connected.
+void forgetAllBut(const ble_addr_t* keep) {
     ble_addr_t peers[MYNEWT_VAL(BLE_STORE_MAX_BONDS)];
     int n = 0;
     if (ble_store_util_bonded_peers(peers, &n, MYNEWT_VAL(BLE_STORE_MAX_BONDS)) != 0) n = 0;
     for (int i = 0; i < n; ++i) {
-        if (ble_addr_cmp(&peers[i], &keep.peer_id_addr) == 0) continue;
+        if (keep != nullptr && ble_addr_cmp(&peers[i], keep) == 0) continue;
         ble_gap_conn_desc d;
         if (ble_gap_conn_find_by_addr(&peers[i], &d) == 0) ble_gap_terminate(d.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
         ble_store_util_delete_peer(&peers[i]);
@@ -104,7 +137,8 @@ void forgetOthers(const ble_gap_conn_desc& keep) {
 }
 
 class ServerCallbacks : public BLEServerCallbacks {
-    void onConnect(BLEServer*, ble_gap_conn_desc*) override {
+    void onConnect(BLEServer*, ble_gap_conn_desc* d) override {
+        g_grace[d->conn_handle].open(millis(), bt_pairing::kGraceMs);
         // NimBLE stops advertising on a connect. Keep it up while no paired Computer is here, so a
         // stranger who connects and sits can't lock the paired one out, and while a window is open.
         if (g_trusted.load() == kNone || windowOpen()) BLEDevice::startAdvertising();
@@ -119,6 +153,7 @@ class ServerCallbacks : public BLEServerCallbacks {
         expected = handle;
         g_subscribed.compare_exchange_strong(expected, kNone);
         g_notifying.erase(d->conn_handle);
+        g_grace.erase(d->conn_handle);
         const auto forget = g_forget.find(d->conn_handle);
         if (forget != g_forget.end()) {
             ble_store_util_delete_peer(&forget->second);
@@ -188,12 +223,14 @@ class SecurityCallbacks : public BLESecurityCallbacks {
             reject(*d);
             return;
         }
-        switch (bt_pairing::onPaired(pairedNow, windowOpen())) {
+        const bool known = g_hasComputer && ble_addr_cmp(&d->peer_id_addr, &g_computer) == 0;
+        switch (bt_pairing::onPaired(pairedNow, known, windowOpen())) {
             case bt_pairing::Bond::Reject:
                 reject(*d);
                 return;
             case bt_pairing::Bond::ReplaceOthers:
-                forgetOthers(*d);
+                forgetAllBut(&d->peer_id_addr);
+                saveComputer(d->peer_id_addr);
                 closePairing();
                 break;
             case bt_pairing::Bond::Keep:
@@ -205,6 +242,27 @@ class SecurityCallbacks : public BLESecurityCallbacks {
         bump();
     }
 };
+
+// Once a second on the host task, beside the callbacks that own g_grace: stops advertising when a
+// window runs out, and ends connections that sat unencrypted past their grace (#141).
+ble_npl_callout g_tick;
+
+void tick(ble_npl_event*) {
+    const uint32_t now = millis();
+    portENTER_CRITICAL(&g_windowLock);
+    const bool lapsed = g_window.lapsed(now);
+    portEXIT_CRITICAL(&g_windowLock);
+    if (lapsed) closePairing();
+    const bool window = windowOpen();
+    for (const auto& [handle, grace] : g_grace) {
+        ble_gap_conn_desc d;
+        if (ble_gap_conn_find(handle, &d) != 0) continue;
+        if (bt_pairing::dropIdle(d.sec_state.encrypted, g_pairing.load() == handle, window, grace.isOpen(now))) {
+            ble_gap_terminate(handle, BLE_ERR_REM_USER_CONN_TERM);
+        }
+    }
+    ble_npl_callout_reset(&g_tick, ble_npl_time_ms_to_ticks32(1000));
+}
 
 }  // namespace
 
@@ -218,6 +276,10 @@ bool start() {
     // Secure Connections only: a sniffed legacy passkey pairing gives up its key in seconds.
     ble_hs_cfg.sm_sc_only = 1;
     BLEDevice::setSecurityCallbacks(new SecurityCallbacks());
+    // No stored Computer (first start, a factory reset, or bonds from #140): no bond is trusted, so
+    // forget them all. Otherwise forget any but the Computer's.
+    g_hasComputer = loadComputer();
+    forgetAllBut(g_hasComputer ? &g_computer : nullptr);
 
     g_server = BLEDevice::createServer();
     if (g_server == nullptr) return false;
@@ -235,6 +297,8 @@ bool start() {
     adv->setAppearance(0x03C1);  // HID keyboard
     adv->addServiceUUID(hid->hidService()->getUUID());
     adv->setScanResponse(true);
+    ble_npl_callout_init(&g_tick, nimble_port_get_dflt_eventq(), tick, nullptr);
+    ble_npl_callout_reset(&g_tick, ble_npl_time_ms_to_ticks32(1000));
     BLEDevice::startAdvertising();
     g_started.store(true);
     return true;

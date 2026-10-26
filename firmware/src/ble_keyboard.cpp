@@ -124,18 +124,33 @@ bool storedLtk(const ble_addr_t& addr, uint8_t out[16]) {
     return true;
 }
 
+// Not in a public header; ble_gap_unpair() would also end the link and drop the subscriptions.
+extern "C" int ble_hs_pvcy_remove_entry(uint8_t addr_type, const uint8_t* addr);
+
 // NimBLE's NVS store saves a bond only when the number of bonds changes: a pairing that replaces an
 // existing bond for the same identity updates RAM and leaves the old keys in NVS, which come back at
-// the next start without the new IRK or LTK (#155). Deleting and writing the keys again makes the
-// count drop then grow, so both reach NVS. Only the keys: the subscriptions stay.
+// the next start without the new IRK or LTK (#155). Deleting and writing each record again makes the
+// count drop then grow, so it reaches NVS. Runs for every new Computer; only the keys, the
+// subscriptions stay. Each record is rewritten in turn, so a power cut loses at most one.
 bool persistBond(const ble_addr_t& addr) {
     ble_store_key_sec key{};
     key.peer_addr = addr;
     ble_store_value_sec ours{}, peers{};
     if (ble_store_read_our_sec(&key, &ours) != 0 || ble_store_read_peer_sec(&key, &peers) != 0) return false;
     ble_store_delete_our_sec(&key);
+    if (ble_store_write_our_sec(&ours) != 0) return false;
+    // The peer write adds the IRK to the controller's resolving list, which already holds this
+    // address (from the pairing, or from boot with the old IRK) and would refuse a second entry.
+    // The list can't change while advertising.
+    BLEDevice::stopAdvertising();
+    ble_hs_pvcy_remove_entry(addr.type, addr.val);
     ble_store_delete_peer_sec(&key);
-    return ble_store_write_our_sec(&ours) == 0 && ble_store_write_peer_sec(&peers) == 0;
+    const int rc = ble_store_write_peer_sec(&peers);
+    // A resolving-list failure is returned after the record is saved: go by what's stored.
+    ble_store_value_sec back{};
+    if (ble_store_read_peer_sec(&key, &back) != 0 || memcmp(back.ltk, peers.ltk, sizeof(back.ltk)) != 0) return false;
+    if (rc != 0) log_w("Computer's IRK not added to the resolving list: rc=%d", rc);
+    return true;
 }
 
 bool isComputer(const ble_addr_t& addr) {

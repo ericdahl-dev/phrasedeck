@@ -229,7 +229,8 @@ comment) adds a second listener:
   fingerprint, for matching a paired computer) and `port`. TXT carries no token. If Tailscale
   comes up after `phrased` starts, `ts` is added without a restart.
 - **`/pair`** adds `certSHA256` and `lanPort` to its reply, and the QR code from `phrased pair`
-  adds `fp`, `lan` (this machine's LAN address) and `lanPort`. With Tailscale off, the QR code
+  adds `fp`, `lan` (this machine's LAN address) and `lanPort`. `phrased pair` also prints `Pin for a panel:`
+  the first 16 hex of the fingerprint, which a panel without a camera takes with the code (#68). With Tailscale off, the QR code
   leaves out `host` and `port` and carries only the LAN route.
 - `/pair`, `/type`, tokens, limits and lockout are shared by both listeners. Each accepts only
   its own `Host` names: tailnet names on 47811, LAN IPs and `.local` names on 47812.

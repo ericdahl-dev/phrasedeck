@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include <esp_heap_caps.h>
 #include <lvgl.h>
 
 #include "board_pins.h"
@@ -75,14 +76,16 @@ void setup() {
         delay(100);
     }
     if (!display_init()) {
-        Serial.println("phrasedeck panel: no display, halting");
-        while (true) delay(1000);
+        Serial.println("phrasedeck panel: no display, restarting in 5 s");
+        delay(5000);
+        esp_restart();
     }
     touch_init();
     buildPage();
     lv_timer_handler();
     panel_mcu::backlightOn();  // last, so the screen doesn't flash on boot
-    Serial.println("phrasedeck panel: ready");
+    Serial.printf("phrasedeck panel: ready, internal heap free %u, PSRAM free %u\n",
+                  heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }
 
 void loop() {

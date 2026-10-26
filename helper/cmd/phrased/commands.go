@@ -135,6 +135,10 @@ func command(args []string, home string, out io.Writer) (bool, error) {
 		if lanIP != "" {
 			fp, _ = dir.Fingerprint()
 		}
+		if len(fp) == 64 {
+			// A panel (#68) has no camera: it takes the code plus these 64 bits of the Pin.
+			fmt.Fprintf(out, "Pin for a panel: %s %s %s %s\n", fp[0:4], fp[4:8], fp[8:12], fp[12:16])
+		}
 		if hostErr != nil && lanIP != "" && fp != "" {
 			// Tailscale is off: the app pairs over the pinned LAN route alone.
 			host, hostErr = "", nil

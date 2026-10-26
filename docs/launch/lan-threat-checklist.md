@@ -109,3 +109,15 @@ listener (47812) and the app's choice of route.
       `fp`. The fingerprint stored afterward must equal the QR's `fp`, or the pairing is rejected.
 - [ ] Unpaired nearby computers from Bonjour can only prompt "Scan its QR code to pair". Never pair
       from a Bonjour result alone.
+
+**Panel pairing (#68)**
+- [ ] The panel (an ESP32 Device, no camera, no Tailscale) pairs with the Pairing code plus the
+      short Pin that `phrased pair` prints: the first 16 hex of the fingerprint (64 bits), typed
+      with case and spaces ignored. Bonjour TXT already publishes `fp`, so a forger knows the
+      target; matching 64 bits still takes about 2^64 certificate keys of offline work, which is
+      out of reach for an attacker on a home LAN.
+- [ ] It sends the code to `https://<lan>:47812/pair` only after the TLS handshake, and only if the
+      leaf certificate's SHA-256 starts with the typed short Pin. Otherwise nothing is sent.
+- [ ] It then stores the full fingerprint and the Token in NVS, and every later request pins the
+      full fingerprint, never the short one.
+- [ ] Bonjour TXT `fp` only finds the Helper (Nearby); it's never the source of the Pin.

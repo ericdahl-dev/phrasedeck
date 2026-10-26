@@ -40,7 +40,8 @@ lv_obj_t* g_status = nullptr;
 lv_obj_t* g_net = nullptr;
 unsigned g_net_version = 0;
 unsigned g_message_seq = 0;
-lv_obj_t* g_grid = nullptr;
+std::vector<lv_obj_t*> g_buttons;  // the grid's Buttons, by phrase index
+lv_obj_t* g_dots = nullptr;        // one dot per Page, when there's more than one
 lv_obj_t* g_sending = nullptr;  // the Button whose Send is in flight, dimmed until its result
 lv_obj_t* g_maybe = nullptr;    // a Maybe typed Button stays orange until the next tap
 lv_timer_t* g_flash = nullptr;  // ends the 700 ms result color on g_flashed
@@ -359,7 +360,7 @@ void sendResult(const net::Snapshot& s) {
 void sendPhrase(size_t i) {
     const phrases::Button& b = g_phrases.at(i);
     if (!startRequest(net::type(b.text, phraseKey(b.id), b.edit), "Sending: " + b.label)) return;
-    g_sending = lv_obj_get_child(g_grid, static_cast<int32_t>(i));
+    g_sending = g_buttons[i];
     lv_obj_add_state(g_sending, LV_STATE_DISABLED);  // dimmed while it sends
     Serial.printf("tap: %u at %d,%d\n", static_cast<unsigned>(i), touch_x(), touch_y());  // never the text
 }
@@ -673,6 +674,17 @@ void openGear(lv_event_t*) {
     openLock(!admin::isSet());
 }
 
+// Lights the dot of the Page that's showing.
+void showPage(lv_event_t* e) {
+    lv_obj_t* tiles = static_cast<lv_obj_t*>(lv_event_get_target(e));
+    const int32_t active = lv_obj_get_index(lv_tileview_get_tile_active(tiles));
+    for (uint32_t p = 0; p < lv_obj_get_child_count(g_dots); ++p) {
+        lv_obj_t* dot = lv_obj_get_child(g_dots, static_cast<int32_t>(p));
+        if (static_cast<int32_t>(p) == active) lv_obj_add_state(dot, LV_STATE_CHECKED);
+        else lv_obj_remove_state(dot, LV_STATE_CHECKED);
+    }
+}
+
 void buildPage() {
     // LVGL's default theme is light; dark, so every screen and overlay matches without per-object colors.
     lv_display_set_theme(display_lvgl(), lv_theme_default_init(display_lvgl(), lv_palette_main(LV_PALETTE_BLUE),
@@ -704,20 +716,30 @@ void buildPage() {
     lv_label_set_text(g_status, "Tap a Button");
     lv_obj_align(g_status, LV_ALIGN_TOP_LEFT, 16, 12);
 
-    // Rows of 4 Buttons below the status line; two rows fit, more scroll.
-    lv_obj_t* grid = g_grid = lv_obj_create(screen);
-    lv_obj_set_size(grid, board::LCD_WIDTH, board::LCD_HEIGHT - 52);
-    lv_obj_align(grid, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(grid, 0, 0);
-    lv_obj_set_style_pad_all(grid, 12, 0);
-    lv_obj_set_style_pad_gap(grid, 12, 0);
+    // Pages of 4 x 2 Buttons below the status line; past 8, swipe sideways, with a dot per Page.
+    constexpr size_t kPerPage = 8;
+    const size_t pages = g_phrases.size() == 0 ? 1 : (g_phrases.size() + kPerPage - 1) / kPerPage;
+    const int32_t dots = pages > 1 ? 24 : 0;
+    lv_obj_t* tiles = lv_tileview_create(screen);
+    lv_obj_set_size(tiles, board::LCD_WIDTH, board::LCD_HEIGHT - 52 - dots);
+    lv_obj_align(tiles, LV_ALIGN_TOP_MID, 0, 52);
+    lv_obj_set_style_bg_opa(tiles, LV_OPA_TRANSP, 0);
+    lv_obj_set_scrollbar_mode(tiles, LV_SCROLLBAR_MODE_OFF);
     const int32_t w = (board::LCD_WIDTH - 24 - 3 * 12) / 4;
-    const int32_t h = (board::LCD_HEIGHT - 52 - 24 - 12) / 2;
+    const int32_t h = (board::LCD_HEIGHT - 52 - dots - 24 - 12) / 2;
 
+    g_buttons.clear();
+    std::vector<lv_obj_t*> page(pages);
+    for (size_t p = 0; p < pages; ++p) {
+        lv_dir_t dir = static_cast<lv_dir_t>((p > 0 ? LV_DIR_LEFT : 0) | (p + 1 < pages ? LV_DIR_RIGHT : 0));
+        page[p] = lv_tileview_add_tile(tiles, static_cast<uint8_t>(p), 0, dir);
+        lv_obj_set_flex_flow(page[p], LV_FLEX_FLOW_ROW_WRAP);
+        lv_obj_set_style_pad_all(page[p], 12, 0);
+        lv_obj_set_style_pad_gap(page[p], 12, 0);
+    }
     for (size_t i = 0; i < g_phrases.size(); ++i) {
-        lv_obj_t* button = lv_button_create(grid);
+        lv_obj_t* button = lv_button_create(page[i / kPerPage]);
+        g_buttons.push_back(button);
         lv_obj_set_size(button, w, h);
         lv_obj_add_event_cb(button, onTap, LV_EVENT_CLICKED, reinterpret_cast<void*>(i));
         lv_obj_t* label = lv_label_create(button);
@@ -728,6 +750,26 @@ void buildPage() {
         lv_label_set_text(label, g_phrases.at(i).label.c_str());
         lv_obj_center(label);
     }
+
+    if (pages < 2) return;
+    g_dots = lv_obj_create(screen);
+    lv_obj_remove_style_all(g_dots);
+    lv_obj_set_size(g_dots, board::LCD_WIDTH, dots);
+    lv_obj_align(g_dots, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_flex_flow(g_dots, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(g_dots, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(g_dots, 12, 0);
+    for (size_t p = 0; p < pages; ++p) {
+        lv_obj_t* dot = lv_obj_create(g_dots);
+        lv_obj_remove_style_all(dot);
+        lv_obj_set_size(dot, 10, 10);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(dot, lv_color_hex(0x5A616B), 0);
+        lv_obj_set_style_bg_color(dot, lv_color_hex(0xE6E9ED), LV_STATE_CHECKED);
+        if (p == 0) lv_obj_add_state(dot, LV_STATE_CHECKED);
+    }
+    lv_obj_add_event_cb(tiles, showPage, LV_EVENT_VALUE_CHANGED, nullptr);
 }
 
 }  // namespace
@@ -824,6 +866,14 @@ void serialCommands() {
             Preferences p;
             if (p.begin("admin", false, panel_store::kPartition)) p.clear();
             Serial.println("clearpw: done, reboot to load");
+        } else if (line.rfind("add ", 0) == 0) {  // a Button, as the web page would add it; reboot to see it
+            Serial.printf("add: %s\n", g_phrases.add(line.substr(4), line.substr(4)) && savePhrases() ? "added" : "refused");
+        } else if (line.rfind("remove ", 0) == 0) {  // reboot to see it
+            Serial.printf("remove: %s\n", g_phrases.remove(strtoul(line.c_str() + 7, nullptr, 10)) && savePhrases() ? "removed" : "refused");
+        } else if (line.rfind("page ", 0) == 0 && !g_buttons.empty()) {
+            lv_obj_t* tiles = lv_obj_get_parent(lv_obj_get_parent(g_buttons.front()));
+            lv_tileview_set_tile_by_index(tiles, strtoul(line.c_str() + 5, nullptr, 10), 0, LV_ANIM_OFF);
+            lv_obj_send_event(tiles, LV_EVENT_VALUE_CHANGED, nullptr);
         } else if (line == "gear") {
             openGear(nullptr);
         } else if (line.rfind("pw ", 0) == 0 && g_lock != nullptr) {  // types into the password screen, then OK

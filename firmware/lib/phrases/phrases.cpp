@@ -13,7 +13,7 @@ bool fits(const std::string& label, const std::string& text) {
 
 bool List::add(const std::string& label, const std::string& text) {
     if (buttons_.size() >= kMaxButtons || !fits(label, text)) return false;
-    buttons_.push_back({nextId_++, 1, label, text});
+    buttons_.push_back({nextId_++, 1, 0, label, text});
     return true;
 }
 
@@ -47,6 +47,7 @@ std::string List::toJson() const {
         JsonObject o = arr.add<JsonObject>();
         o["id"] = b.id;
         o["edit"] = b.edit;
+        o["confirmed"] = b.confirmedEdit;
         o["label"] = b.label;
         o["text"] = b.text;
     }
@@ -63,7 +64,7 @@ bool List::fromJson(const std::string& json) {
     List next;
     next.nextId_ = doc["next"] | 1u;
     for (JsonObjectConst o : arr) {
-        const Button b{o["id"] | 0u, o["edit"] | 0u, o["label"] | "", o["text"] | ""};
+        const Button b{o["id"] | 0u, o["edit"] | 0u, o["confirmed"] | 0u, o["label"] | "", o["text"] | ""};
         if (b.id == 0 || b.edit == 0 || next.buttons_.size() >= kMaxButtons || !fits(b.label, b.text)) return false;
         for (const Button& other : next.buttons_) {
             if (other.id == b.id) return false;

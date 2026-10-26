@@ -94,6 +94,24 @@ void test_ids_stay_put_and_edits_count() {
     TEST_ASSERT_TRUE(back.at(2).id > list.at(1).id);
 }
 
+// Eric (#98): the first tap on a Phrase added or edited on the web page shows it and asks
+// "Send?"; once confirmed, taps send at once until the next edit. The confirmation is saved.
+void test_an_edited_phrase_needs_one_confirm() {
+    phrases::List list;
+    list.add("Ship", "Ship it");
+    TEST_ASSERT_TRUE(list.needsConfirm(0));
+    list.confirmed(0);
+    TEST_ASSERT_FALSE(list.needsConfirm(0));
+    phrases::List back;
+    back.fromJson(list.toJson());
+    TEST_ASSERT_FALSE(back.needsConfirm(0));
+    back.edit(0, "Ship", "Ship it now");
+    TEST_ASSERT_TRUE(back.needsConfirm(0));
+    back.move(0, 0);
+    TEST_ASSERT_TRUE(back.needsConfirm(0));
+    TEST_ASSERT_TRUE(list.needsConfirm(9));  // out of range: never send without asking
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_buttons_can_be_added_edited_moved_and_deleted);
@@ -101,5 +119,6 @@ int main() {
     RUN_TEST(test_the_list_round_trips_through_json);
     RUN_TEST(test_a_bad_file_is_refused_and_the_list_kept);
     RUN_TEST(test_ids_stay_put_and_edits_count);
+    RUN_TEST(test_an_edited_phrase_needs_one_confirm);
     return UNITY_END();
 }

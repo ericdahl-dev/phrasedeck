@@ -17,6 +17,7 @@ constexpr size_t kMaxText = 2000;  // bytes
 struct Button {
     uint32_t id = 0;    // never changes and is never reused, so the Helper can tell Phrases apart
     uint32_t edit = 1;  // goes up on each edit; the Helper notifies on a counter it hasn't seen
+    uint32_t confirmedEdit = 0;  // the edit the user OKed on the panel; 0 = never
     std::string label;
     std::string text;  // the Phrase
 };
@@ -31,6 +32,13 @@ class List {
     bool edit(size_t i, const std::string& label, const std::string& text);
     bool remove(size_t i);
     bool move(size_t from, size_t to);  // to is the index it ends up at
+
+    // Eric (#98): a Phrase added or edited on the web page is shown and confirmed on the panel
+    // before its first send. True for an index out of range, so nothing sends unasked.
+    bool needsConfirm(size_t i) const { return i >= buttons_.size() || buttons_[i].confirmedEdit != buttons_[i].edit; }
+    void confirmed(size_t i) {
+        if (i < buttons_.size()) buttons_[i].confirmedEdit = buttons_[i].edit;
+    }
 
     // {"next":N,"buttons":[{"id":..,"edit":..,"label":..,"text":..},..]}. fromJson replaces the list only if the whole file
     // parses and every Button fits the caps; otherwise it changes nothing.

@@ -17,17 +17,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Required checks can't be skipped with on.paths, so the job runs and skips its work when
+      # a pull request doesn't touch these paths.
+      - id: changes
+        working-directory: .
+        run: .github/scripts/touches.sh '^(helper/|\.github/workflows/helper\.yml$|\.github/scripts/touches\.sh$)'
       - uses: actions/setup-go@v5
+        if: steps.changes.outputs.run == 'true'
         with:
           go-version-file: helper/go.mod
           cache-dependency-path: helper/go.sum
       - name: gofmt
+        if: steps.changes.outputs.run == 'true'
         run: |
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi
       - run: go vet ./...
+        if: steps.changes.outputs.run == 'true'
       - run: go test -race ./...
+        if: steps.changes.outputs.run == 'true'
       - name: Linux package builds and passes its check (#78)
+        if: steps.changes.outputs.run == 'true'
         run: |
           GOTOOLCHAIN=auto go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0
           packaging/build-linux.sh 0.0.0-ci amd64 "$RUNNER_TEMP/pkg"
@@ -37,11 +49,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Required checks can't be skipped with on.paths, so the job runs and skips its work when
+      # a pull request doesn't touch these paths.
+      - id: changes
+        working-directory: .
+        run: .github/scripts/touches.sh '^(helper/|\.github/workflows/helper\.yml$|\.github/scripts/touches\.sh$)'
       - uses: actions/setup-go@v5
+        if: steps.changes.outputs.run == 'true'
         with:
           go-version-file: helper/go.mod
           cache-dependency-path: helper/go.sum
       - name: AUR phrased-bin builds with makepkg and passes its check (#78)
+        if: steps.changes.outputs.run == 'true'
         working-directory: helper
         run: |
           GOTOOLCHAIN=auto go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0
@@ -54,13 +75,25 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Required checks can't be skipped with on.paths, so the job runs and skips its work when
+      # a pull request doesn't touch these paths.
+      - id: changes
+        working-directory: .
+        run: .github/scripts/touches.sh '^(helper/|\.github/workflows/helper\.yml$|\.github/scripts/touches\.sh$)'
       - uses: actions/setup-go@v5
+        if: steps.changes.outputs.run == 'true'
         with:
           go-version-file: helper/go.mod
           cache-dependency-path: helper/go.sum
       - run: go build ./...
+        if: steps.changes.outputs.run == 'true'
       - run: go vet ./...
+        if: steps.changes.outputs.run == 'true'
       - name: Mac backend tests (private pasteboard; no key events)
+        if: steps.changes.outputs.run == 'true'
         run: go test ./internal/typer/
       - name: LaunchAgent plist lints
+        if: steps.changes.outputs.run == 'true'
         run: make plist AGENT="$RUNNER_TEMP/dev.ericdahl.phrased.plist"

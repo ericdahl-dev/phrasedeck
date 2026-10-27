@@ -10,6 +10,7 @@ struct PhrasedeckApp: App {
     private let stub: StubHelper?
     /// Bonjour discovery (#11); nil under UI tests, so no local-network prompt.
     @State private var browser: NearbyBrowser?
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         #if DEBUG
@@ -54,6 +55,9 @@ struct PhrasedeckApp: App {
                     browser = NearbyBrowser { model.setNearby($0) }
                     browser?.start()
                 }
+        }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            UIApplication.shared.isIdleTimerDisabled = KeepAwake.idleTimerDisabled(for: phase)
         }
         .modelContainer(container)
         // UI tests keep the button size in their throwaway defaults.

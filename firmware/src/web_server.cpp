@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <esp_https_server.h>
 #include <esp_random.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <mbedtls/ecp.h>
@@ -150,10 +151,13 @@ std::string ip() { return WiFi.localIP().toString().c_str(); }
 
 bool hostOk(httpd_req_t* req) { return web::hostAllowed(header(req, "Host"), ip()); }
 
+// Milliseconds since boot on a clock that doesn't wrap, for the session (millis() wraps at 49.7 days).
+uint64_t nowMs() { return esp_timer_get_time() / 1000; }
+
 bool loggedIn(httpd_req_t* req) {
     const std::string token = web::cookieToken(header(req, "Cookie"));
-    if (!web::sessionValid(g_session, token, millis())) return false;
-    web::touch(g_session, millis());
+    if (!web::sessionValid(g_session, token, nowMs())) return false;
+    web::touch(g_session, nowMs());
     return true;
 }
 
@@ -242,8 +246,8 @@ esp_err_t postLogin(httpd_req_t* req) {
     esp_fill_random(raw, sizeof raw);
     char token[web::kTokenLen + 1];
     for (size_t i = 0; i < sizeof raw; ++i) snprintf(token + 2 * i, 3, "%02x", raw[i]);
-    web::startSession(g_session, token, millis());
-    const std::string cookie = std::string("s=") + token + "; HttpOnly; Secure; SameSite=Strict; Path=/";
+    web::startSession(g_session, token, nowMs());
+    const std::string cookie = std::string("__Host-s=") + token + "; HttpOnly; Secure; SameSite=Strict; Path=/";
     httpd_resp_set_hdr(req, "Set-Cookie", cookie.c_str());
     httpd_resp_set_hdr(req, "Location", "/");
     return reply(req, "303 See Other", "");
@@ -302,7 +306,7 @@ esp_err_t postLogout(httpd_req_t* req) {
     esp_err_t sent = ESP_OK;
     if (!postOk(req, body, sent)) return sent;
     web::endSession(g_session);
-    httpd_resp_set_hdr(req, "Set-Cookie", "s=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0");
+    httpd_resp_set_hdr(req, "Set-Cookie", "__Host-s=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0");
     httpd_resp_set_hdr(req, "Location", "/");
     return reply(req, "303 See Other", "");
 }

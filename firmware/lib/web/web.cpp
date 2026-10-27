@@ -69,8 +69,9 @@ std::string cookieToken(const std::string& cookieHeader) {
         while (start < cookieHeader.size() && cookieHeader[start] == ' ') ++start;
         size_t end = cookieHeader.find(';', start);
         if (end == std::string::npos) end = cookieHeader.size();
-        if (cookieHeader.compare(start, 2, "s=") == 0) {
-            const std::string t = cookieHeader.substr(start + 2, end - start - 2);
+        static const std::string kName = "__Host-s=";
+        if (cookieHeader.compare(start, kName.size(), kName) == 0) {
+            const std::string t = cookieHeader.substr(start + kName.size(), end - start - kName.size());
             return isToken(t) ? t : "";
         }
         start = end + 1;
@@ -78,17 +79,19 @@ std::string cookieToken(const std::string& cookieHeader) {
     return "";
 }
 
-void startSession(Session& s, const std::string& token, uint32_t nowMs) {
+void startSession(Session& s, const std::string& token, uint64_t nowMs) {
     s.token = token;
-    s.lastMs = nowMs;
+    s.lastMs = s.startMs = nowMs;
 }
 
 void endSession(Session& s) { s = Session{}; }
 
-void touch(Session& s, uint32_t nowMs) { s.lastMs = nowMs; }
+void touch(Session& s, uint64_t nowMs) { s.lastMs = nowMs; }
 
-bool sessionValid(const Session& s, const std::string& token, uint32_t nowMs) {
-    if (!isToken(s.token) || !isToken(token) || nowMs - s.lastMs >= kSessionMs) return false;  // wrap-safe
+bool sessionValid(const Session& s, const std::string& token, uint64_t nowMs) {
+    if (!isToken(s.token) || !isToken(token) || nowMs - s.lastMs >= kSessionMs ||
+        nowMs - s.startMs >= kSessionMaxMs)
+        return false;
     unsigned char diff = 0;
     for (size_t i = 0; i < kTokenLen; ++i) diff |= static_cast<unsigned char>(s.token[i] ^ token[i]);
     return diff == 0;

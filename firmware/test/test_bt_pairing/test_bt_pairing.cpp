@@ -36,6 +36,50 @@ void test_the_pairing_window() {
     TEST_ASSERT_FALSE(w.isOpen(50001));
 }
 
+// With a Computer stored and no window open, only the Computer may connect, so a nearby device can't
+// start the pairing that wipes its bond (#144). A window lets a new Computer in.
+void test_only_the_computer_may_connect_outside_a_window() {
+    const bool computer = true, window = true;
+    TEST_ASSERT_TRUE(bt_pairing::allowListOnly(computer, !window));
+    TEST_ASSERT_FALSE(bt_pairing::allowListOnly(computer, window));
+    TEST_ASSERT_FALSE(bt_pairing::allowListOnly(!computer, !window));
+    TEST_ASSERT_FALSE(bt_pairing::allowListOnly(!computer, window));
+}
+
+// Keys are saved only for a passkey pairing from a window: a Just Works pairing claiming the
+// Computer's identity address can't overwrite its keys (#144). Other records, such as
+// subscriptions, are saved as usual.
+void test_only_a_window_pairing_saves_keys() {
+    const bool keys = true, windowPairing = true;
+    TEST_ASSERT_TRUE(bt_pairing::saveToStore(keys, windowPairing));
+    TEST_ASSERT_FALSE(bt_pairing::saveToStore(keys, !windowPairing));
+    TEST_ASSERT_TRUE(bt_pairing::saveToStore(!keys, !windowPairing));
+}
+
+// A resolvable private address: random, its top two bits 01. Little-endian, so the top byte is
+// last. A Mac connects from these; black2, with BlueZ's privacy off, from its public address.
+void test_a_resolvable_private_address() {
+    const uint8_t rpa[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x5a};     // 0x5a = 0b01011010
+    const uint8_t stat[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0xda};    // static random: 11
+    const uint8_t nrpa[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x1a};    // non-resolvable: 00
+    TEST_ASSERT_TRUE(bt_pairing::isRpa(1, rpa));
+    TEST_ASSERT_FALSE(bt_pairing::isRpa(0, rpa));  // public
+    TEST_ASSERT_FALSE(bt_pairing::isRpa(1, stat));
+    TEST_ASSERT_FALSE(bt_pairing::isRpa(1, nrpa));
+}
+
+// The Computer is matched only by private addresses made from its IRK once it has been seen using
+// them: a Computer that sent an IRK but connects from its public address would be locked out (#144).
+void test_a_computer_seen_on_private_addresses_is_matched_by_them_only() {
+    const uint8_t irk[16] = {0x5a, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    const uint8_t zero[16] = {};
+    const bool present = true, seenRpa = true;
+    TEST_ASSERT_TRUE(bt_pairing::networkPrivacy(present, irk, seenRpa));
+    TEST_ASSERT_FALSE(bt_pairing::networkPrivacy(present, irk, !seenRpa));
+    TEST_ASSERT_FALSE(bt_pairing::networkPrivacy(present, zero, seenRpa));
+    TEST_ASSERT_FALSE(bt_pairing::networkPrivacy(!present, irk, seenRpa));
+}
+
 // A window that runs out without a pairing or Cancel has lapsed, once, so the panel can stop
 // advertising (#141). Closing it ends that.
 void test_a_window_lapses_when_it_runs_out() {
@@ -79,5 +123,9 @@ int main() {
     RUN_TEST(test_a_window_lapses_when_it_runs_out);
     RUN_TEST(test_an_idle_unencrypted_connection_is_dropped);
     RUN_TEST(test_what_the_panel_shows);
+    RUN_TEST(test_only_the_computer_may_connect_outside_a_window);
+    RUN_TEST(test_only_a_window_pairing_saves_keys);
+    RUN_TEST(test_a_resolvable_private_address);
+    RUN_TEST(test_a_computer_seen_on_private_addresses_is_matched_by_them_only);
     return UNITY_END();
 }

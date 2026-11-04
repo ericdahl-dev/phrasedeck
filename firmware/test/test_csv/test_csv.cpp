@@ -206,6 +206,26 @@ void test_blank_and_empty_rows_are_skipped_anywhere() {
     refusedAt("label,phrase\nA,1\n,\nB,\n", "Row 4");
 }
 
+// #173: a row whose cells hold only spaces or tabs looks empty in a spreadsheet, so it's skipped
+// too, and the row numbers after it still count it.
+void test_a_row_of_only_spaces_is_skipped_like_an_empty_one() {
+    TEST_ASSERT_EQUAL_STRING("A=1;B=2;", importedTexts("label,phrase\nA,1\n , \n\t,\t\n\" \",\"  \"\nB,2\n").c_str());
+    refusedAt("label,phrase\nA,1\n , \nB,\n", "Row 4");
+}
+
+// #173: a label of only spaces makes a Button that looks blank, so it's refused like an empty one.
+// A Phrase of only whitespace is kept: a Button that types a Tab or an Enter is useful.
+void test_a_label_of_only_spaces_is_refused_but_a_phrase_of_them_is_kept() {
+    refusedAt("label,phrase\nA,1\n\" \",2\n", "Row 3");
+    refusedAt("label,phrase\nA,1\n  ,2\n", "Row 3");
+    refusedAt("label,phrase\nA,1\n\t,2\n", "Row 3");
+    phrases::List l;
+    std::string error;
+    TEST_ASSERT_FALSE(importInto(l, {Import::Mode::Replace, "label,phrase\n\"  \",2\n"}, error));
+    TEST_ASSERT_EQUAL_STRING("Row 2 has no label.", error.c_str());
+    TEST_ASSERT_EQUAL_STRING("Tab=\t;Enter=\n;Space= ;", importedTexts("label,phrase\nTab,\t\nEnter,\"\n\"\nSpace, \n").c_str());
+}
+
 const std::string kType ="multipart/form-data; boundary=----WebKitFormBoundaryAbc123";
 
 std::string part(const std::string& disposition, const std::string& data) {
@@ -270,6 +290,8 @@ int main() {
     UNITY_BEGIN();
     RUN_TEST(test_the_export_opens_in_the_tab_as_text);
     RUN_TEST(test_blank_and_empty_rows_are_skipped_anywhere);
+    RUN_TEST(test_a_row_of_only_spaces_is_skipped_like_an_empty_one);
+    RUN_TEST(test_a_label_of_only_spaces_is_refused_but_a_phrase_of_them_is_kept);
     RUN_TEST(test_an_import_form_parses_to_an_import);
     RUN_TEST(test_the_largest_export_fits_the_import_cap);
     RUN_TEST(test_a_malformed_import_form_is_refused);

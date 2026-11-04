@@ -32,6 +32,7 @@ void test_export_then_import_gives_back_the_same_buttons() {
     l.add("Sig", "Thanks\nEric\n");
     l.add("Tab", "col1\tcol2");
     l.add("Caf\xC3\xA9", "\xE2\x9C\x93 done, na\xC3\xAFve");
+    l.add("Go", "submit me", true);
     const std::string csv = exported(l);
     phrases::List back;
     std::string error;
@@ -40,7 +41,26 @@ void test_export_then_import_gives_back_the_same_buttons() {
     for (size_t i = 0; i < l.size(); ++i) {
         TEST_ASSERT_EQUAL_STRING(l.at(i).label.c_str(), back.at(i).label.c_str());
         TEST_ASSERT_EQUAL_STRING(l.at(i).text.c_str(), back.at(i).text.c_str());
+        TEST_ASSERT_EQUAL(l.at(i).enter, back.at(i).enter);
     }
+}
+
+// Send Enter (#171): a third column, enter, yes or no (any case; an empty cell is no). A file from
+// before it, label,phrase only, still imports with Send Enter off. Any other value is refused.
+std::string importedEnters(const std::string& csv) {
+    phrases::List l;
+    std::string error;
+    if (!importInto(l, {Import::Mode::Replace, csv}, error)) return "refused: " + error;
+    std::string out;
+    for (size_t i = 0; i < l.size(); ++i) out += l.at(i).label + (l.at(i).enter ? "=yes;" : "=no;");
+    return out;
+}
+
+void test_the_enter_column_imports_and_old_files_still_do() {
+    TEST_ASSERT_EQUAL_STRING("A=yes;B=no;C=yes;D=no;E=no;",
+                             importedEnters("label,phrase,enter\nA,1,yes\nB,2,no\nC,3,YES\nD,4,No\nE,5,\n").c_str());
+    TEST_ASSERT_EQUAL_STRING("A=no;B=no;", importedEnters("label,phrase\r\nA,1\r\nB,2\r\n").c_str());
+    TEST_ASSERT_EQUAL_STRING("A=yes;", importedEnters("Label,Phrase,Enter\nA,1,yes").c_str());
 }
 
 // RFC 4180: CRLF between rows, and a field with a comma, quote or line break in quotes. A UTF-8
@@ -49,7 +69,9 @@ void test_the_export_is_rfc_4180() {
     phrases::List l;
     l.add("A", "plain");
     l.add("B, c", "say \"hi\"\nthen go");
-    TEST_ASSERT_EQUAL_STRING("\xEF\xBB\xBFlabel,phrase\r\nA,plain\r\n\"B, c\",\"say \"\"hi\"\"\nthen go\"\r\n", exported(l).c_str());
+    l.add("C", "submit", true);
+    TEST_ASSERT_EQUAL_STRING("\xEF\xBB\xBFlabel,phrase,enter\r\nA,plain,no\r\n\"B, c\",\"say \"\"hi\"\"\nthen go\",no\r\nC,submit,yes\r\n",
+                             exported(l).c_str());
 }
 
 std::string importedTexts(const std::string& csv) {
@@ -97,6 +119,14 @@ void test_a_file_without_the_header_changes_nothing() {
     refusedAt("A,1\nB,2\n", "Row 1");
     refusedAt("label,text\nA,1\n", "Row 1");
     refusedAt("label,phrase,color\nA,1,red\n", "Row 1");
+}
+
+void test_a_bad_enter_value_changes_nothing() {
+    refusedAt("label,phrase,enter\nA,1,yes\nB,2,maybe\n", "Row 3");
+    refusedAt("label,phrase,enter\nA,1,true\n", "Row 2");
+    refusedAt("label,phrase,enter\nA,1\n", "Row 2");      // a column short
+    refusedAt("label,phrase\nA,1,yes\n", "Row 2");        // more columns than the header
+    refusedAt("label,phrase,send\nA,1,yes\n", "Row 1");
 }
 
 void test_a_malformed_row_changes_nothing() {
@@ -200,7 +230,7 @@ void test_an_import_form_parses_to_an_import() {
 void test_the_largest_export_fits_the_import_cap() {
     phrases::List l;
     for (size_t i = 0; i < phrases::kMaxButtons; ++i) {
-        TEST_ASSERT_TRUE(l.add(std::string(phrases::kMaxLabel, '"'), std::string(phrases::kMaxText, '"')));
+        TEST_ASSERT_TRUE(l.add(std::string(phrases::kMaxLabel, '"'), std::string(phrases::kMaxText, '"'), true));
     }
     const std::string body = part("name=\"file\"; filename=\"phrasedeck-buttons.csv\"", exported(l)) +
                              part("name=\"do\"", "replace") + kEnd;
@@ -242,6 +272,8 @@ int main() {
     RUN_TEST(test_a_malformed_import_form_is_refused);
     RUN_TEST(test_a_file_without_the_header_changes_nothing);
     RUN_TEST(test_a_malformed_row_changes_nothing);
+    RUN_TEST(test_the_enter_column_imports_and_old_files_still_do);
+    RUN_TEST(test_a_bad_enter_value_changes_nothing);
     RUN_TEST(test_a_row_over_the_limits_changes_nothing);
     RUN_TEST(test_more_than_48_buttons_changes_nothing);
     RUN_TEST(test_replace_makes_the_file_the_list_with_new_ids);

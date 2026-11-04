@@ -40,6 +40,7 @@ bool editFrom(const std::string& body, Edit& e) {
     else return false;
     e.label = formValue(body, "label");
     e.text = lf(formValue(body, "text"));
+    e.enter = formValue(body, "enter") == "yes";
     if (e.kind == Edit::Kind::Add) {
         e.id = e.edit = 0;
         return true;
@@ -48,11 +49,11 @@ bool editFrom(const std::string& body, Edit& e) {
 }
 
 bool apply(phrases::List& list, const Edit& e) {
-    if (e.kind == Edit::Kind::Add) return list.add(e.label, e.text);
+    if (e.kind == Edit::Kind::Add) return list.add(e.label, e.text, e.enter);
     const size_t i = list.find(e.id, e.edit);
     if (i >= list.size()) return false;
     switch (e.kind) {
-        case Edit::Kind::Change: return list.edit(i, e.label, e.text);
+        case Edit::Kind::Change: return list.edit(i, e.label, e.text, e.enter);
         case Edit::Kind::Remove: return list.remove(i);
         case Edit::Kind::Up: return i > 0 && list.move(i, i - 1);
         case Edit::Kind::Down: return i + 1 < list.size() && list.move(i, i + 1);
@@ -84,25 +85,33 @@ std::string editorHead(const phrases::List& list, const std::string& note) {
     return p;
 }
 
+// Send Enter (#171): unticked, a browser leaves the field out of the form, so it reads as off.
+static std::string enterBox(bool on) {
+    return std::string("<p><label><input type=checkbox name=enter value=yes") + (on ? " checked" : "") +
+           "> Send Enter after the Phrase</label></p>";
+}
+
 std::string editorButton(const phrases::Button& b) {
-    return "<details><summary>" + html(b.label) + "</summary><pre>" +
+    return "<details><summary>" + html(b.label) + (b.enter ? " (Send Enter)" : "") + "</summary><pre>" +
            html(phrases::visible(b.text, "\xE2\x86\xB5", "\xE2\x86\x92")) + "</pre>"
            "<form method=post action=/edit><input type=hidden name=id value=" + std::to_string(b.id) +
            "><input type=hidden name=edit value=" + std::to_string(b.edit) + ">"
            "<p><label>Label<br><input name=label maxlength=40 value=\"" + html(b.label) + "\"></label></p>"
            // The newline after <textarea> is dropped by the browser, so a Phrase starting with Enter keeps it.
-           "<p><label>Phrase<br><textarea name=text rows=4 maxlength=2000>\n" + html(b.text) + "</textarea></label></p>"
+           "<p><label>Phrase<br><textarea name=text rows=4 maxlength=2000>\n" + html(b.text) + "</textarea></label></p>" +
+           enterBox(b.enter) +
            "<p><button name=do value=change>Save</button> <button name=do value=up>Up</button> "
            "<button name=do value=down>Down</button> <button name=do value=remove>Delete</button></p></form></details>";
 }
 
 std::string editorTail() {
-    return "<h2>Add a Button</h2><form method=post action=/edit><input type=hidden name=do value=add>"
+    return std::string("<h2>Add a Button</h2><form method=post action=/edit><input type=hidden name=do value=add>"
            "<p><label>Label<br><input name=label maxlength=40 required></label></p>"
-           "<p><label>Phrase<br><textarea name=text rows=4 maxlength=2000 required></textarea></label></p>"
+           "<p><label>Phrase<br><textarea name=text rows=4 maxlength=2000 required></textarea></label></p>") +
+           enterBox(false) +
            "<p><button>Add</button></p></form>"
            "<h2>Spreadsheet</h2><p><a href=/buttons.csv>View CSV</a> (save it with Ctrl+S or Cmd+S). "
-           "One row per Button: label,phrase.</p>"
+           "One row per Button: label,phrase,enter (enter is yes or no).</p>"
            "<form method=post action=/import enctype=multipart/form-data>"
            "<p><label>CSV file<br><input type=file name=file accept=\".csv,text/csv\" required></label></p>"
            // Append first, so it's the form's default submit: a stray Enter never replaces every Button.

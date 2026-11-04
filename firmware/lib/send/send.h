@@ -20,14 +20,16 @@ inline Outcome outcome(bool sent, int status) {
 }
 
 // /type's JSON body. phrase and edit let the Helper notice the first Send of an edited Phrase
-// (#98); an empty phrase leaves both out.
-inline std::string typeBody(const std::string& text, const std::string& phrase, uint32_t edit) {
+// (#98); an empty phrase leaves both out. enter asks the Helper to press Enter after the text
+// (Send Enter, #171); a "\n" in the text wouldn't, since the Helper types that as Shift+Enter.
+inline std::string typeBody(const std::string& text, const std::string& phrase, uint32_t edit, bool enter = false) {
     JsonDocument doc;
     doc["text"] = text;
     if (!phrase.empty()) {
         doc["phrase"] = phrase;
         doc["edit"] = edit;
     }
+    if (enter) doc["enter"] = true;
     std::string json;
     serializeJson(doc, json);
     return json;

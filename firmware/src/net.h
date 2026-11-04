@@ -54,8 +54,9 @@ Snapshot snapshot();
 bool pair(const Helper& h, const std::string& code, const std::string& shortPin);
 
 // Types text on the paired Computer, checked against its whole Pin. phrase and edit name the
-// panel Phrase for the Helper's edit notice; leave phrase empty for none. False if not queued.
-bool type(const std::string& text, const std::string& phrase = "", uint32_t edit = 0);
+// panel Phrase for the Helper's edit notice; leave phrase empty for none. enter presses Enter after
+// the text (Send Enter, #171), in either Mode. False if not queued.
+bool type(const std::string& text, const std::string& phrase = "", uint32_t edit = 0, bool enter = false);
 
 // The Mode, stored in the panel NVS. A change takes effect at the next restart. False if not saved.
 bool setBluetooth(bool on);

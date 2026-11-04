@@ -17,9 +17,10 @@ struct Edit {
     uint32_t edit = 0;
     std::string label;
     std::string text;  // CRLF from the browser already turned into LF
+    bool enter = false;  // Send Enter (#171): the checkbox, sent only when ticked
 };
 
-// Parses a form body (do=add|change|remove|up|down, id, edit, label, text). False if malformed.
+// Parses a form body (do=add|change|remove|up|down, id, edit, label, text, enter). False if malformed.
 bool editFrom(const std::string& body, Edit& e);
 
 // Applies e to the list; false, changing nothing, if its Button is gone or changed, or the list refuses it.
@@ -28,8 +29,8 @@ bool apply(phrases::List& list, const Edit& e);
 // & < > " ' as entities, so text is never markup.
 std::string html(const std::string& s);
 
-// The editor: each Button with its Phrase (Enter shown as ↵) and a form to change, move or
-// delete it, then a form to add one. note, if any, shows on top (already plain text).
+// The editor: each Button with its Phrase (Enter shown as ↵, "(Send Enter)" after the label when
+// it's on) and a form to change, move or delete it, then a form to add one. note, if any, shows on top (already plain text).
 std::string editorPage(const phrases::List& list, const std::string& note = "");
 // The same page in parts, so the server sends it a Button at a time instead of building it whole.
 std::string editorHead(const phrases::List& list, const std::string& note);

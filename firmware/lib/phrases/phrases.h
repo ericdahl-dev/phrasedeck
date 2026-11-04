@@ -21,6 +21,7 @@ struct Button {
     uint32_t confirmedEdit = 0;  // the edit the user OKed on the panel; 0 = never
     std::string label;
     std::string text;  // the Phrase
+    bool enter = false;  // Send Enter (#171): press Enter after the Phrase
 };
 
 class List {
@@ -29,8 +30,9 @@ class List {
     const Button& at(size_t i) const { return buttons_[i]; }
 
     // add and edit refuse anything over the caps, or an empty label or Phrase, and then change nothing.
-    bool add(const std::string& label, const std::string& text);
-    bool edit(size_t i, const std::string& label, const std::string& text);
+    // enter is the Button's Send Enter choice; edit sets it too, so leaving it out turns it off.
+    bool add(const std::string& label, const std::string& text, bool enter = false);
+    bool edit(size_t i, const std::string& label, const std::string& text, bool enter = false);
     bool remove(size_t i);
     bool move(size_t from, size_t to);  // to is the index it ends up at
     // Removes every Button but keeps the id counter, so a Button added after has a new id.
@@ -50,7 +52,7 @@ class List {
         if (i < buttons_.size()) buttons_[i].confirmedEdit = buttons_[i].edit;
     }
 
-    // {"next":N,"buttons":[{"id":..,"edit":..,"label":..,"text":..},..]}. fromJson replaces the list only if the whole file
+    // {"next":N,"buttons":[{"id":..,"edit":..,"label":..,"text":..,"enter":true},..]}. fromJson replaces the list only if the whole file
     // parses and every Button fits the caps; otherwise it changes nothing.
     std::string toJson() const;
     bool fromJson(const std::string& json);
@@ -62,6 +64,8 @@ class List {
 
 // For "Send?": text with each Enter shown as enterMark (before the line break) and each Tab as tabMark.
 std::string visible(const std::string& text, const char* enterMark, const char* tabMark);
+// The same for a Button, plus a final enterMark when Send Enter is on (#171).
+std::string preview(const Button& b, const char* enterMark, const char* tabMark);
 
 // Characters (UTF-8 code points, not bytes) and lines, an Enter starting a new one.
 size_t characters(const std::string& text);

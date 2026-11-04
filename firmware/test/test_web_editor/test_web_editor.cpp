@@ -93,8 +93,42 @@ void test_the_page_links_the_csv_and_has_an_import_form() {
                                "<button name=do value=replace>Replace all</button>") != std::string::npos);
 }
 
+// Send Enter (#171): a checkbox when adding or changing a Button, sent as enter=yes when ticked and
+// left out of the form when not, so it's off unless asked for.
+void test_the_send_enter_checkbox_parses_and_applies() {
+    Edit e;
+    TEST_ASSERT_TRUE(web::editFrom("do=add&label=Go&text=submit&enter=yes", e));
+    TEST_ASSERT_TRUE(e.enter);
+    TEST_ASSERT_TRUE(web::editFrom("do=change&id=2&edit=1&label=Go&text=submit", e));
+    TEST_ASSERT_FALSE(e.enter);
+
+    phrases::List l = twoButtons();
+    const uint32_t bye = l.at(1).id;
+    l.confirmed(1);
+    TEST_ASSERT_TRUE(web::apply(l, {Edit::Kind::Change, bye, 1, "Bye", "Goodbye", true}));
+    TEST_ASSERT_TRUE(l.at(1).enter);
+    TEST_ASSERT_TRUE(l.needsConfirm(1));  // turning it on is an edit, confirmed on the panel
+    TEST_ASSERT_TRUE(web::apply(l, {Edit::Kind::Add, 0, 0, "New", "Phrase", true}));
+    TEST_ASSERT_TRUE(l.at(2).enter);
+}
+
+// The list shows which Buttons press Enter, and each form's checkbox starts as the Button has it.
+void test_the_page_shows_which_buttons_send_enter() {
+    phrases::List l;
+    l.add("Plain", "no Enter");
+    l.add("Go", "submit", true);
+    TEST_ASSERT_TRUE(web::editorButton(l.at(0)).find("<summary>Plain</summary>") != std::string::npos);
+    TEST_ASSERT_TRUE(web::editorButton(l.at(0)).find("<input type=checkbox name=enter value=yes>") != std::string::npos);
+    TEST_ASSERT_TRUE(web::editorButton(l.at(1)).find("<summary>Go (Send Enter)</summary>") != std::string::npos);
+    TEST_ASSERT_TRUE(web::editorButton(l.at(1)).find("<input type=checkbox name=enter value=yes checked>") !=
+                     std::string::npos);
+    TEST_ASSERT_TRUE(web::editorTail().find("<input type=checkbox name=enter value=yes>") != std::string::npos);
+}
+
 int main() {
     UNITY_BEGIN();
+    RUN_TEST(test_the_send_enter_checkbox_parses_and_applies);
+    RUN_TEST(test_the_page_shows_which_buttons_send_enter);
     RUN_TEST(test_the_page_links_the_csv_and_has_an_import_form);
     RUN_TEST(test_labels_and_phrases_are_escaped_on_the_page);
     RUN_TEST(test_the_page_shows_enter_as_a_mark);

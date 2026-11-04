@@ -33,6 +33,7 @@ struct Request {
     Helper helper;
     std::string code, shortPin, text;
     std::string raw;  // Type: the Phrase itself, for Bluetooth
+    bool enter = false;  // Type: Send Enter (#171), for Bluetooth; the Helper's is in text
 };
 
 // Read once at start(), before the task: a Mode change waits for a restart.
@@ -204,7 +205,7 @@ constexpr uint32_t kKeyIntervalMs = 20;
 std::atomic<bool> g_cancelSend{false};  // set from the UI task, read by the send loop
 
 void handleBluetoothType(const Request& req, Snapshot& s) {
-    const hid_keys::Plan p = hid_keys::plan(req.raw, false);
+    const hid_keys::Plan p = hid_keys::plan(req.raw, req.enter);
     hid_keys::Said r = p.ok ? hid_keys::Said{"Not sent: no Computer connected over Bluetooth", false}
                             : hid_keys::refused(p.bad);
     if (p.ok && ble_keyboard::ready()) {
@@ -451,11 +452,11 @@ bool pair(const Helper& h, const std::string& code, const std::string& shortPin)
     return enqueue(new Request{Request::Pair, h, code, shortPin, "", ""});
 }
 
-bool type(const std::string& text, const std::string& phrase, uint32_t edit) {
+bool type(const std::string& text, const std::string& phrase, uint32_t edit, bool enter) {
     // Cleared here, not when the Send starts: a Stop tapped while this one waits in the queue (a
     // browse holds the net task about 3 s) must still stop it. One Send at a time, so none is stale.
     g_cancelSend.store(false);
-    return enqueue(new Request{Request::Type, Helper{}, "", "", send::typeBody(text, phrase, edit), text});
+    return enqueue(new Request{Request::Type, Helper{}, "", "", send::typeBody(text, phrase, edit, enter), text, enter});
 }
 
 bool setBluetooth(bool on) {

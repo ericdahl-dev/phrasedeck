@@ -22,16 +22,17 @@ bool fits(const std::string& label, const std::string& text) {
 
 }  // namespace
 
-bool List::add(const std::string& label, const std::string& text) {
+bool List::add(const std::string& label, const std::string& text, bool enter) {
     if (buttons_.size() >= kMaxButtons || nextId_ >= kMaxCounter || !fits(label, text)) return false;
-    buttons_.push_back({nextId_++, 1, 0, label, text});
+    buttons_.push_back({nextId_++, 1, 0, label, text, enter});
     return true;
 }
 
-bool List::edit(size_t i, const std::string& label, const std::string& text) {
+bool List::edit(size_t i, const std::string& label, const std::string& text, bool enter) {
     if (i >= buttons_.size() || buttons_[i].edit >= kMaxCounter || !fits(label, text)) return false;
     buttons_[i].label = label;
     buttons_[i].text = text;
+    buttons_[i].enter = enter;
     ++buttons_[i].edit;
     return true;
 }
@@ -61,6 +62,7 @@ std::string List::toJson() const {
         o["confirmed"] = b.confirmedEdit;
         o["label"] = b.label;
         o["text"] = b.text;
+        if (b.enter) o["enter"] = true;  // left out when off, as in files saved before #171
     }
     std::string out;
     serializeJson(doc, out);
@@ -76,7 +78,7 @@ bool List::fromJson(const std::string& json) {
     next.nextId_ = doc["next"] | 1u;
     if (next.nextId_ == 0 || next.nextId_ > kMaxCounter) return false;
     for (JsonObjectConst o : arr) {
-        const Button b{o["id"] | 0u, o["edit"] | 0u, o["confirmed"] | 0u, o["label"] | "", o["text"] | ""};
+        const Button b{o["id"] | 0u, o["edit"] | 0u, o["confirmed"] | 0u, o["label"] | "", o["text"] | "", o["enter"] | false};
         if (b.id == 0 || b.id >= kMaxCounter || b.edit == 0 || b.edit > kMaxCounter || next.buttons_.size() >= kMaxButtons || !fits(b.label, b.text)) return false;
         for (const Button& other : next.buttons_) {
             if (other.id == b.id) return false;
@@ -96,6 +98,10 @@ std::string visible(const std::string& text, const char* enterMark, const char* 
         else out += ch;
     }
     return out;
+}
+
+std::string preview(const Button& b, const char* enterMark, const char* tabMark) {
+    return visible(b.text, enterMark, tabMark) + (b.enter ? enterMark : "");
 }
 
 size_t characters(const std::string& text) {

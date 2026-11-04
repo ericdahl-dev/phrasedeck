@@ -8,8 +8,14 @@ So far it shows a fixed Page of Buttons. It pairs with a Nearby Helper (the Pair
 `Pin for a panel:` line from `phrased pair`), and a tap sends the Button's phrase. Its own Phrase
 list, edited from a web page, is in progress (#98).
 
-The web page can also show the Buttons as a CSV file (`label,phrase`, one row per Button) and
-import one back from a spreadsheet (#164). **View CSV** opens the file in the tab as text; save it
+Each Button has a **Send Enter** choice, off by default (#171). When it's on, a Send types the
+Phrase and then presses Enter, in both Modes, so it can submit a form or a chat message. A line
+break inside a Phrase is still typed as Shift+Enter, which doesn't submit. "Send?" shows the final
+Enter as an Enter mark after the text.
+
+The web page can also show the Buttons as a CSV file (`label,phrase,enter`, one row per Button,
+`enter` being `yes` or `no`) and import one back from a spreadsheet (#164). A file from before
+Send Enter, with only `label,phrase`, still imports, with Send Enter off. **View CSV** opens the file in the tab as text; save it
 with Ctrl+S or Cmd+S (the name is `phrasedeck-buttons.csv`). It isn't a download because Chrome
 won't download from a site with a self-signed certificate (#168). On import, **Replace all** makes the file the whole list, **Append**
 adds its rows after the Buttons. An import is all or nothing: if any row is wrong, nothing changes

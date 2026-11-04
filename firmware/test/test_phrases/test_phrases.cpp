@@ -171,8 +171,47 @@ void test_control_characters_are_refused() {
     TEST_ASSERT_FALSE(loaded.fromJson("{\"next\":2,\"buttons\":[{\"id\":1,\"edit\":1,\"label\":\"x\",\"text\":\"a\\u001bb\"}]}"));
 }
 
+// Send Enter (#171): each Button can press Enter after its Phrase, off by default. It's saved with
+// the Button, and a file saved before the choice existed loads with it off. Turning it on or off is
+// an edit, so the Button asks "Send?" again on the panel.
+void test_send_enter_is_saved_with_the_button_and_off_by_default() {
+    phrases::List list;
+    TEST_ASSERT_TRUE(list.add("Plain", "no Enter"));
+    TEST_ASSERT_TRUE(list.add("Go", "submit me", true));
+    TEST_ASSERT_FALSE(list.at(0).enter);
+    TEST_ASSERT_TRUE(list.at(1).enter);
+    phrases::List back;
+    TEST_ASSERT_TRUE(back.fromJson(list.toJson()));
+    TEST_ASSERT_FALSE(back.at(0).enter);
+    TEST_ASSERT_TRUE(back.at(1).enter);
+
+    back.confirmed(0);
+    TEST_ASSERT_TRUE(back.edit(0, "Plain", "no Enter", true));
+    TEST_ASSERT_TRUE(back.at(0).enter);
+    TEST_ASSERT_EQUAL_UINT32(2, back.at(0).edit);
+    TEST_ASSERT_TRUE(back.needsConfirm(0));
+    TEST_ASSERT_TRUE(back.edit(1, "Go", "submit me"));  // an edit without the choice turns it off
+    TEST_ASSERT_FALSE(back.at(1).enter);
+
+    phrases::List old;  // saved before #171
+    TEST_ASSERT_TRUE(old.fromJson("{\"next\":2,\"buttons\":[{\"id\":1,\"edit\":1,\"label\":\"a\",\"text\":\"x\"}]}"));
+    TEST_ASSERT_FALSE(old.at(0).enter);
+}
+
+// "Send?" shows the Enter that Send Enter adds (#171): the Enter mark after the text, with no line
+// break after it, since nothing is typed after the Enter.
+void test_the_preview_shows_the_final_enter_when_it_is_on() {
+    phrases::List l;
+    l.add("Plain", "Hi\nthere");
+    l.add("Go", "Hi\nthere", true);
+    TEST_ASSERT_EQUAL_STRING("Hi<NL>\nthere", phrases::preview(l.at(0), "<NL>", "<TAB>").c_str());
+    TEST_ASSERT_EQUAL_STRING("Hi<NL>\nthere<NL>", phrases::preview(l.at(1), "<NL>", "<TAB>").c_str());
+}
+
 int main() {
     UNITY_BEGIN();
+    RUN_TEST(test_the_preview_shows_the_final_enter_when_it_is_on);
+    RUN_TEST(test_send_enter_is_saved_with_the_button_and_off_by_default);
     RUN_TEST(test_buttons_can_be_added_edited_moved_and_deleted);
     RUN_TEST(test_count_and_lengths_are_capped);
     RUN_TEST(test_the_list_round_trips_through_json);

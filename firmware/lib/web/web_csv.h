@@ -21,7 +21,8 @@ constexpr const char* kCsvDisposition = "inline; filename=\"phrasedeck-buttons.c
 
 // The export, sent in parts: csvHead() once, then csvRow() for each Button in panel order.
 // RFC 4180 with CRLF between rows; a field with a comma, quote or line break is quoted. The head
-// starts with a UTF-8 BOM, which Excel needs to read the file as UTF-8.
+// starts with a UTF-8 BOM, which Excel needs to read the file as UTF-8. Columns: label,phrase,enter,
+// enter being yes or no (Send Enter, #171).
 std::string csvHead();
 std::string csvRow(const phrases::Button& b);
 
@@ -35,7 +36,8 @@ struct Import {
 bool importFrom(const std::string& contentType, std::string_view body, Import& im);
 
 // The list after the import, in out: Replace makes the file the whole list, in its order; Append
-// adds its rows after the Buttons. Every imported Button gets a new id (the list's id counter goes
+// adds its rows after the Buttons. A file without the enter column (from before #171) imports with
+// Send Enter off; in one with it, yes or no in any case, and an empty cell is no. Every imported Button gets a new id (the list's id counter goes
 // on) and must be confirmed on the panel before its first Send. False if any row is malformed or
 // over the limits, and error then names the row. list itself never changes, so the caller can keep
 // it if saving fails, and only two lists are ever in memory.

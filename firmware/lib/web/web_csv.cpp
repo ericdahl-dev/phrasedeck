@@ -177,9 +177,11 @@ bool partName(std::string_view headers, std::string_view& name) {
 
 }  // namespace
 
-std::string csvHead() { return "\xEF\xBB\xBFlabel,phrase\r\n"; }
+std::string csvHead() { return "\xEF\xBB\xBFlabel,phrase,enter\r\n"; }
 
-std::string csvRow(const phrases::Button& b) { return field(b.label) + "," + field(b.text) + "\r\n"; }
+std::string csvRow(const phrases::Button& b) {
+    return field(b.label) + "," + field(b.text) + (b.enter ? ",yes\r\n" : ",no\r\n");
+}
 
 bool importFrom(const std::string& contentType, std::string_view body, Import& im) {
     std::string_view boundary;
@@ -224,10 +226,13 @@ bool apply(const phrases::List& list, const Import& im, phrases::List& out, std:
         error = "Row " + std::to_string(row) + " " + why + ".";
         return false;
     };
-    if (r.done() || !r.next(fields, error) || fields.size() != 2 || lower(fields[0]) != "label" ||
-        lower(fields[1]) != "phrase") {
-        return fail(1, "must be the header label,phrase");
+    // label,phrase,enter, or label,phrase from before Send Enter (#171), which imports with it off.
+    if (r.done() || !r.next(fields, error) || fields.size() < 2 || fields.size() > 3 || lower(fields[0]) != "label" ||
+        lower(fields[1]) != "phrase" || (fields.size() == 3 && lower(fields[2]) != "enter")) {
+        return fail(1, "must be the header label,phrase,enter (or label,phrase)");
     }
+    const size_t columns = fields.size();
+    const std::string names = columns == 3 ? "label,phrase,enter" : "label,phrase";
     size_t row = 1, added = 0;
     while (!r.done()) {
         ++row;
@@ -236,17 +241,19 @@ bool apply(const phrases::List& list, const Import& im, phrases::List& out, std:
         bool empty = true;
         for (const std::string& f : fields) empty = empty && f.empty();
         if (empty) continue;
-        if (fields.size() != 2) {
+        if (fields.size() != columns) {
             return fail(row, "has " + std::to_string(fields.size()) + (fields.size() == 1 ? " column" : " columns") +
-                                 ", not 2 (label,phrase)");
+                                 ", not " + std::to_string(columns) + " (" + names + ")");
         }
+        const std::string enter = columns == 3 ? lower(fields[2]) : "no";
+        if (enter != "yes" && enter != "no" && !enter.empty()) return fail(row, "has an enter that isn't yes or no");
         const std::string label = lf(fields[0]), text = lf(fields[1]);
         const std::string why = refused(label, text);
         if (!why.empty()) return fail(row, why);
         if (next.size() >= phrases::kMaxButtons) {
             return fail(row, "makes more than " + std::to_string(phrases::kMaxButtons) + " Buttons");
         }
-        if (!next.add(label, text)) return fail(row, "can't be added");
+        if (!next.add(label, text, enter == "yes")) return fail(row, "can't be added");
         ++added;
     }
     if (added == 0) {

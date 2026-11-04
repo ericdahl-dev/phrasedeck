@@ -390,7 +390,7 @@ void loadPhrases() {
         LittleFS.rename(kPhrasesFile, "/phrases.bad");
         Serial.println("phrasedeck panel: saved Buttons didn't load, kept as /phrases.bad; using the starter Buttons");
     }
-    for (const char* p : kStarterPhrases) g_phrases.add(p, p);
+    for (const char* p : kStarterPhrases) g_phrases.add(p, p, false);
     for (size_t i = 0; i < g_phrases.size(); ++i) g_phrases.confirmed(i);
     if (!savePhrases()) web_server::publish(g_phrases.toJson());  // the page still shows them
 }
@@ -447,7 +447,7 @@ void sendResult(const net::Snapshot& s) {
 
 void sendPhrase(size_t i) {
     const phrases::Button& b = g_phrases.at(i);
-    if (!startRequest(net::type(b.text, phraseKey(b.id), b.edit), "Sending: " + b.label)) return;
+    if (!startRequest(net::type(b.text, phraseKey(b.id), b.edit, b.enter), "Sending: " + b.label)) return;
     g_sending = g_buttons[i];
     lv_obj_add_state(g_sending, LV_STATE_DISABLED);  // dimmed while it sends
     if (net::snapshot().bluetooth) showStop(true);  // a long one takes a while
@@ -505,8 +505,8 @@ void openConfirm(size_t i) {
     lv_obj_t* about = lv_label_create(g_confirm);
     lv_obj_set_style_text_color(about, lv_color_hex(0x8A929C), 0);
     const unsigned chars = phrases::characters(b.text), lines = phrases::lines(b.text);
-    lv_label_set_text_fmt(about, "Changed on the web page  |  %u character%s, %u line%s", chars, chars == 1 ? "" : "s",
-                          lines, lines == 1 ? "" : "s");
+    lv_label_set_text_fmt(about, "Changed on the web page  |  %u character%s, %u line%s%s", chars, chars == 1 ? "" : "s",
+                          lines, lines == 1 ? "" : "s", b.enter ? ", then Enter" : "");
     lv_obj_align(about, LV_ALIGN_TOP_LEFT, 0, 40);
 
     lv_obj_t* box = lv_obj_create(g_confirm);
@@ -518,7 +518,7 @@ void openConfirm(size_t i) {
     lv_obj_set_style_text_font(text, &lv_font_montserrat_28, 0);
     lv_obj_set_width(text, lv_pct(100));
     lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
-    lv_label_set_text(text, phrases::visible(b.text, LV_SYMBOL_NEW_LINE, LV_SYMBOL_RIGHT " ").c_str());
+    lv_label_set_text(text, phrases::preview(b, LV_SYMBOL_NEW_LINE, LV_SYMBOL_RIGHT " ").c_str());
 
     // Send is the wide one, far from Cancel, so a slip doesn't pick the wrong one.
     lv_obj_t* cancel = textButton(g_confirm, "Cancel", closeConfirm, nullptr);
@@ -1099,7 +1099,7 @@ void serialCommands() {
             std::string text = rest + (*rest == ' ');
             for (size_t at; (at = text.find("\\n")) != std::string::npos;) text.replace(at, 2, "\n");
             for (size_t at; (at = text.find("\\t")) != std::string::npos;) text.replace(at, 2, "\t");
-            if (i < g_phrases.size() && g_phrases.edit(i, g_phrases.at(i).label, text) && savePhrases()) rebuildGrid();
+            if (i < g_phrases.size() && g_phrases.edit(i, g_phrases.at(i).label, text, g_phrases.at(i).enter) && savePhrases()) rebuildGrid();
         } else if (line == "shot") {
             // The screen, one line per row: "R" then hex (count, RGB565) runs. Copied whole first, so
             // the picture is one moment; one write per row, so log lines land between rows.
@@ -1133,7 +1133,7 @@ void serialCommands() {
             if (p.begin("admin", false, panel_store::kPartition)) p.clear();
             Serial.println("clearpw: done, reboot to load");
         } else if (line.rfind("add ", 0) == 0) {  // a Button, as the web page would add it
-            const bool ok = g_phrases.add(line.substr(4), line.substr(4)) && savePhrases();
+            const bool ok = g_phrases.add(line.substr(4), line.substr(4), false) && savePhrases();
             if (ok) rebuildGrid();
             Serial.printf("add: %s\n", ok ? "added" : "refused");
         } else if (line.rfind("remove ", 0) == 0) {

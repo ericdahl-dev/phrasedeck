@@ -38,10 +38,20 @@ void test_the_type_body_names_the_phrase_and_its_edit() {
     TEST_ASSERT_EQUAL_STRING("{\"text\":\"hi\"}", send::typeBody("hi", "", 0).c_str());
 }
 
+// Send Enter (#171): the Helper presses Enter after the text only when the Button asks for it. A
+// "\n" in the text wouldn't do: the Helper types a line break as Shift+Enter, which doesn't submit.
+void test_the_type_body_asks_for_enter_only_when_the_button_does() {
+    TEST_ASSERT_EQUAL_STRING("{\"text\":\"Ship it\",\"phrase\":\"a1b2:7\",\"edit\":3,\"enter\":true}",
+                             send::typeBody("Ship it", "a1b2:7", 3, true).c_str());
+    TEST_ASSERT_EQUAL_STRING("{\"text\":\"Ship it\",\"phrase\":\"a1b2:7\",\"edit\":3}",
+                             send::typeBody("Ship it", "a1b2:7", 3, false).c_str());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_status_codes_map_to_typed_not_typed_or_maybe_typed);
     RUN_TEST(test_no_reply_is_not_typed_unless_the_request_was_sent);
     RUN_TEST(test_the_type_body_names_the_phrase_and_its_edit);
+    RUN_TEST(test_the_type_body_asks_for_enter_only_when_the_button_does);
     return UNITY_END();
 }

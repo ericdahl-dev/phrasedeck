@@ -10,8 +10,10 @@
 #include <lvgl.h>
 
 #include "board_pins.h"
+#include "display_driver.h"
 #include "gt911.h"
 #include "panel_mcu.h"
+#include "screen_rotation.h"
 
 namespace {
 
@@ -116,8 +118,11 @@ void touch_poll() {
     g_touch.pressed = g_pressed;
     gt911::decode(buf, ok, board::LCD_WIDTH, board::LCD_HEIGHT, g_touch);
     g_pressed = g_touch.pressed;
-    g_x = g_touch.x;
-    g_y = g_touch.y;
+    // On the screen as drawn (#190): LVGL, the factory reset corner and the app all read these.
+    const screen_rotation::Point p =
+        screen_rotation::touch(g_touch.x, g_touch.y, board::LCD_WIDTH, board::LCD_HEIGHT, display_rotated());
+    g_x = static_cast<int16_t>(p.x);
+    g_y = static_cast<int16_t>(p.y);
     if (!ok || (buf[0] & 0x80) == 0) return;
 
     // The status register must be cleared or the controller stops reporting.

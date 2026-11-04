@@ -40,7 +40,8 @@ void touch_poll();
 // True while a finger is down, as of the last poll.
 bool touch_pressed();
 
-// Where that finger is, in panel coordinates, as of the last poll. Only
+// Where that finger is, on the screen as drawn (mirrored when it's rotated, #190), as of the last
+// poll. Only
 // meaningful while touch_pressed() is true; otherwise these hold wherever the
 // last press was. Published so the application can tell one region of the glass
 // from another - the driver has always tracked them for LVGL.

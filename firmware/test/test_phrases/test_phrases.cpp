@@ -1,6 +1,8 @@
 #include <unity.h>
 
 #include <string>
+#include <type_traits>
+#include <utility>
 
 #include "phrases.h"
 
@@ -10,10 +12,10 @@ void tearDown() {}
 // The panel's own Phrase list (#98): add, edit, delete and reorder, saved as JSON.
 void test_buttons_can_be_added_edited_moved_and_deleted() {
     phrases::List list;
-    TEST_ASSERT_TRUE(list.add("LGTM", "Looks good to me"));
-    TEST_ASSERT_TRUE(list.add("Late", "Running late"));
-    TEST_ASSERT_TRUE(list.add("Ship", "Ship it"));
-    TEST_ASSERT_TRUE(list.edit(1, "Late", "Running 5 min late"));
+    TEST_ASSERT_TRUE(list.add("LGTM", "Looks good to me", false));
+    TEST_ASSERT_TRUE(list.add("Late", "Running late", false));
+    TEST_ASSERT_TRUE(list.add("Ship", "Ship it", false));
+    TEST_ASSERT_TRUE(list.edit(1, "Late", "Running 5 min late", false));
     TEST_ASSERT_TRUE(list.move(2, 0));  // Ship first
     TEST_ASSERT_TRUE(list.remove(1));   // LGTM gone
     TEST_ASSERT_EQUAL(2, list.size());
@@ -21,32 +23,32 @@ void test_buttons_can_be_added_edited_moved_and_deleted() {
     TEST_ASSERT_EQUAL_STRING("Running 5 min late", list.at(1).text.c_str());
     TEST_ASSERT_FALSE(list.remove(5));
     TEST_ASSERT_FALSE(list.move(0, 9));
-    TEST_ASSERT_FALSE(list.edit(9, "x", "y"));
+    TEST_ASSERT_FALSE(list.edit(9, "x", "y", false));
 }
 
 // Caps (#98): at most kMaxButtons, a label of 1 to kMaxLabel bytes, a Phrase of 1 to kMaxText
 // bytes. A rejected add or edit changes nothing.
 void test_count_and_lengths_are_capped() {
     phrases::List list;
-    for (size_t i = 0; i < phrases::kMaxButtons; ++i) TEST_ASSERT_TRUE(list.add("b", "p"));
-    TEST_ASSERT_FALSE(list.add("one", "too many"));
+    for (size_t i = 0; i < phrases::kMaxButtons; ++i) TEST_ASSERT_TRUE(list.add("b", "p", false));
+    TEST_ASSERT_FALSE(list.add("one", "too many", false));
     TEST_ASSERT_EQUAL(phrases::kMaxButtons, list.size());
 
     phrases::List small;
-    TEST_ASSERT_FALSE(small.add("", "text"));
-    TEST_ASSERT_FALSE(small.add("label", ""));
-    TEST_ASSERT_FALSE(small.add(std::string(phrases::kMaxLabel + 1, 'l'), "text"));
-    TEST_ASSERT_FALSE(small.add("label", std::string(phrases::kMaxText + 1, 't')));
-    TEST_ASSERT_TRUE(small.add(std::string(phrases::kMaxLabel, 'l'), std::string(phrases::kMaxText, 't')));
-    TEST_ASSERT_FALSE(small.edit(0, "label", std::string(phrases::kMaxText + 1, 't')));
+    TEST_ASSERT_FALSE(small.add("", "text", false));
+    TEST_ASSERT_FALSE(small.add("label", "", false));
+    TEST_ASSERT_FALSE(small.add(std::string(phrases::kMaxLabel + 1, 'l'), "text", false));
+    TEST_ASSERT_FALSE(small.add("label", std::string(phrases::kMaxText + 1, 't'), false));
+    TEST_ASSERT_TRUE(small.add(std::string(phrases::kMaxLabel, 'l'), std::string(phrases::kMaxText, 't'), false));
+    TEST_ASSERT_FALSE(small.edit(0, "label", std::string(phrases::kMaxText + 1, 't'), false));
     TEST_ASSERT_EQUAL(phrases::kMaxText, small.at(0).text.size());
 }
 
 // The list round-trips through JSON (LittleFS on the panel), Unicode and quotes included.
 void test_the_list_round_trips_through_json() {
     phrases::List list;
-    list.add("Café", "naïve \"quoted\" ✓\nsecond line");
-    list.add("Ship", "Ship it");
+    list.add("Café", "naïve \"quoted\" ✓\nsecond line", false);
+    list.add("Ship", "Ship it", false);
     phrases::List back;
     TEST_ASSERT_TRUE(back.fromJson(list.toJson()));
     TEST_ASSERT_EQUAL(2, back.size());
@@ -57,7 +59,7 @@ void test_the_list_round_trips_through_json() {
 // A damaged or hand-edited file never loads past the caps; it's refused whole, keeping the list.
 void test_a_bad_file_is_refused_and_the_list_kept() {
     phrases::List list;
-    list.add("Keep", "me");
+    list.add("Keep", "me", false);
     TEST_ASSERT_FALSE(list.fromJson("not json"));
     TEST_ASSERT_FALSE(list.fromJson("{\"buttons\":[{\"id\":1,\"edit\":1,\"label\":\"\",\"text\":\"x\"}]}"));
     TEST_ASSERT_FALSE(list.fromJson("{\"buttons\":[{\"label\":\"a\",\"text\":\"x\"}]}"));  // no id
@@ -75,22 +77,22 @@ void test_a_bad_file_is_refused_and_the_list_kept() {
 // save and load, and a deleted id is never reused.
 void test_ids_stay_put_and_edits_count() {
     phrases::List list;
-    list.add("A", "a");
-    list.add("B", "b");
+    list.add("A", "a", false);
+    list.add("B", "b", false);
     const uint32_t idB = list.at(1).id;
     TEST_ASSERT_EQUAL_UINT32(1, list.at(1).edit);
-    list.edit(1, "B", "b2");
-    list.edit(1, "B", "b3");
+    list.edit(1, "B", "b2", false);
+    list.edit(1, "B", "b3", false);
     TEST_ASSERT_EQUAL_UINT32(3, list.at(1).edit);
     list.remove(0);
-    list.add("C", "c");
+    list.add("C", "c", false);
     TEST_ASSERT_EQUAL_UINT32(idB, list.at(0).id);
     TEST_ASSERT_NOT_EQUAL(idB, list.at(1).id);
     phrases::List back;
     TEST_ASSERT_TRUE(back.fromJson(list.toJson()));
     TEST_ASSERT_EQUAL_UINT32(idB, back.at(0).id);
     TEST_ASSERT_EQUAL_UINT32(3, back.at(0).edit);
-    back.add("D", "d");
+    back.add("D", "d", false);
     TEST_ASSERT_TRUE(back.at(2).id > list.at(1).id);
 }
 
@@ -98,14 +100,14 @@ void test_ids_stay_put_and_edits_count() {
 // "Send?"; once confirmed, taps send at once until the next edit. The confirmation is saved.
 void test_an_edited_phrase_needs_one_confirm() {
     phrases::List list;
-    list.add("Ship", "Ship it");
+    list.add("Ship", "Ship it", false);
     TEST_ASSERT_TRUE(list.needsConfirm(0));
     list.confirmed(0);
     TEST_ASSERT_FALSE(list.needsConfirm(0));
     phrases::List back;
     back.fromJson(list.toJson());
     TEST_ASSERT_FALSE(back.needsConfirm(0));
-    back.edit(0, "Ship", "Ship it now");
+    back.edit(0, "Ship", "Ship it now", false);
     TEST_ASSERT_TRUE(back.needsConfirm(0));
     back.move(0, 0);
     TEST_ASSERT_TRUE(back.needsConfirm(0));
@@ -124,8 +126,8 @@ void test_counters_never_wrap() {
     TEST_ASSERT_EQUAL(0, list.size());
 
     TEST_ASSERT_TRUE(list.fromJson("{\"next\":" + top + ",\"buttons\":[{\"id\":1,\"edit\":" + top + ",\"label\":\"a\",\"text\":\"x\"}]}"));
-    TEST_ASSERT_FALSE(list.add("b", "y"));
-    TEST_ASSERT_FALSE(list.edit(0, "a", "z"));
+    TEST_ASSERT_FALSE(list.add("b", "y", false));
+    TEST_ASSERT_FALSE(list.edit(0, "a", "z", false));
     TEST_ASSERT_EQUAL_STRING("x", list.at(0).text.c_str());
 }
 
@@ -133,13 +135,13 @@ void test_counters_never_wrap() {
 // the confirm finds nothing and nothing is sent.
 void test_a_confirm_finds_only_the_edit_it_showed() {
     phrases::List list;
-    list.add("A", "a");
-    list.add("B", "b");
+    list.add("A", "a", false);
+    list.add("B", "b", false);
     const phrases::Button shown = list.at(1);
     TEST_ASSERT_EQUAL(1, list.find(shown.id, shown.edit));
     list.move(1, 0);
     TEST_ASSERT_EQUAL(0, list.find(shown.id, shown.edit));
-    list.edit(0, "B", "b2");
+    list.edit(0, "B", "b2", false);
     TEST_ASSERT_EQUAL(list.size(), list.find(shown.id, shown.edit));
     list.remove(0);
     TEST_ASSERT_EQUAL(list.size(), list.find(shown.id, shown.edit + 1));
@@ -159,13 +161,13 @@ void test_the_preview_shows_enter_and_tab_and_counts() {
 // still types it; other control bytes draw as nothing. Only Enter and Tab are allowed.
 void test_control_characters_are_refused() {
     phrases::List l;
-    TEST_ASSERT_FALSE(l.add("Hi", std::string("echo hi\0rm -rf ~", 17)));
-    TEST_ASSERT_FALSE(l.add("Hi", "esc\x1b[2J"));
-    TEST_ASSERT_FALSE(l.add("Hi", "del\x7f"));
-    TEST_ASSERT_FALSE(l.add("H\ni", "label with Enter"));
-    TEST_ASSERT_FALSE(l.add(std::string("H\0i", 3), "x"));
-    TEST_ASSERT_TRUE(l.add("Sig", "Line\nTab\there"));
-    TEST_ASSERT_FALSE(l.edit(0, "Sig", "bell\a"));
+    TEST_ASSERT_FALSE(l.add("Hi", std::string("echo hi\0rm -rf ~", 17), false));
+    TEST_ASSERT_FALSE(l.add("Hi", "esc\x1b[2J", false));
+    TEST_ASSERT_FALSE(l.add("Hi", "del\x7f", false));
+    TEST_ASSERT_FALSE(l.add("H\ni", "label with Enter", false));
+    TEST_ASSERT_FALSE(l.add(std::string("H\0i", 3), "x", false));
+    TEST_ASSERT_TRUE(l.add("Sig", "Line\nTab\there", false));
+    TEST_ASSERT_FALSE(l.edit(0, "Sig", "bell\a", false));
     TEST_ASSERT_EQUAL_STRING("Line\nTab\there", l.at(0).text.c_str());
     phrases::List loaded;
     TEST_ASSERT_FALSE(loaded.fromJson("{\"next\":2,\"buttons\":[{\"id\":1,\"edit\":1,\"label\":\"x\",\"text\":\"a\\u001bb\"}]}"));
@@ -176,7 +178,7 @@ void test_control_characters_are_refused() {
 // an edit, so the Button asks "Send?" again on the panel.
 void test_send_enter_is_saved_with_the_button_and_off_by_default() {
     phrases::List list;
-    TEST_ASSERT_TRUE(list.add("Plain", "no Enter"));
+    TEST_ASSERT_TRUE(list.add("Plain", "no Enter", false));
     TEST_ASSERT_TRUE(list.add("Go", "submit me", true));
     TEST_ASSERT_FALSE(list.at(0).enter);
     TEST_ASSERT_TRUE(list.at(1).enter);
@@ -190,7 +192,7 @@ void test_send_enter_is_saved_with_the_button_and_off_by_default() {
     TEST_ASSERT_TRUE(back.at(0).enter);
     TEST_ASSERT_EQUAL_UINT32(2, back.at(0).edit);
     TEST_ASSERT_TRUE(back.needsConfirm(0));
-    TEST_ASSERT_TRUE(back.edit(1, "Go", "submit me"));  // an edit without the choice turns it off
+    TEST_ASSERT_TRUE(back.edit(1, "Go", "submit me", false));  // an edit with the choice off turns it off
     TEST_ASSERT_FALSE(back.at(1).enter);
 
     phrases::List old;  // saved before #171
@@ -202,14 +204,33 @@ void test_send_enter_is_saved_with_the_button_and_off_by_default() {
 // break after it, since nothing is typed after the Enter.
 void test_the_preview_shows_the_final_enter_when_it_is_on() {
     phrases::List l;
-    l.add("Plain", "Hi\nthere");
+    l.add("Plain", "Hi\nthere", false);
     l.add("Go", "Hi\nthere", true);
     TEST_ASSERT_EQUAL_STRING("Hi<NL>\nthere", phrases::preview(l.at(0), "<NL>", "<TAB>").c_str());
     TEST_ASSERT_EQUAL_STRING("Hi<NL>\nthere<NL>", phrases::preview(l.at(1), "<NL>", "<TAB>").c_str());
 }
 
+// Review of #172: add and edit take the Send Enter choice with no default, so no caller can drop it
+// by leaving it out (an edit that forgot it would turn Send Enter off).
+template <typename L, typename = void>
+struct editWithoutEnter : std::false_type {};
+template <typename L>
+struct editWithoutEnter<L, std::void_t<decltype(std::declval<L&>().edit(0, std::string(), std::string()))>>
+    : std::true_type {};
+template <typename L, typename = void>
+struct addWithoutEnter : std::false_type {};
+template <typename L>
+struct addWithoutEnter<L, std::void_t<decltype(std::declval<L&>().add(std::string(), std::string()))>>
+    : std::true_type {};
+
+void test_add_and_edit_need_the_send_enter_choice() {
+    TEST_ASSERT_FALSE(editWithoutEnter<phrases::List>::value);
+    TEST_ASSERT_FALSE(addWithoutEnter<phrases::List>::value);
+}
+
 int main() {
     UNITY_BEGIN();
+    RUN_TEST(test_add_and_edit_need_the_send_enter_choice);
     RUN_TEST(test_the_preview_shows_the_final_enter_when_it_is_on);
     RUN_TEST(test_send_enter_is_saved_with_the_button_and_off_by_default);
     RUN_TEST(test_buttons_can_be_added_edited_moved_and_deleted);

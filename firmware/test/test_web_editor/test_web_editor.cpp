@@ -12,15 +12,15 @@ using web::Edit;
 
 phrases::List twoButtons() {
     phrases::List l;
-    l.add("Hello", "Hello there");
-    l.add("Bye", "Goodbye");
+    l.add("Hello", "Hello there", false);
+    l.add("Bye", "Goodbye", false);
     return l;
 }
 
 // The page shows labels and Phrases as text, never as markup (XSS, #98 AppSec).
 void test_labels_and_phrases_are_escaped_on_the_page() {
     phrases::List l;
-    l.add("<b>x</b>", "a\"b'c&d<script>alert(1)</script>");
+    l.add("<b>x</b>", "a\"b'c&d<script>alert(1)</script>", false);
     const std::string page = web::editorPage(l);
     TEST_ASSERT_TRUE(page.find("<script>") == std::string::npos);
     TEST_ASSERT_TRUE(page.find("<b>x</b>") == std::string::npos);
@@ -31,7 +31,7 @@ void test_labels_and_phrases_are_escaped_on_the_page() {
 // Eric (#98): the editor shows each Enter as ↵.
 void test_the_page_shows_enter_as_a_mark() {
     phrases::List l;
-    l.add("Sig", "Thanks\nEric");
+    l.add("Sig", "Thanks\nEric", false);
     TEST_ASSERT_TRUE(web::editorPage(l).find("Thanks\xE2\x86\xB5\nEric") != std::string::npos);
 }
 
@@ -115,7 +115,7 @@ void test_the_send_enter_checkbox_parses_and_applies() {
 // The list shows which Buttons press Enter, and each form's checkbox starts as the Button has it.
 void test_the_page_shows_which_buttons_send_enter() {
     phrases::List l;
-    l.add("Plain", "no Enter");
+    l.add("Plain", "no Enter", false);
     l.add("Go", "submit", true);
     TEST_ASSERT_TRUE(web::editorButton(l.at(0)).find("<summary>Plain</summary>") != std::string::npos);
     TEST_ASSERT_TRUE(web::editorButton(l.at(0)).find("<input type=checkbox name=enter value=yes>") != std::string::npos);

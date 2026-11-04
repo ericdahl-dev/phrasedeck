@@ -30,9 +30,9 @@ class List {
     const Button& at(size_t i) const { return buttons_[i]; }
 
     // add and edit refuse anything over the caps, or an empty label or Phrase, and then change nothing.
-    // enter is the Button's Send Enter choice; edit sets it too, so leaving it out turns it off.
-    bool add(const std::string& label, const std::string& text, bool enter = false);
-    bool edit(size_t i, const std::string& label, const std::string& text, bool enter = false);
+    // enter is the Button's Send Enter choice, with no default, so a caller never drops it by accident.
+    bool add(const std::string& label, const std::string& text, bool enter);
+    bool edit(size_t i, const std::string& label, const std::string& text, bool enter);
     bool remove(size_t i);
     bool move(size_t from, size_t to);  // to is the index it ends up at
     // Removes every Button but keeps the id counter, so a Button added after has a new id.

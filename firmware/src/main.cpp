@@ -390,7 +390,7 @@ void loadPhrases() {
         LittleFS.rename(kPhrasesFile, "/phrases.bad");
         Serial.println("phrasedeck panel: saved Buttons didn't load, kept as /phrases.bad; using the starter Buttons");
     }
-    for (const char* p : kStarterPhrases) g_phrases.add(p, p);
+    for (const char* p : kStarterPhrases) g_phrases.add(p, p, false);
     for (size_t i = 0; i < g_phrases.size(); ++i) g_phrases.confirmed(i);
     if (!savePhrases()) web_server::publish(g_phrases.toJson());  // the page still shows them
 }
@@ -1133,7 +1133,7 @@ void serialCommands() {
             if (p.begin("admin", false, panel_store::kPartition)) p.clear();
             Serial.println("clearpw: done, reboot to load");
         } else if (line.rfind("add ", 0) == 0) {  // a Button, as the web page would add it
-            const bool ok = g_phrases.add(line.substr(4), line.substr(4)) && savePhrases();
+            const bool ok = g_phrases.add(line.substr(4), line.substr(4), false) && savePhrases();
             if (ok) rebuildGrid();
             Serial.printf("add: %s\n", ok ? "added" : "refused");
         } else if (line.rfind("remove ", 0) == 0) {

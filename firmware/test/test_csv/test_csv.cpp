@@ -27,11 +27,11 @@ std::string exported(const phrases::List& l) {
 // Eric (#164): export, edit in a spreadsheet, import back. Nothing a Phrase can hold is lost.
 void test_export_then_import_gives_back_the_same_buttons() {
     phrases::List l;
-    l.add("Plain", "Hello there");
-    l.add("Comma, \"quote\"", "a,b \"c\" d");
-    l.add("Sig", "Thanks\nEric\n");
-    l.add("Tab", "col1\tcol2");
-    l.add("Caf\xC3\xA9", "\xE2\x9C\x93 done, na\xC3\xAFve");
+    l.add("Plain", "Hello there", false);
+    l.add("Comma, \"quote\"", "a,b \"c\" d", false);
+    l.add("Sig", "Thanks\nEric\n", false);
+    l.add("Tab", "col1\tcol2", false);
+    l.add("Caf\xC3\xA9", "\xE2\x9C\x93 done, na\xC3\xAFve", false);
     l.add("Go", "submit me", true);
     const std::string csv = exported(l);
     phrases::List back;
@@ -67,8 +67,8 @@ void test_the_enter_column_imports_and_old_files_still_do() {
 // BOM first, or Excel opens the file as Windows-1252 and garbles every é.
 void test_the_export_is_rfc_4180() {
     phrases::List l;
-    l.add("A", "plain");
-    l.add("B, c", "say \"hi\"\nthen go");
+    l.add("A", "plain", false);
+    l.add("B, c", "say \"hi\"\nthen go", false);
     l.add("C", "submit", true);
     TEST_ASSERT_EQUAL_STRING("\xEF\xBB\xBFlabel,phrase,enter\r\nA,plain,no\r\n\"B, c\",\"say \"\"hi\"\"\nthen go\",no\r\nC,submit,yes\r\n",
                              exported(l).c_str());
@@ -99,8 +99,8 @@ void test_a_crlf_inside_a_phrase_becomes_lf() {
 
 phrases::List twoButtons() {
     phrases::List l;
-    l.add("Hello", "Hello there");
-    l.add("Bye", "Goodbye");
+    l.add("Hello", "Hello there", false);
+    l.add("Bye", "Goodbye", false);
     return l;
 }
 
@@ -111,7 +111,10 @@ void refusedAt(const std::string& csv, const char* row, Import::Mode mode = Impo
     std::string error;
     TEST_ASSERT_FALSE_MESSAGE(importInto(l, {mode, csv}, error), csv.c_str());
     TEST_ASSERT_EQUAL_STRING(before.c_str(), l.toJson().c_str());
-    TEST_ASSERT_TRUE_MESSAGE(error.find(row) != std::string::npos, error.c_str());
+    // "Row 2" must be the row the error starts with, not the start of "Row 20".
+    const std::string want(row);
+    const bool found = want.rfind("Row ", 0) == 0 ? error.rfind(want + " ", 0) == 0 : error.find(want) != std::string::npos;
+    TEST_ASSERT_TRUE_MESSAGE(found, error.c_str());
 }
 
 void test_a_file_without_the_header_changes_nothing() {

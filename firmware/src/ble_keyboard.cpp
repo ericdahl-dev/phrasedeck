@@ -17,6 +17,7 @@
 #include <set>
 #include <vector>
 
+#include "ble_params.h"
 #include "bt_pairing.h"
 #include "panel_store.h"
 
@@ -193,27 +194,29 @@ class DeviceCallbacks : public BLEDeviceCallbacks {
       (PANEL_BLE_CONN_MIN >= 9 && PANEL_BLE_CONN_MIN + 12 <= PANEL_BLE_CONN_MAX))
 #warning "PANEL_BLE_CONN_MIN/MAX break Apple's connection parameter rules: test with Linux or Windows only"
 #endif
-// 2 s, in 10 ms units: Apple's minimum. The timeout is how long a stalled link can hold a key down
-// before the host drops it and its keys; longer would let a stall run into the host's auto-repeat
-// (BlueZ's own default is 420 ms, which this replaces, so keep it at the shortest every host takes).
-constexpr uint16_t kSupervisionTimeout = 200;
-
-// Asks for a short interval, unless the host already gave one at least that short (a Mac at
-// 11.25 ms mustn't be slowed to 15). The host may refuse or pick another; onConnParamsUpdate logs it.
+// Asks for a short interval and the 2 s supervision timeout, unless the host already has both
+// (ble_params::shouldRequest). The host may refuse or pick another; onConnParamsUpdate logs it.
 void requestFastInterval(uint16_t handle) {
     ble_gap_conn_desc d;
-    if (ble_gap_conn_find(handle, &d) == 0 && d.conn_itvl <= PANEL_BLE_CONN_MAX) {
+    const bool found = ble_gap_conn_find(handle, &d) == 0;
+    if (found && !ble_params::shouldRequest(d.conn_itvl, d.supervision_timeout, PANEL_BLE_CONN_MAX)) {
 #ifdef PANEL_BLE_DEBUG
-        Serial.printf("ble: connection interval %u.%02u ms already, no request\n", d.conn_itvl * 125 / 100,
-                      d.conn_itvl * 125 % 100);
+        Serial.printf("ble: connection interval %u.%02u ms, timeout %u ms already, no request\n",
+                      d.conn_itvl * 125 / 100, d.conn_itvl * 125 % 100, d.supervision_timeout * 10u);
 #endif
         return;
     }
+#ifdef PANEL_BLE_DEBUG
+    if (found) {
+        Serial.printf("ble: connection interval %u.%02u ms, timeout %u ms: requesting new parameters\n",
+                      d.conn_itvl * 125 / 100, d.conn_itvl * 125 % 100, d.supervision_timeout * 10u);
+    }
+#endif
     ble_gap_upd_params params{};
     params.itvl_min = PANEL_BLE_CONN_MIN;
     params.itvl_max = PANEL_BLE_CONN_MAX;
     params.latency = 0;
-    params.supervision_timeout = kSupervisionTimeout;
+    params.supervision_timeout = ble_params::kSupervisionTimeout;
     const int rc = ble_gap_update_params(handle, &params);
     if (rc != 0) log_w("connection parameter request failed: %d", rc);
 }

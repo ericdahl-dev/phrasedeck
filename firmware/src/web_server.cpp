@@ -347,8 +347,8 @@ esp_err_t getCsv(httpd_req_t* req) {
     json.clear();
     json.shrink_to_fit();
     httpd_resp_set_status(req, "200 OK");
-    httpd_resp_set_type(req, "text/csv; charset=utf-8");
-    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"phrasedeck-buttons.csv\"");
+    httpd_resp_set_type(req, web::kCsvContentType);
+    httpd_resp_set_hdr(req, "Content-Disposition", web::kCsvDisposition);
     securityHeaders(req);
     Serial.printf("web: GET %s 200 OK (%u Buttons)\n", req->uri, static_cast<unsigned>(list.size()));
     const auto chunk = [req](const std::string& s) { return httpd_resp_send_chunk(req, s.data(), s.size()) == ESP_OK; };

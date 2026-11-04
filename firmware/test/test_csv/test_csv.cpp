@@ -226,8 +226,16 @@ void test_a_malformed_import_form_is_refused() {
     TEST_ASSERT_FALSE(web::importFrom(kType, "", im));
 }
 
+// #168: the export opens in the tab as text, since Chrome won't download over a self-signed
+// certificate. The name still applies when the user saves it.
+void test_the_export_opens_in_the_tab_as_text() {
+    TEST_ASSERT_EQUAL_STRING("text/plain; charset=utf-8", web::kCsvContentType);
+    TEST_ASSERT_EQUAL_STRING("inline; filename=\"phrasedeck-buttons.csv\"", web::kCsvDisposition);
+}
+
 int main() {
     UNITY_BEGIN();
+    RUN_TEST(test_the_export_opens_in_the_tab_as_text);
     RUN_TEST(test_blank_and_empty_rows_are_skipped_anywhere);
     RUN_TEST(test_an_import_form_parses_to_an_import);
     RUN_TEST(test_the_largest_export_fits_the_import_cap);

@@ -32,12 +32,29 @@ def make_private(cache_dir):
         os.chmod(cache_dir, 0o700)
 
 
-def apply(env):
-    make_private(env.subst("$BUILD_CACHE_DIR"))
+def lib_builder_classes():
     # SCons loads PlatformIO's piolib tool from its toolpath under its own module name, so find
     # the class wherever it was loaded rather than importing platformio.builder.tools.piolib.
-    classes = {getattr(m, "LibBuilderBase", None) for m in list(sys.modules.values())}
-    classes = [c for c in classes if isinstance(c, type) and isinstance(getattr(c, "build_dir", None), property)]
+    classes = set()
+    for m in list(sys.modules.values()):
+        try:
+            c = getattr(m, "LibBuilderBase", None)
+        except Exception:  # a lazy module can raise anything on attribute access
+            continue
+        if isinstance(c, type) and isinstance(getattr(c, "build_dir", None), property):
+            classes.add(c)
+    return classes
+
+
+def apply(env):
+    make_private(env.subst("$BUILD_CACHE_DIR"))
+    # With build_cache_dir set, PlatformIO also moves the SCons database (.sconsign) into the
+    # cache, so every checkout would share one record of what it last built, keyed by the path in
+    # the project. A checkout could then keep a stale object after another built its new sources
+    # first, and two builds at once would both write it. Each build dir keeps its own; only the
+    # objects are shared.
+    env.SConsignFile(os.path.join(env.subst("$BUILD_DIR"), ".sconsign%d%d" % sys.version_info[:2]))
+    classes = lib_builder_classes()
     if not classes:
         # A PlatformIO update changed this: builds stay correct, worktrees just share less.
         print("build_cache: no LibBuilderBase.build_dir in PlatformIO; libraries not shared")

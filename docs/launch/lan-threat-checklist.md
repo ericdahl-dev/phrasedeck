@@ -129,6 +129,18 @@ listener (47812) and the app's choice of route.
       which is compiled into the firmware. It is not a hand-off wipe: before the panel leaves the house, erase the whole
       flash over USB (`pio run -t erase`). After any reset, `phrased devices` and `phrased revoke`
       the old panel: the Helper still accepts its Token until then.
+- [ ] The panel's own network (#165): when the panel can't join its Wi-Fi within 30 s (or the build
+      has none), it runs a WPA2 network `Phrasedeck-XXXX` for at most 2 clients. It carries only
+      the web editor (HTTPS on 443, the same admin password, session and lockout): no `phrased`
+      traffic, no mDNS (it runs only on the panel's Wi-Fi, after this network stops), no DNS, no
+      captive portal. The Host and Origin checks accept `192.168.4.1` only while it's up. Its
+      password is random (12 characters, 60 bits), made on the panel, kept in the panel NVS, shown
+      on the screen and never logged; anyone who can see the screen can join, as anyone who can
+      touch it can type. A factory reset makes a new one. The Wi-Fi driver also keeps a copy in the
+      default NVS, which the reset erases too. Known limitation: on the very first start the radio
+      may beacon its default open network for a moment before the WPA2 settings apply (Arduino
+      enables the AP before it sets its config). A client that joined in that moment would reach
+      only the same HTTPS editor behind the admin password, and is dropped when the config applies.
 - [ ] Bluetooth Mode (#94): the 2-minute pairing window (Settings, behind the admin password)
       trusts whoever types the shown passkey first, and replaces the paired Computer. If yours
       didn't connect, someone nearby may have: open pairing again. Done closes the window early.

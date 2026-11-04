@@ -24,7 +24,11 @@ struct Snapshot {
     bool maybe = false;       // the last Send was Maybe typed (never over Bluetooth)
     bool wifiConfigured = false;
     bool wifiUp = false;
-    std::string ip;
+    std::string ip;       // on the panel's Wi-Fi; empty when not joined
+    // The panel's own network (#165), up while it can't join its Wi-Fi: only the web editor, at
+    // https://192.168.4.1/. The password is for the screen; it's never logged.
+    bool ownNetwork = false;
+    std::string ownName, ownPassword;
     std::vector<Helper> nearby;
     unsigned version = 0;  // bumps on every change
     // The Bluetooth keyboard Mode (#94). These are read live, so they're current in any snapshot.
@@ -34,8 +38,9 @@ struct Snapshot {
     int32_t passkey = -1;       // to show while a Computer pairs, or -1
 };
 
-// Starts the task. Does nothing but report "not configured" when the build has no Wi-Fi.
-// False if the task or its lock couldn't be created.
+// Starts the task. Without Wi-Fi in the build, or once the Wi-Fi hasn't joined for 30 s, it
+// starts the panel's own network, and keeps trying the Wi-Fi. False if the task or its lock
+// couldn't be created.
 bool start();
 
 // Bumps on every change; cheap to poll before taking a snapshot.

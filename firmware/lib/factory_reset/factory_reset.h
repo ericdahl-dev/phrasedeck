@@ -1,5 +1,6 @@
 // Factory reset (#98): a finger on the top-left corner from power-on, held 10 s, erases the panel's
-// admin password, lockouts, web key and cert, pairing and Buttons. Needs hands on the panel, like USB.
+// admin password, lockouts, web key and cert, pairing, own network password (#165) and Buttons.
+// Needs hands on the panel, like USB.
 #pragma once
 
 #include <cstdint>

@@ -21,6 +21,7 @@
 #include "display_driver.h"
 #include "factory_reset.h"
 #include "net.h"
+#include "own_network.h"
 #include "panel_store.h"
 #include "pairing.h"
 #include "panel_mcu.h"
@@ -91,6 +92,34 @@ lv_obj_t* g_bt_pair = nullptr;  // the Bluetooth pairing screen
 void btPairShow(const net::Snapshot& s);
 void sendResult(const net::Snapshot& s);
 
+// The panel's own network (#165): a bar along the bottom with its name, password and the editor's
+// address, while it's up. Over the Buttons' lower edge, under any overlay.
+lv_obj_t* g_own = nullptr;
+
+void showOwnNetwork(const net::Snapshot& s) {
+    if (!s.ownNetwork) {
+        if (g_own != nullptr) lv_obj_delete(g_own);
+        g_own = nullptr;
+        return;
+    }
+    if (g_own == nullptr) {
+        g_own = lv_label_create(lv_screen_active());
+        lv_obj_set_width(g_own, board::LCD_WIDTH);
+        lv_label_set_long_mode(g_own, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_pad_hor(g_own, 16, 0);
+        lv_obj_set_style_pad_ver(g_own, 6, 0);
+        lv_obj_set_style_bg_opa(g_own, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(g_own, lv_color_hex(0x1C2026), 0);
+        lv_obj_align(g_own, LV_ALIGN_BOTTOM_MID, 0, -24);  // above the Page dots
+        lv_obj_move_background(g_own);
+        lv_obj_move_background(g_tiles);  // so the Buttons are under it, and the overlays above
+    }
+    std::string text = "Wi-Fi " + s.ownName + "   Password " + s.ownPassword + "   Editor https://" +
+                       own_network::kAddress + "/";
+    if (!s.bluetooth) text += "\nNo Sends until the panel is back on its Wi-Fi.";
+    lv_label_set_text(g_own, text.c_str());
+}
+
 // Shows Wi-Fi and the paired Computer; runs on the LVGL loop, reading the net task's snapshot.
 // Nearby Computers are listed on the Pair screen, not here.
 void showNet() {
@@ -101,6 +130,8 @@ void showNet() {
     std::string text = LV_SYMBOL_WIFI " ";
     if (s.bluetooth) {
         text = LV_SYMBOL_BLUETOOTH " " + std::string(bt_pairing::status(s.bleReady, s.blePairing));
+    } else if (s.ownNetwork) {
+        text += "Own network";
     } else if (!s.wifiConfigured) {
         text += "Not set up";
     } else if (!s.wifiUp) {
@@ -109,6 +140,7 @@ void showNet() {
         text += s.paired.empty() ? "Not paired" : s.paired;
     }
     lv_label_set_text(g_net, text.c_str());
+    showOwnNetwork(s);
     if (g_bt_pair != nullptr) btPairShow(s);
     if (s.messageSeq != g_message_seq) {
         g_message_seq = s.messageSeq;
@@ -603,15 +635,19 @@ lv_obj_t* tabText(lv_obj_t* tab, const char* text) {
 // The web editor's address, as text and a QR code for a phone camera.
 void webEditorInfo(lv_obj_t* parent) {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
-    const std::string ip = net::snapshot().ip;
-    if (ip.empty()) {
+    const net::Snapshot s = net::snapshot();
+    if (s.ip.empty() && !s.ownNetwork) {
         tabText(parent, "Connect the panel to Wi-Fi to edit its Buttons from a browser.");
         return;
     }
-    const std::string url = "https://" + ip + "/";
+    const std::string url = "https://" + (s.ip.empty() ? std::string(own_network::kAddress) : s.ip) + "/";
+    // On its own network (#165), the browser joins that first.
+    const std::string where = s.ip.empty() ? "on the panel's own Wi-Fi network " + s.ownName + " (password " +
+                                                 s.ownPassword + ")"
+                                           : std::string("on your home network");
     std::string fp = web_server::fingerprint();
     if (fp.size() == 95) fp.insert(48, "\n");  // two lines of 16 bytes
-    tabText(parent, ("Open " + url + " in a browser on your home network and log in with the admin password.\n"
+    tabText(parent, ("Open " + url + " in a browser " + where + " and log in with the admin password.\n"
                      "The browser warns about the certificate. Its SHA-256 fingerprint must be this; if not, don't log in:\n" +
                      (fp.empty() ? std::string("(still being made: open this again in a moment)") : fp)).c_str());
     lv_obj_t* qr = lv_qrcode_create(parent);
@@ -968,8 +1004,8 @@ void applyWebImport() {
 }
 
 // A finger on the top-left corner at power-on: count down on screen, and after 10 s erase the
-// panel NVS (admin password, lockouts, web key and cert, pairing, Mode), the saved Buttons and the
-// default NVS (Bluetooth bonds, so the last owner's Computer can't reconnect).
+// panel NVS (admin password, lockouts, web key and cert, pairing, Mode, own network password), the
+// saved Buttons and the default NVS (Bluetooth bonds, so the last owner's Computer can't reconnect).
 void factoryResetIfHeld() {
     using factory_reset::Hold;
     auto inCorner = [] { return factory_reset::check(touch_pressed(), touch_x(), touch_y(), 0) == Hold::Holding; };
@@ -994,7 +1030,8 @@ void factoryResetIfHeld() {
     if (hold == Hold::Reset) {
         lv_label_set_text(label, "Erasing...");
         lv_timer_handler();
-        // The default NVS holds the Bluetooth bonds; nothing in it is needed (Wi-Fi is compiled in).
+        // The default NVS holds the Bluetooth bonds and the Wi-Fi driver's copy of its settings, the own
+        // network's password included; nothing in it is needed (Wi-Fi is compiled in).
         const bool nvs = panel_store::erase() && nvs_flash_erase() == ESP_OK && nvs_flash_init() == ESP_OK;
         // The whole Buttons partition, not LittleFS.format(): that only rewrites the superblock.
         // loadPhrases() then makes a fresh filesystem.

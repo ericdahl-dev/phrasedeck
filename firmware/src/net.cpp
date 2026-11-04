@@ -5,6 +5,9 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <esp_mac.h>
+#include <esp_random.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
@@ -14,6 +17,7 @@
 #include "ble_keyboard.h"
 #include "helper_client.h"
 #include "hid_keys.h"
+#include "own_network.h"
 #include "pairing.h"
 #include "panel_store.h"
 #include "send.h"
@@ -149,6 +153,10 @@ void handleType(const Request& req, Snapshot& s) {
         s.message = "Not typed: pair with a Computer first";
         return;
     }
+    if (!s.wifiUp) {  // on its own network, or still joining: phrased is only reachable over the Wi-Fi
+        s.message = "Not typed: the panel isn't on its Wi-Fi";
+        return;
+    }
     // A paired Computer is found again by its Pin in Bonjour, since its address can change.
     std::string address = g_pairing.address;
     int port = g_pairing.port;
@@ -217,6 +225,70 @@ void handleBluetoothType(const Request& req, Snapshot& s) {
     s.ok = r.ok;
 }
 
+// The panel's own network (#165). Only the web editor answers on it: phrased isn't reachable,
+// mDNS runs only on the panel's Wi-Fi (it starts after this network stops), and there's no DNS
+// server or captive portal. The password stays in the panel NVS, so a factory reset makes a new one.
+std::string ownPassword() {
+    const own_network::Store store{
+        [] {
+            Preferences p;
+            if (!p.begin("ownnet", true, panel_store::kPartition)) return std::string();
+            const std::string pw = p.getString("password", "").c_str();
+            p.end();
+            return pw;
+        },
+        [](const std::string& pw) {
+            Preferences p;
+            if (!p.begin("ownnet", false, panel_store::kPartition)) return false;
+            const bool ok = p.putString("password", pw.c_str()) == pw.size();
+            p.end();
+            return ok;
+        }};
+    // The radio is on (STA started in run), so the hardware RNG has RF entropy.
+    return own_network::loadOrMakePassword(store, [](uint8_t* out, size_t len) { esp_fill_random(out, len); });
+}
+
+bool startOwnNetwork(Snapshot& s) {
+    const std::string pw = ownPassword();
+    if (pw.empty()) {
+        Serial.println("net: own network: no password saved (panel NVS), not started");
+        return false;
+    }
+    uint8_t mac[6];
+    if (esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP) != ESP_OK) return false;
+    const std::string name = own_network::name(mac);
+    // Retried on our own schedule (retryDue): a reconnect loop would scan every channel nonstop.
+    WiFi.setAutoReconnect(false);
+    WiFi.disconnect();
+    IPAddress ip;
+    ip.fromString(own_network::kAddress);
+    // WPA2, at most 2 clients (the web server's 2 sockets); no DNS offered over DHCP (dns 0).
+    if (!WiFi.softAP(name.c_str(), pw.c_str(), 1, 0, 2, false, WIFI_AUTH_WPA2_PSK, WIFI_CIPHER_TYPE_CCMP) ||
+        !WiFi.softAPConfig(ip, ip, IPAddress(255, 255, 255, 0), IPAddress(), IPAddress())) {
+        Serial.println("net: own network didn't start");
+        WiFi.enableAP(false);
+        WiFi.setAutoReconnect(true);
+        if (s.wifiConfigured) WiFi.begin(WIFI_SSID, WIFI_PASSWORD);  // disconnect() above stopped the tries
+        return false;
+    }
+    s.ownNetwork = true;
+    s.ownName = name;
+    s.ownPassword = pw;
+    Serial.printf("net: own network %s up, editor at https://%s/\n", name.c_str(), own_network::kAddress);  // never the password
+    return true;
+}
+
+void stopOwnNetwork(Snapshot& s) {
+    WiFi.enableAP(false);
+    WiFi.setAutoReconnect(true);
+    s.ownNetwork = false;
+    s.ownName.clear();
+    s.ownPassword.clear();
+    Serial.println("net: own network stopped");
+}
+
+uint64_t nowMs() { return esp_timer_get_time() / 1000; }
+
 void handleRequests(Snapshot& s, TickType_t wait) {
     Request* req = nullptr;
     while (xQueueReceive(g_requests, &req, wait) == pdTRUE) {
@@ -242,20 +314,36 @@ void run(void*) {
         Serial.println("net: Bluetooth didn't start");
     }
     publish(s);
-    if (!s.wifiConfigured) {
-        Serial.println("net: no Wi-Fi in this build");
-        if (g_bluetooth) {
-            for (;;) handleRequests(s, portMAX_DELAY);
-        }
-        vTaskDelete(nullptr);
-        return;
-    }
+    // STA even without Wi-Fi in the build: the radio on gives the RNG entropy for the own network.
     WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    if (s.wifiConfigured) {
+        WiFi.setAutoReconnect(true);
+        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    } else {
+        Serial.println("net: no Wi-Fi in this build");
+    }
     bool mdns = false;
+    own_network::Decision own;
+    uint64_t triedMs = 0, failedMs = 0;
+    bool failed = false;
     for (;;) {
-        const bool up = WiFi.status() == WL_CONNECTED;
+        const bool up = s.wifiConfigured && WiFi.status() == WL_CONNECTED;
+        const uint64_t now = nowMs();
+        // Before mDNS below: the own network stops before mDNS starts, so they never share a radio.
+        const bool wanted = own.wanted(s.wifiConfigured, up, now);
+        if (wanted && !s.ownNetwork && (!failed || now - failedMs >= 10000)) {
+            failed = !startOwnNetwork(s);
+            failedMs = triedMs = now;
+            if (!failed) publish(s);
+        } else if (!wanted && s.ownNetwork) {
+            stopOwnNetwork(s);
+            publish(s);
+        }
+        if (s.ownNetwork && s.wifiConfigured && own_network::retryDue(now, triedMs, WiFi.softAPgetStationNum())) {
+            triedMs = now;
+            Serial.println("net: trying the Wi-Fi again");
+            WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        }
         if (up != s.wifiUp) {
             s.wifiUp = up;
             s.ip = up ? WiFi.localIP().toString().c_str() : "";
@@ -312,8 +400,8 @@ Snapshot snapshot() {
 namespace {
 
 bool enqueue(Request* req) {
-    // No Wi-Fi in this build and no Bluetooth: the net task is gone, so nothing would answer.
-    if ((sizeof(WIFI_SSID) > 1 || g_bluetooth) && g_requests != nullptr && xQueueSend(g_requests, &req, 0) == pdTRUE) return true;
+    // The net task runs in every build now (it runs the own network), so something always answers.
+    if (g_requests != nullptr && xQueueSend(g_requests, &req, 0) == pdTRUE) return true;
     delete req;
     return false;
 }

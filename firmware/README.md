@@ -20,6 +20,27 @@ Wi-Fi comes from `~/.config/phrasedeck/panel-wifi.ini` (or `PHRASEDECK_WIFI_INI`
 section with `ssid` and `password`, read at build time by `wifi_secrets.py`. Without it the panel
 skips Wi-Fi.
 
+## The panel's own network (#165)
+
+If the panel can't join its Wi-Fi within 30 s of boot, or the build has no Wi-Fi, it starts its
+own WPA2 network, `Phrasedeck-XXXX` (the last 4 hex digits of its MAC), for at most 2 clients. The
+password is made on the panel the first time and kept in the panel NVS; a factory reset makes a new
+one. The screen shows the name, the password and the web editor's address, `https://192.168.4.1/`.
+Only the web editor answers on it (HTTPS on 443): no `phrased`, no mDNS, no DNS, no captive portal.
+Sends in Wi-Fi Mode need the panel's Wi-Fi; Bluetooth Mode works as usual.
+
+The panel keeps trying its Wi-Fi: once a minute, or every 5 minutes while someone is on its
+network (each try scans every channel and stalls the network for a few seconds). Once it joins,
+its own network stops.
+
+To try it, build without Wi-Fi (the network starts at once), or with a network that isn't there
+(it starts after 30 s, and the panel keeps trying):
+
+```sh
+PHRASEDECK_WIFI_INI=/nonexistent pio run -e crowpanel
+PHRASEDECK_WIFI_INI=/path/to/wrong-wifi.ini pio run -e crowpanel   # [wifi] ssid = nowhere, password = whatever123
+```
+
 ## Build and flash
 
 PlatformIO (`uv tool install platformio`), with the board on USB-C (a CH340 serial bridge):

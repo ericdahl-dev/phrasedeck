@@ -14,6 +14,7 @@
 #include <mbedtls/x509_crt.h>
 
 #include "admin.h"
+#include "own_network.h"
 #include "panel_store.h"
 #include "phrases.h"
 #include "web.h"
@@ -151,8 +152,15 @@ const char* kLoginForm =
     "<form method=post action=/login><p><label>Admin password<br><input type=password name=password "
     "autocomplete=current-password required></label></p><p><button>Log in</button></p></form>";
 
-// Read per request, so a new DHCP lease doesn't lock the browser out until a reboot.
-std::string ip() { return WiFi.localIP().toString().c_str(); }
+// The panel's own network (#165) is the only AP the panel runs.
+bool ownNetworkUp() { return (WiFi.getMode() & WIFI_MODE_AP) != 0; }
+
+// Read per request, so a new DHCP lease doesn't lock the browser out until a reboot. 192.168.4.1
+// only while the panel's own network is up (own_network::editorAddress).
+std::string ip() {
+    const bool joined = WiFi.status() == WL_CONNECTED;
+    return own_network::editorAddress(joined ? WiFi.localIP().toString().c_str() : "", ownNetworkUp());
+}
 
 bool hostOk(httpd_req_t* req) { return web::hostAllowed(header(req, "Host"), ip()); }
 
@@ -408,7 +416,7 @@ esp_err_t postLogout(httpd_req_t* req) {
 
 // Returns instead of deleting itself mid-way, so locals are destroyed (run deletes the task).
 void serve() {
-    while (WiFi.status() != WL_CONNECTED) vTaskDelay(pdMS_TO_TICKS(500));
+    while (WiFi.status() != WL_CONNECTED && !ownNetworkUp()) vTaskDelay(pdMS_TO_TICKS(500));
     if (!loadOrMakeCert()) {
         Serial.println("web: no key or cert, not serving");
         return;

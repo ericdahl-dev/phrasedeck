@@ -257,6 +257,7 @@ void handleBluetoothType(const Request& req, Snapshot& s) {
     }
     s.message = r.message;
     s.ok = r.ok;
+    s.maybe = r.maybe;
 }
 
 // The panel's own network (#165). Only the web editor answers on it: phrased isn't reachable,

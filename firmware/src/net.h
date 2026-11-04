@@ -21,7 +21,7 @@ struct Snapshot {
     std::string message;  // the last pairing or Send result, for the status line
     unsigned messageSeq = 0;  // bumps once per handled request, even when message repeats
     bool ok = false;          // the last request worked: paired, Typed, or Sent as keystrokes
-    bool maybe = false;       // the last Send was Maybe typed (never over Bluetooth)
+    bool maybe = false;       // the last Send was Maybe typed (over Bluetooth: it stopped partway)
     bool wifiConfigured = false;
     bool wifiUp = false;
     std::string ip;       // on the panel's Wi-Fi; empty when not joined

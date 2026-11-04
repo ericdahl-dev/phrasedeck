@@ -183,24 +183,35 @@ void test_cancel_before_the_first_key_sends_nothing() {
     TEST_ASSERT_EQUAL(hid_keys::Sender::Result::NotSent, s.result());
 }
 
-// The panel can't see what landed over Bluetooth, so it never says Typed (#98 UI review).
+// The panel can't see what landed over Bluetooth, so it never says Typed (#98 UI review). A Send
+// that stopped partway typed the start of the Phrase, so tapping again would type it twice: it's
+// Maybe typed, not Not typed (#177).
 void test_what_the_status_line_says_after_a_bluetooth_send() {
     using R = hid_keys::Sender::Result;
     hid_keys::Said said = hid_keys::said(R::Sent);
     TEST_ASSERT_EQUAL_STRING("Sent as keystrokes", said.message.c_str());
     TEST_ASSERT_TRUE(said.ok);
+    TEST_ASSERT_FALSE(said.maybe);
 
     said = hid_keys::said(R::Stopped);
-    TEST_ASSERT_EQUAL_STRING("Stopped partway: some keystrokes were sent", said.message.c_str());
+    TEST_ASSERT_EQUAL_STRING("Maybe typed: check the Computer before tapping again", said.message.c_str());
     TEST_ASSERT_FALSE(said.ok);
+    TEST_ASSERT_TRUE(said.maybe);
 
     said = hid_keys::said(R::NotSent);
     TEST_ASSERT_EQUAL_STRING("Not sent", said.message.c_str());
     TEST_ASSERT_FALSE(said.ok);
+    TEST_ASSERT_FALSE(said.maybe);
+
+    said = hid_keys::said(R::Running);
+    TEST_ASSERT_EQUAL_STRING("Sending", said.message.c_str());
+    TEST_ASSERT_FALSE(said.ok);
+    TEST_ASSERT_FALSE(said.maybe);
 
     said = hid_keys::refused("\xc3\xa9");
     TEST_ASSERT_EQUAL_STRING("Not sent: a US keyboard can't type \xc3\xa9", said.message.c_str());
     TEST_ASSERT_FALSE(said.ok);
+    TEST_ASSERT_FALSE(said.maybe);
 }
 
 // A disconnect can't send a release, and the host drops held keys with the link anyway: drop()

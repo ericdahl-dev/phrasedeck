@@ -149,17 +149,19 @@ class Sender {
     std::atomic<uint8_t> request_{0};
 };
 
-// The status line after a Bluetooth send, and whether it's green. The panel can't see what landed,
-// so it never says Typed, and never Maybe typed either: Stopped says what it knows.
+// The status line after a Bluetooth send, and its color: green when ok, orange when maybe, red
+// otherwise. The panel can't see what landed, so it never says Typed. Stopped typed the start of
+// the Phrase, so it's Maybe typed (#177): tapping again would type that start a second time.
 struct Said {
     std::string message;
     bool ok;
+    bool maybe = false;
 };
 
 inline Said said(Sender::Result r) {
     switch (r) {
         case Sender::Result::Sent: return {"Sent as keystrokes", true};
-        case Sender::Result::Stopped: return {"Stopped partway: some keystrokes were sent", false};
+        case Sender::Result::Stopped: return {"Maybe typed: check the Computer before tapping again", false, true};
         case Sender::Result::NotSent: return {"Not sent", false};
         case Sender::Result::Running: return {"Sending", false};
     }

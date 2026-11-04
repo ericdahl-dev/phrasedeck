@@ -390,16 +390,25 @@ curl -sk https://<lan-ip>:47812/health   # -k: the app pins the certificate inst
 
 ## The panel (ESP32)
 
-The panel is an Elecrow CrowPanel Advance 7" (ESP32-S3, 800×480 touch screen), hardware V1.4. It's
-a Device: it pairs with a Helper over the Home network route, so the Helper needs `-lan`.
+The panel is an Elecrow CrowPanel Advance 7" (ESP32-S3, 800×480 touch screen), hardware V1.4. It
+types in one of two Modes, set in Settings > Mode (the panel restarts to switch):
 
-- **To pair,** run `phrased pair`, open the panel's Pair screen, pick the Nearby Computer, and enter
-  the Pairing code and the `Pin for a panel:` line that `phrased pair` prints (the panel has no
-  camera for the QR code). The panel checks the Helper's certificate against the Pin before it
-  sends anything.
-- **Today** it shows a fixed Page of Buttons; a tap sends its Phrase.
-- **In progress (#98):** the panel's own Phrase list, edited from its web page.
-- **Planned (#94):** a Bluetooth keyboard mode.
+- **Wi-Fi Mode** (the default): the panel is a Device. It pairs with a Helper over the Home network
+  route, so the Helper needs `-lan`.
+- **Bluetooth Mode:** the panel is a Bluetooth keyboard. The Computer needs no Helper, no
+  Tailscale and no network, which suits a computer you can't install those on (a work laptop).
+
+Both Modes type the panel's own Buttons, which you edit from its web page (Settings > Web editor).
+
+**Pair in Wi-Fi Mode.** Run `phrased pair`, open the panel's Pair screen, pick the Nearby Computer,
+and enter the Pairing code and the `Pin for a panel:` line that `phrased pair` prints (the panel has
+no camera for the QR code). The panel checks the Helper's certificate against the Pin before it
+sends anything.
+
+**Pair in Bluetooth Mode.** Settings > Computer > Pair a Computer opens pairing for 2 minutes.
+On the Computer, open Bluetooth settings and connect "Phrasedeck panel", then type the 6-digit
+passkey the panel shows. See [Bluetooth Mode](firmware/README.md#bluetooth-mode) for the details
+and its limits (US keyboard layout and ASCII only, one Computer at a time).
 
 Build, flash, Wi-Fi and factory restore are in [firmware/README.md](firmware/README.md).
 

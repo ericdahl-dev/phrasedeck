@@ -605,6 +605,7 @@ lv_obj_t* tabText(lv_obj_t* tab, const char* text) {
 }
 
 lv_obj_t* g_screen_note = nullptr;
+lv_obj_t* g_screen_switch = nullptr;  // while Settings is open
 
 // Rotate screen 180° (#190): saved, then turned at once, with touch. The switch toggles on release,
 // so the finger is already off the glass when everything under it moves.
@@ -632,6 +633,7 @@ void screenTab(lv_obj_t* tab) {
     lv_obj_set_size(sw, 100, 56);  // big enough for a finger
     if (display_rotated()) lv_obj_add_state(sw, LV_STATE_CHECKED);
     lv_obj_add_event_cb(sw, switchRotation, LV_EVENT_VALUE_CHANGED, nullptr);
+    g_screen_switch = sw;
     lv_obj_t* label = lv_label_create(row);
     lv_obj_set_style_text_font(label, &lv_font_montserrat_20, 0);
     lv_label_set_text(label, "Rotate screen 180°");
@@ -1205,6 +1207,10 @@ void serialCommands() {
             const bool on = !display_rotated();
             const bool saved = screen_setting::save(on);
             if (saved) display_set_rotated(on);
+            if (saved && g_settings != nullptr && g_screen_switch != nullptr) {  // the Screen tab shows it too
+                if (on) lv_obj_add_state(g_screen_switch, LV_STATE_CHECKED);
+                else lv_obj_remove_state(g_screen_switch, LV_STATE_CHECKED);
+            }
             Serial.printf("rotate: %s\n", !saved ? "couldn't save" : on ? "on" : "off");
         } else if (line == "flush") {  // time spent flushing since the last "flush" (#170, #190)
             uint32_t n = 0;

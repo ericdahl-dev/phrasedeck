@@ -21,7 +21,6 @@ inline Point touch(int x, int y, int width, int height, bool rotated) {
     return {width - 1 - x, height - 1 - y};
 }
 
-// Where the choice is kept: the panel NVS on the panel, so a factory reset turns it off.
 struct Area {
     int x1, y1, x2, y2;  // inclusive, as LVGL's lv_area_t
 };
@@ -37,6 +36,7 @@ inline Area flush(const Area& a, uint16_t* px, int width, int height, bool rotat
     return {width - 1 - a.x2, height - 1 - a.y2, width - 1 - a.x1, height - 1 - a.y1};
 }
 
+// Where the choice is kept: the panel NVS on the panel, so a factory reset turns it off.
 struct Store {
     std::function<int()> get;         // the saved byte, or -1 if none
     std::function<bool(uint8_t)> put;  // false if not saved

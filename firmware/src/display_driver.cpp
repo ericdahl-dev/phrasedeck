@@ -36,8 +36,9 @@ uint32_t g_flushes = 0;
 uint64_t g_flush_us = 0;
 #endif
 
-// Rotated, the pixels are turned in the draw buffer, in internal RAM, before the copy to the
-// framebuffer in PSRAM, so that copy stays a straight memcpy per row. LVGL 9.1's own rotation
+// Rotated, the pixels are turned in place in the draw buffer (internal RAM, or PSRAM if
+// display_init() had to fall back), before the copy to the framebuffer in PSRAM, so that copy
+// stays a straight memcpy per row. LVGL 9.1's own rotation
 // (lv_display_set_rotation) doesn't turn pixels: the flush would need lv_draw_sw_rotate into a
 // third draw-sized buffer (16 KB more internal RAM, or PSRAM traffic, #170). LovyanGFX's
 // setRotation leaves its memcpy path for a per-pixel copy. Off, this costs one test per flush.

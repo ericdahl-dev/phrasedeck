@@ -108,6 +108,20 @@ void test_the_picture_is_unchanged_when_not_rotated() {
         for (int x = 0; x < SW; ++x) TEST_ASSERT_EQUAL(logical(x, y), glass[y][x]);
 }
 
+// A finger on the glass lands where that pixel was drawn: the touch mirror and the picture flip
+// agree, both ways, so a tap hits the Button under it.
+void test_a_touch_lands_on_the_pixel_under_the_finger() {
+    for (const bool rotated : {false, true}) {
+        uint16_t glass[SH][SW] = {};
+        flushTo(glass, {0, 0, 7, 3}, rotated);
+        for (int gy = 0; gy < SH; ++gy)
+            for (int gx = 0; gx < SW; ++gx) {
+                const screen_rotation::Point p = screen_rotation::touch(gx, gy, SW, SH, rotated);
+                TEST_ASSERT_EQUAL(logical(p.x, p.y), glass[gy][gx]);
+            }
+    }
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_a_touch_is_mirrored_through_the_center_when_rotated);
@@ -118,5 +132,6 @@ int main() {
     RUN_TEST(test_a_failed_save_says_so);
     RUN_TEST(test_the_picture_is_turned_half_a_turn_when_rotated);
     RUN_TEST(test_the_picture_is_unchanged_when_not_rotated);
+    RUN_TEST(test_a_touch_lands_on_the_pixel_under_the_finger);
     return UNITY_END();
 }

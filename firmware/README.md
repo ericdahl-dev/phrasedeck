@@ -37,8 +37,8 @@ touch turns with it. It's saved in the panel NVS, so it survives a restart, and 
 turns it off. The factory reset corner is the top-left as the screen shows it: with the screen
 rotated, that's the glass's bottom-right corner.
 
-The flush callback turns each block of pixels LVGL draws half a turn in the draw buffer (in
-internal RAM) and writes it to the mirrored place on the glass; the touch point is mirrored in
+The flush callback turns each block of pixels LVGL draws half a turn in place in the draw
+buffer (internal RAM, or PSRAM if internal RAM was short at boot) and writes it to the mirrored place on the glass; the touch point is mirrored in
 `touch.cpp`. The math is `lib/screen_rotation`, with host tests. This needs no extra buffer, and
 with the switch off the flush only checks one flag. LVGL 9.1's `lv_display_set_rotation` doesn't
 turn pixels itself: it would need a third 16 KB buffer for `lv_draw_sw_rotate`. In dev builds,

@@ -82,6 +82,16 @@ pio run -e crowpanel -t upload --upload-port /dev/ttyUSB0
 pio device monitor -p /dev/ttyUSB0                     # serial log, 115200
 ```
 
+Builds share compiled objects through `~/.cache/phrasedeck/pio-build-cache` (#175), so a clean
+build in a new git worktree reuses the framework, LVGL and anything else another checkout already
+compiled with the same flags and sources (`build_cache.py` makes library object paths the same in
+every checkout). Only the objects are shared: each checkout keeps its own record of what it built
+(`.sconsign` in `.pio/build`), so builds in two checkouts never mix up each other's sources and
+can run at the same time. A different flag or Wi-Fi file compiles what it changes and caches that too. The
+cache holds the Wi-Fi password inside the objects, so it's readable only by you. It never shrinks
+on its own; delete the folder to reclaim the space (it fills again on the next build).
+`PLATFORMIO_BUILD_CACHE_DIR` points it somewhere else (a private folder).
+
 The first flash replaces Elecrow's partition table, so back up the factory image first:
 `esptool --port /dev/ttyUSB0 read-flash 0 0x1000000 crowpanel-factory.bin`.
 

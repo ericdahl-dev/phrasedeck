@@ -31,7 +31,28 @@ jobs:
         if: steps.changes.outputs.run == 'true'
       - run: uv tool install platformio==6.2.0
         if: steps.changes.outputs.run == 'true'
+      # The shared build cache (#175, build_cache_dir in platformio.ini). Objects are keyed by
+      # their flags and sources, so an older cache is safe: it only saves compiling. Only pushes
+      # to main save it, so a pull request can't put objects into what main builds from.
+      - uses: actions/cache/restore@v4
+        if: steps.changes.outputs.run == 'true'
+        with:
+          path: ~/.cache/phrasedeck/pio-build-cache
+          key: pio-build-${{ github.sha }}
+          restore-keys: pio-build-
+      - run: python3 -m unittest discover -s tools && tools/prune_build_cache_test.sh
+        if: steps.changes.outputs.run == 'true'
+      - run: touch "$RUNNER_TEMP/pio-build-start"
+        if: steps.changes.outputs.run == 'true'
       - run: pio test -e native
         if: steps.changes.outputs.run == 'true'
       - run: pio run -e crowpanel
         if: steps.changes.outputs.run == 'true'
+      # Keep only what this build used, so the saved cache doesn't grow with every commit.
+      - run: tools/prune_build_cache.sh ~/.cache/phrasedeck/pio-build-cache "$RUNNER_TEMP/pio-build-start"
+        if: steps.changes.outputs.run == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - uses: actions/cache/save@v4
+        if: steps.changes.outputs.run == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/phrasedeck/pio-build-cache
+          key: pio-build-${{ github.sha }}

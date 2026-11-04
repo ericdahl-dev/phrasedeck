@@ -2,3 +2,4 @@
 secrets.ini
 *.bin
 src/wifi_secrets.h
+__pycache__/

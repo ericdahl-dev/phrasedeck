@@ -8,6 +8,12 @@ So far it shows a fixed Page of Buttons. It pairs with a Nearby Helper (the Pair
 `Pin for a panel:` line from `phrased pair`), and a tap sends the Button's phrase. Its own Phrase
 list, edited from a web page, is in progress (#98).
 
+The web page can also download the Buttons as a CSV file (`label,phrase`, one row per Button) and
+import one back from a spreadsheet (#164): **Replace all** makes the file the whole list, **Append**
+adds its rows after the Buttons. An import is all or nothing: if any row is wrong, nothing changes
+and the page names the row. Imported Buttons get new ids and, like any web edit, are confirmed on
+the panel before their first Send. Save from Excel as "CSV UTF-8".
+
 Wi-Fi comes from `~/.config/phrasedeck/panel-wifi.ini` (or `PHRASEDECK_WIFI_INI`), a `[wifi]`
 section with `ssid` and `password`, read at build time by `wifi_secrets.py`. Without it the panel
 skips Wi-Fi.

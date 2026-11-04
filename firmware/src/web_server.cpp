@@ -17,6 +17,7 @@
 #include "panel_store.h"
 #include "phrases.h"
 #include "web.h"
+#include "web_csv.h"
 #include "web_editor.h"
 
 namespace web_server {
@@ -27,11 +28,15 @@ StaticSemaphore_t g_lockBuf;
 SemaphoreHandle_t g_lock = xSemaphoreCreateMutexStatic(&g_lockBuf);
 std::string g_fingerprint;  // under g_lock
 std::string g_listJson;     // under g_lock: the Buttons as the loop last saved them
-// One change at a time from the page to the loop, under g_lock (httpd is one task).
+// One change at a time from the page to the loop, an edit or an import, under g_lock (httpd is one
+// task). An import's csv points into the httpd task's buffer, which it frees only once the loop is
+// done with it, or after withdrawing it before the loop took it.
+enum class Waiting { None, Edit, Import } g_waiting = Waiting::None;
 web::Edit g_edit;
-bool g_editWaiting = false;
+web::Import g_import;
 uint32_t g_editSeq = 0, g_doneSeq = 0;
 bool g_doneOk = false;
+std::string g_doneError;  // why an import was refused
 
 struct Locked {
     Locked() { xSemaphoreTake(g_lock, portMAX_DELAY); }
@@ -190,8 +195,8 @@ esp_err_t getRoot(httpd_req_t* req) {
     return editor(req, "200 OK", "");
 }
 
-// Every POST: our own Host and Origin, a form body, and not too big.
-bool postOk(httpd_req_t* req, std::string& body, esp_err_t& sent, size_t maxBody = 256) {
+// Every POST's checks before its body is read: not too big, our own Host and Origin, and the type.
+bool postChecks(httpd_req_t* req, esp_err_t& sent, size_t maxBody, bool multipart) {
     // First, before any reply: a reply makes httpd drain the body, which a trickle can drag out.
     if (req->content_len > maxBody) {
         sent = ESP_FAIL;  // close without draining, so a trickled huge body can't hold the one httpd task
@@ -205,22 +210,68 @@ bool postOk(httpd_req_t* req, std::string& body, esp_err_t& sent, size_t maxBody
         sent = reply(req, "403 Forbidden", page("Not from this page", ""));
         return false;
     }
-    if (header(req, "Content-Type") != "application/x-www-form-urlencoded") {
+    const std::string type = header(req, "Content-Type");
+    if (multipart ? type.rfind("multipart/form-data;", 0) != 0 : type != "application/x-www-form-urlencoded") {
         sent = reply(req, "400 Bad Request", page("Bad request", ""));
         return false;
     }
-    body.assign(req->content_len, '\0');
+    return true;
+}
+
+// The whole body, or false if the connection closes, fails, or trickles past 10 s, so a slow body
+// can't hold the one httpd task.
+bool recvAll(httpd_req_t* req, char* buf, size_t len) {
     const uint32_t start = millis();
-    for (size_t got = 0; got < body.size();) {
-        const int n = millis() - start > 10000 ? -1 : httpd_req_recv(req, &body[got], body.size() - got);
-        if (n <= 0) {  // closed, failed, or trickled past 10 s: a slow body can't hold the one httpd task
-            sent = ESP_FAIL;
-            return false;
-        }
+    for (size_t got = 0; got < len;) {
+        const int n = millis() - start > 10000 ? -1 : httpd_req_recv(req, buf + got, len - got);
+        if (n <= 0) return false;
         got += n;
     }
     return true;
 }
+
+// Every POST with a form body: postChecks, then the body.
+bool postOk(httpd_req_t* req, std::string& body, esp_err_t& sent, size_t maxBody = 256) {
+    if (!postChecks(req, sent, maxBody, false)) return false;
+    body.assign(req->content_len, '\0');
+    if (!recvAll(req, &body[0], body.size())) {
+        sent = ESP_FAIL;
+        return false;
+    }
+    return true;
+}
+
+// The session first, before any body is read: without one, close at once (a reply would drain it).
+bool sessionFirst(httpd_req_t* req, esp_err_t& sent) {
+    if (loggedIn(req)) return true;
+    sent = req->content_len > 256 ? ESP_FAIL
+                                  : reply(req, "401 Unauthorized", page("Phrasedeck panel", "<p class=note>Log in again.</p>" + std::string(kLoginForm)));
+    return false;
+}
+
+enum class Outcome { Done, Refused, Withdrawn };
+
+// Waits for the loop to apply the change handed to it as seq. The loop takes it within a few ms
+// unless a Send or pair is in flight; after 5 s it's withdrawn, so it can't apply after this reply.
+// Decided under the lock, replied after it: editor() takes the lock too, and it isn't recursive.
+Outcome waitForLoop(uint32_t seq, std::string* error = nullptr) {
+    for (uint32_t waited = 0;; waited += 20) {
+        {
+            Locked l;
+            if (g_doneSeq == seq) {
+                if (error != nullptr) *error = g_doneError;
+                return g_doneOk ? Outcome::Done : Outcome::Refused;
+            }
+            if (waited >= 5000 && g_waiting != Waiting::None) {
+                g_waiting = Waiting::None;
+                return Outcome::Withdrawn;
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
+const char* kBusy = "The panel is busy sending or pairing: nothing changed, try again.";
 
 esp_err_t postLogin(httpd_req_t* req) {
     std::string body;
@@ -257,13 +308,9 @@ esp_err_t postLogin(httpd_req_t* req) {
 constexpr size_t kMaxEditBody = 2000 * 6 + 40 * 3 + 256;
 
 esp_err_t postEdit(httpd_req_t* req) {
-    // The session first, before the body is read: without one, close at once (a reply would drain it).
-    if (!loggedIn(req)) {
-        if (req->content_len > 256) return ESP_FAIL;
-        return reply(req, "401 Unauthorized", page("Phrasedeck panel", "<p class=note>Log in again.</p>" + std::string(kLoginForm)));
-    }
-    std::string body;
     esp_err_t sent = ESP_OK;
+    if (!sessionFirst(req, sent)) return sent;
+    std::string body;
     if (!postOk(req, body, sent, kMaxEditBody)) return sent;
     web::Edit e;
     if (!web::editFrom(body, e)) return reply(req, "400 Bad Request", page("Bad request", ""));
@@ -271,34 +318,82 @@ esp_err_t postEdit(httpd_req_t* req) {
     {
         Locked l;
         g_edit = e;
-        g_editWaiting = true;
+        g_waiting = Waiting::Edit;
         seq = ++g_editSeq;
     }
-    // The loop takes it within a few ms unless a Send or pair is in flight; wait for the result.
-    // Decided under the lock, replied after it: editor() takes the lock too, and it isn't recursive.
-    enum { Waiting, Done, Refused, Withdrawn } outcome = Waiting;
-    for (uint32_t waited = 0; outcome == Waiting; waited += 20) {
-        {
-            Locked l;
-            if (g_doneSeq == seq) {
-                outcome = g_doneOk ? Done : Refused;
-            } else if (waited >= 5000 && g_editWaiting) {
-                g_editWaiting = false;  // withdrawn, so it can't apply after this reply
-                outcome = Withdrawn;
-            }
-        }
-        if (outcome == Waiting) vTaskDelay(pdMS_TO_TICKS(20));
-    }
-    if (outcome == Done) {
+    const Outcome outcome = waitForLoop(seq);
+    if (outcome == Outcome::Done) {
         httpd_resp_set_hdr(req, "Location", "/");
         return reply(req, "303 See Other", "");
     }
-    if (outcome == Withdrawn) {
-        return editor(req, "503 Service Unavailable", "The panel is busy sending or pairing: nothing changed, try again.");
-    }
+    if (outcome == Outcome::Withdrawn) return editor(req, "503 Service Unavailable", kBusy);
     return editor(req, "409 Conflict",
                   "Nothing changed: that Button was changed or removed meanwhile, or it's over the limits "
                   "(48 Buttons, a 40-byte label, a 2,000-byte Phrase, neither empty).");
+}
+
+// The Buttons as CSV (#164), sent a Button at a time like the editor.
+esp_err_t getCsv(httpd_req_t* req) {
+    if (req->content_len > 0) return ESP_FAIL;
+    if (!hostOk(req)) return reply(req, "421 Misdirected Request", page("Wrong address", ""));
+    if (!loggedIn(req)) return reply(req, "401 Unauthorized", page("Phrasedeck panel", kLoginForm));
+    std::string json;
+    {
+        Locked l;
+        json = g_listJson;
+    }
+    phrases::List list;
+    if (!list.fromJson(json)) return reply(req, "503 Service Unavailable", page("Buttons", "<p>Still starting: reload in a moment.</p>"));
+    json.clear();
+    json.shrink_to_fit();
+    httpd_resp_set_status(req, "200 OK");
+    httpd_resp_set_type(req, "text/csv; charset=utf-8");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"phrasedeck-buttons.csv\"");
+    securityHeaders(req);
+    Serial.printf("web: GET %s 200 OK (%u Buttons)\n", req->uri, static_cast<unsigned>(list.size()));
+    const auto chunk = [req](const std::string& s) { return httpd_resp_send_chunk(req, s.data(), s.size()) == ESP_OK; };
+    bool ok = chunk(web::csvHead());
+    for (size_t i = 0; ok && i < list.size(); ++i) ok = chunk(web::csvRow(list.at(i)));
+    return ok ? httpd_resp_send_chunk(req, nullptr, 0) : ESP_FAIL;
+}
+
+// A CSV file from the page (#164), applied all or nothing on the loop like an edit.
+esp_err_t postImport(httpd_req_t* req) {
+    esp_err_t sent = ESP_OK;
+    if (!sessionFirst(req, sent)) return sent;
+    if (!postChecks(req, sent, web::kMaxImportBody, true)) return sent;
+    // In PSRAM: only ~63 KB of internal heap is free once the server is up.
+    const size_t len = req->content_len;
+    char* buf = static_cast<char*>(heap_caps_malloc(len > 0 ? len : 1, MALLOC_CAP_SPIRAM));
+    if (buf == nullptr) return editor(req, "503 Service Unavailable", "Not enough memory for the file: nothing changed, try again.");
+    struct Free {
+        char* p;
+        ~Free() { heap_caps_free(p); }
+    } freeBuf{buf};
+    if (!recvAll(req, buf, len)) return ESP_FAIL;
+    web::Import im;
+    if (!web::importFrom(header(req, "Content-Type"), std::string_view(buf, len), im)) {
+        return editor(req, "400 Bad Request", "Nothing changed: choose a CSV file, then Replace all or Append.");
+    }
+    uint32_t seq;
+    {
+        Locked l;
+        g_import = im;
+        g_waiting = Waiting::Import;
+        seq = ++g_editSeq;
+    }
+    std::string error;
+    const Outcome outcome = waitForLoop(seq, &error);
+    {
+        Locked l;
+        g_import = {};  // buf goes when this returns; nothing may point into it
+    }
+    if (outcome == Outcome::Done) {
+        httpd_resp_set_hdr(req, "Location", "/");
+        return reply(req, "303 See Other", "");
+    }
+    if (outcome == Outcome::Withdrawn) return editor(req, "503 Service Unavailable", kBusy);
+    return editor(req, "422 Unprocessable Content", "Nothing changed. " + error);
 }
 
 esp_err_t postLogout(httpd_req_t* req) {
@@ -328,7 +423,7 @@ void serve() {
     conf.httpd.stack_size = 12 * 1024;  // TLS handshake and PBKDF2 run on it
     conf.httpd.task_priority = 1;       // like the net task: TLS and PBKDF2 never preempt the UI
     conf.httpd.core_id = 0;             // the LVGL loop runs on core 1
-    conf.httpd.max_uri_handlers = 4;
+    conf.httpd.max_uri_handlers = 6;
     httpd_handle_t server = nullptr;
     const size_t before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     if (httpd_ssl_start(&server, &conf) != ESP_OK) {
@@ -340,6 +435,8 @@ void serve() {
         {"/login", HTTP_POST, postLogin, nullptr},
         {"/logout", HTTP_POST, postLogout, nullptr},
         {"/edit", HTTP_POST, postEdit, nullptr},
+        {"/buttons.csv", HTTP_GET, getCsv, nullptr},
+        {"/import", HTTP_POST, postImport, nullptr},
     };
     for (const httpd_uri_t& r : routes) {
         if (httpd_register_uri_handler(server, &r) != ESP_OK) {
@@ -379,8 +476,8 @@ void publish(const std::string& json) {
 
 bool takeEdit(web::Edit& e, uint32_t& seq) {
     Locked l;
-    if (!g_editWaiting) return false;
-    g_editWaiting = false;
+    if (g_waiting != Waiting::Edit) return false;
+    g_waiting = Waiting::None;
     e = g_edit;
     seq = g_editSeq;
     return true;
@@ -388,6 +485,22 @@ bool takeEdit(web::Edit& e, uint32_t& seq) {
 
 void editDone(uint32_t seq, bool ok) {
     Locked l;
+    g_doneSeq = seq;
+    g_doneOk = ok;
+}
+
+bool takeImport(web::Import& im, uint32_t& seq) {
+    Locked l;
+    if (g_waiting != Waiting::Import) return false;
+    g_waiting = Waiting::None;
+    im = g_import;
+    seq = g_editSeq;
+    return true;
+}
+
+void importDone(uint32_t seq, bool ok, const std::string& error) {
+    Locked l;
+    g_doneError = error;
     g_doneSeq = seq;
     g_doneOk = ok;
 }

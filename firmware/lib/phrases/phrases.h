@@ -33,6 +33,8 @@ class List {
     bool edit(size_t i, const std::string& label, const std::string& text);
     bool remove(size_t i);
     bool move(size_t from, size_t to);  // to is the index it ends up at
+    // Removes every Button but keeps the id counter, so a Button added after has a new id.
+    void clear() { buttons_.clear(); }
 
     // Eric (#98): a Phrase added or edited on the web page is shown and confirmed on the panel
     // before its first send. True for an index out of range, so nothing sends unasked.

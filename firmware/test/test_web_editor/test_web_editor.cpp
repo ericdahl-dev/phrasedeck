@@ -79,8 +79,19 @@ void test_a_stale_edit_changes_nothing() {
     TEST_ASSERT_EQUAL(2, l.size());
 }
 
+// #164: a link to download the Buttons as CSV, and a plain form (no JavaScript) to import a file.
+void test_the_page_links_the_csv_and_has_an_import_form() {
+    const std::string page = web::editorPage(twoButtons());
+    TEST_ASSERT_TRUE(page.find("<a href=/buttons.csv download>Download CSV</a>") != std::string::npos);
+    TEST_ASSERT_TRUE(page.find("<form method=post action=/import enctype=multipart/form-data>") != std::string::npos);
+    TEST_ASSERT_TRUE(page.find("<input type=file name=file") != std::string::npos);
+    TEST_ASSERT_TRUE(page.find("<button name=do value=replace>Replace all</button>") != std::string::npos);
+    TEST_ASSERT_TRUE(page.find("<button name=do value=append>Append</button>") != std::string::npos);
+}
+
 int main() {
     UNITY_BEGIN();
+    RUN_TEST(test_the_page_links_the_csv_and_has_an_import_form);
     RUN_TEST(test_labels_and_phrases_are_escaped_on_the_page);
     RUN_TEST(test_the_page_shows_enter_as_a_mark);
     RUN_TEST(test_a_change_form_parses_to_an_edit);

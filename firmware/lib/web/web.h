@@ -11,6 +11,11 @@ constexpr uint32_t kSessionMs = 15u * 60 * 1000;          // ends after 15 minut
 constexpr uint32_t kSessionMaxMs = 8u * 60 * 60 * 1000;    // and 8 hours after login, whatever the requests
 constexpr size_t kTokenLen = 32;                  // 16 random bytes as lowercase hex
 
+// The Referrer-Policy on every reply. Not "no-referrer": with it, browsers send "Origin: null" on
+// the page's own form POSTs, and originAllowed refuses every login. "same-origin" sends the real
+// Origin to the panel and no referrer anywhere else.
+constexpr const char* kReferrerPolicy = "same-origin";
+
 // True only for the panel's own address, with or without :443 (DNS rebinding).
 bool hostAllowed(const std::string& host, const std::string& ip);
 

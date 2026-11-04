@@ -20,6 +20,7 @@
 #include "bt_pairing.h"
 #include "display_driver.h"
 #include "factory_reset.h"
+#include "heap_placement.h"
 #include "net.h"
 #include "own_network.h"
 #include "panel_store.h"
@@ -1075,12 +1076,30 @@ void factoryResetIfHeld() {
     lv_obj_delete(label);
 }
 
+// mbedTLS's allocator. TLS buffers (16 KB records, two per session) to PSRAM, small ones stay
+// internal: the prebuilt sdkconfig keeps them all internal, and in Bluetooth Mode no web session
+// fits (#94). Explicit, so the lower limit for malloc() in setup() (#182) doesn't move the small
+// ones. Nothing here needs DMA: the AES and SHA accelerators copy PSRAM data through their own buffers.
+void* tlsCalloc(size_t n, size_t size) {
+    if (size != 0 && n > SIZE_MAX / size) return nullptr;
+    constexpr uint32_t kInternal = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    constexpr uint32_t kPsram = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+    const bool internal = heap_placement::internalFirst(n * size, heap_placement::kTlsInternalUpTo);
+    return heap_caps_calloc_prefer(n, size, 2, internal ? kInternal : kPsram, internal ? kPsram : kInternal);
+}
+
+std::string heapReport() {
+    const auto stats = [](uint32_t caps) {
+        return heap_placement::Stats{heap_caps_get_free_size(caps), heap_caps_get_largest_free_block(caps),
+                                     heap_caps_get_minimum_free_size(caps)};
+    };
+    return heap_placement::report(stats(MALLOC_CAP_INTERNAL), stats(MALLOC_CAP_SPIRAM));
+}
+
 }  // namespace
 
 void setup() {
-    // TLS buffers (16 KB records, two per session) to PSRAM, small ones stay internal: the prebuilt
-    // sdkconfig keeps them all internal, and in Bluetooth Mode no web session fits (#94).
-    mbedtls_platform_set_calloc_free(calloc, free);
+    mbedtls_platform_set_calloc_free(tlsCalloc, heap_caps_free);
     Serial.begin(115200);
     Serial.println("phrasedeck panel: boot");
     Wire.begin(board::I2C_SDA, board::I2C_SCL, board::I2C_HZ);
@@ -1099,6 +1118,16 @@ void setup() {
     // Before the factory reset check, so its corner and countdown are the right way up (#190).
     if (panel_store::begin()) display_set_rotated(screen_setting::load());
     factoryResetIfHeld();
+    // From here, a malloc() or new of more than 256 bytes goes to PSRAM first, not only those over
+    // 4096 (the prebuilt sdkconfig): a full list of long Phrases is about 96 KB, and in internal RAM
+    // it left too little for Wi-Fi, NimBLE and the web editor's TLS (#182). Set after the display,
+    // touch, I2C and serial drivers are up, so they and their interrupts are set up as before. What
+    // must stay internal asks for it: the draw buffers (display_init), FreeRTOS stacks and queues,
+    // NimBLE (CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL), the Wi-Fi driver's DMA buffers, and TLS
+    // (tlsCalloc). lwIP's own buffers use plain malloc(), so its bigger ones move to PSRAM, as
+    // CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP would put them: the Wi-Fi driver copies what it sends
+    // into its static internal TX buffers (CONFIG_ESP_WIFI_STATIC_TX_BUFFER).
+    heap_caps_malloc_extmem_enable(heap_placement::kInternalUpTo);
     loadPhrases();
     buildPage();
     const bool store = panel_store::begin();  // again: a factory reset closes it
@@ -1112,8 +1141,7 @@ void setup() {
     if (store && !web_server::start()) Serial.println("phrasedeck panel: web task didn't start");
     lv_timer_handler();
     panel_mcu::backlightOn();  // last, so the screen doesn't flash on boot
-    Serial.printf("phrasedeck panel: ready, internal heap free %u, PSRAM free %u\n",
-                  heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    Serial.printf("phrasedeck panel: ready, %s\n", heapReport().c_str());
 }
 
 #ifdef PANEL_SERIAL_COMMANDS
@@ -1199,10 +1227,8 @@ void serialCommands() {
             lv_tabview_set_active(lv_obj_get_child(g_settings, 0), strtoul(line.c_str() + 4, nullptr, 10), LV_ANIM_OFF);
         } else if (line == "mode" && g_settings != nullptr) {  // the Mode tab's switch; restarts
             switchMode(nullptr);
-        } else if (line == "heap") {  // internal RAM: free now, largest block, lowest since boot
-            Serial.printf("heap: internal free %u, largest %u, min %u; PSRAM free %u\n",
-                          heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
-                          heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+        } else if (line == "heap") {  // internal RAM, then PSRAM: free now, largest block, lowest since boot
+            Serial.println(heapReport().c_str());
         } else if (line == "rotate") {  // Rotate screen 180° on or off, saved, as the Screen tab does it
             const bool on = !display_rotated();
             const bool saved = screen_setting::save(on);

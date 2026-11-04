@@ -56,8 +56,7 @@ bool control(const std::string& s, bool enterAndTab) {
     return false;
 }
 
-// Nothing but spaces and tabs (or nothing): what a spreadsheet shows as an empty cell.
-bool blank(const std::string& s) { return s.find_first_not_of(" \t") == std::string::npos; }
+using phrases::blank;
 
 std::string lower(std::string s) {
     for (char& c : s) {
@@ -249,7 +248,8 @@ bool apply(const phrases::List& list, const Import& im, phrases::List& out, std:
             return fail(row, "has " + std::to_string(fields.size()) + (fields.size() == 1 ? " column" : " columns") +
                                  ", not " + std::to_string(columns) + " (" + names + ")");
         }
-        const std::string enter = columns == 3 ? lower(fields[2]) : "no";
+        // Spaces and tabs around it don't count, and a cell of only them is empty, so no (#173).
+        const std::string enter = columns == 3 ? lower(std::string(trim(fields[2]))) : "no";
         if (enter != "yes" && enter != "no" && !enter.empty()) return fail(row, "has an enter that isn't yes or no");
         const std::string label = lf(fields[0]), text = lf(fields[1]);
         const std::string why = refused(label, text);

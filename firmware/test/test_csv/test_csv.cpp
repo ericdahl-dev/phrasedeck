@@ -63,6 +63,13 @@ void test_the_enter_column_imports_and_old_files_still_do() {
     TEST_ASSERT_EQUAL_STRING("A=yes;", importedEnters("Label,Phrase,Enter\nA,1,yes").c_str());
 }
 
+// #173: an enter cell of only spaces looks empty in a spreadsheet, so it's no, like an empty one;
+// spaces and tabs around yes or no don't count, as a spreadsheet hides them.
+void test_an_enter_cell_of_spaces_is_no_and_spaces_around_yes_are_ignored() {
+    TEST_ASSERT_EQUAL_STRING("A=no;B=no;C=yes;D=no;E=yes;",
+                             importedEnters("label,phrase,enter\nA,1, \nB,2,\t\nC,3, yes\nD,4,no\t\nE,5,\" Yes \"\n").c_str());
+}
+
 // RFC 4180: CRLF between rows, and a field with a comma, quote or line break in quotes. A UTF-8
 // BOM first, or Excel opens the file as Windows-1252 and garbles every é.
 void test_the_export_is_rfc_4180() {
@@ -219,6 +226,7 @@ void test_a_label_of_only_spaces_is_refused_but_a_phrase_of_them_is_kept() {
     refusedAt("label,phrase\nA,1\n\" \",2\n", "Row 3");
     refusedAt("label,phrase\nA,1\n  ,2\n", "Row 3");
     refusedAt("label,phrase\nA,1\n\t,2\n", "Row 3");
+    refusedAt("label,phrase\nA,1\n\xC2\xA0,2\n", "Row 3");  // a no-break space, pasted from a web page
     phrases::List l;
     std::string error;
     TEST_ASSERT_FALSE(importInto(l, {Import::Mode::Replace, "label,phrase\n\"  \",2\n"}, error));
@@ -298,6 +306,7 @@ int main() {
     RUN_TEST(test_a_file_without_the_header_changes_nothing);
     RUN_TEST(test_a_malformed_row_changes_nothing);
     RUN_TEST(test_the_enter_column_imports_and_old_files_still_do);
+    RUN_TEST(test_an_enter_cell_of_spaces_is_no_and_spaces_around_yes_are_ignored);
     RUN_TEST(test_a_bad_enter_value_changes_nothing);
     RUN_TEST(test_a_row_over_the_limits_changes_nothing);
     RUN_TEST(test_more_than_48_buttons_changes_nothing);

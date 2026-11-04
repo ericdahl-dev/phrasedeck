@@ -62,6 +62,11 @@ class List {
     uint32_t nextId_ = 1;
 };
 
+// Nothing but spaces, tabs, no-break spaces (U+00A0) and ideographic spaces (U+3000), or nothing:
+// what looks empty on a Button or in a spreadsheet cell.
+// add and edit refuse such a label (#173).
+bool blank(const std::string& s);
+
 // For "Send?": text with each Enter shown as enterMark (before the line break) and each Tab as tabMark.
 std::string visible(const std::string& text, const char* enterMark, const char* tabMark);
 // The same for a Button, plus a final enterMark when Send Enter is on (#171).

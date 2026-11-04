@@ -63,6 +63,13 @@ void test_the_enter_column_imports_and_old_files_still_do() {
     TEST_ASSERT_EQUAL_STRING("A=yes;", importedEnters("Label,Phrase,Enter\nA,1,yes").c_str());
 }
 
+// #173: an enter cell of only spaces looks empty in a spreadsheet, so it's no, like an empty one;
+// spaces and tabs around yes or no don't count, as a spreadsheet hides them.
+void test_an_enter_cell_of_spaces_is_no_and_spaces_around_yes_are_ignored() {
+    TEST_ASSERT_EQUAL_STRING("A=no;B=no;C=yes;D=no;E=yes;",
+                             importedEnters("label,phrase,enter\nA,1, \nB,2,\t\nC,3, yes\nD,4,no\t\nE,5,\" Yes \"\n").c_str());
+}
+
 // RFC 4180: CRLF between rows, and a field with a comma, quote or line break in quotes. A UTF-8
 // BOM first, or Excel opens the file as Windows-1252 and garbles every é.
 void test_the_export_is_rfc_4180() {
@@ -206,6 +213,27 @@ void test_blank_and_empty_rows_are_skipped_anywhere() {
     refusedAt("label,phrase\nA,1\n,\nB,\n", "Row 4");
 }
 
+// #173: a row whose cells hold only spaces or tabs looks empty in a spreadsheet, so it's skipped
+// too, and the row numbers after it still count it.
+void test_a_row_of_only_spaces_is_skipped_like_an_empty_one() {
+    TEST_ASSERT_EQUAL_STRING("A=1;B=2;", importedTexts("label,phrase\nA,1\n , \n\t,\t\n\" \",\"  \"\nB,2\n").c_str());
+    refusedAt("label,phrase\nA,1\n , \nB,\n", "Row 4");
+}
+
+// #173: a label of only spaces makes a Button that looks blank, so it's refused like an empty one.
+// A Phrase of only whitespace is kept: a Button that types a Tab or an Enter is useful.
+void test_a_label_of_only_spaces_is_refused_but_a_phrase_of_them_is_kept() {
+    refusedAt("label,phrase\nA,1\n\" \",2\n", "Row 3");
+    refusedAt("label,phrase\nA,1\n  ,2\n", "Row 3");
+    refusedAt("label,phrase\nA,1\n\t,2\n", "Row 3");
+    refusedAt("label,phrase\nA,1\n\xC2\xA0,2\n", "Row 3");  // a no-break space, pasted from a web page
+    phrases::List l;
+    std::string error;
+    TEST_ASSERT_FALSE(importInto(l, {Import::Mode::Replace, "label,phrase\n\"  \",2\n"}, error));
+    TEST_ASSERT_EQUAL_STRING("Row 2 has no label.", error.c_str());
+    TEST_ASSERT_EQUAL_STRING("Tab=\t;Enter=\n;Space= ;", importedTexts("label,phrase\nTab,\t\nEnter,\"\n\"\nSpace, \n").c_str());
+}
+
 const std::string kType ="multipart/form-data; boundary=----WebKitFormBoundaryAbc123";
 
 std::string part(const std::string& disposition, const std::string& data) {
@@ -270,12 +298,15 @@ int main() {
     UNITY_BEGIN();
     RUN_TEST(test_the_export_opens_in_the_tab_as_text);
     RUN_TEST(test_blank_and_empty_rows_are_skipped_anywhere);
+    RUN_TEST(test_a_row_of_only_spaces_is_skipped_like_an_empty_one);
+    RUN_TEST(test_a_label_of_only_spaces_is_refused_but_a_phrase_of_them_is_kept);
     RUN_TEST(test_an_import_form_parses_to_an_import);
     RUN_TEST(test_the_largest_export_fits_the_import_cap);
     RUN_TEST(test_a_malformed_import_form_is_refused);
     RUN_TEST(test_a_file_without_the_header_changes_nothing);
     RUN_TEST(test_a_malformed_row_changes_nothing);
     RUN_TEST(test_the_enter_column_imports_and_old_files_still_do);
+    RUN_TEST(test_an_enter_cell_of_spaces_is_no_and_spaces_around_yes_are_ignored);
     RUN_TEST(test_a_bad_enter_value_changes_nothing);
     RUN_TEST(test_a_row_over_the_limits_changes_nothing);
     RUN_TEST(test_more_than_48_buttons_changes_nothing);

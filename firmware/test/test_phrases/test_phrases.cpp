@@ -72,6 +72,24 @@ void test_a_bad_file_is_refused_and_the_list_kept() {
     TEST_ASSERT_EQUAL_STRING("Keep", list.at(0).label.c_str());
 }
 
+// #173: a label of only spaces or tabs makes a Button that looks blank, so the web form can't add
+// or edit one, as a CSV import can't. A saved list that already holds one still loads: refusing it
+// at boot would lose every Button.
+void test_a_label_of_only_spaces_is_refused_but_a_saved_one_still_loads() {
+    phrases::List list;
+    TEST_ASSERT_FALSE(list.add("   ", "x", false));
+    TEST_ASSERT_FALSE(list.add("\t", "x", false));
+    TEST_ASSERT_FALSE(list.add("\xC2\xA0", "x", false));          // a no-break space, pasted from a web page
+    TEST_ASSERT_FALSE(list.add(" \xE3\x80\x80 ", "x", false));    // an ideographic space
+    TEST_ASSERT_FALSE(list.add("\xC2\xA0\t\xE3\x80\x80", "x", false));
+    TEST_ASSERT_TRUE(list.add("Keep", " ", false));  // a Phrase of only whitespace is fine
+    TEST_ASSERT_FALSE(list.edit(0, "  ", "x", false));
+    TEST_ASSERT_EQUAL_STRING("Keep", list.at(0).label.c_str());
+    TEST_ASSERT_EQUAL(1, list.size());
+    TEST_ASSERT_TRUE(list.fromJson("{\"next\":2,\"buttons\":[{\"id\":1,\"edit\":1,\"label\":\"  \",\"text\":\"x\"}]}"));
+    TEST_ASSERT_EQUAL_STRING("  ", list.at(0).label.c_str());
+}
+
 // Each Button has an id that never changes and an edit counter that goes up on every edit, so the
 // Helper can notify the first time it types a changed Phrase (#98). Ids survive deletes and a
 // save and load, and a deleted id is never reused.
@@ -237,6 +255,7 @@ int main() {
     RUN_TEST(test_count_and_lengths_are_capped);
     RUN_TEST(test_the_list_round_trips_through_json);
     RUN_TEST(test_a_bad_file_is_refused_and_the_list_kept);
+    RUN_TEST(test_a_label_of_only_spaces_is_refused_but_a_saved_one_still_loads);
     RUN_TEST(test_ids_stay_put_and_edits_count);
     RUN_TEST(test_an_edited_phrase_needs_one_confirm);
     RUN_TEST(test_counters_never_wrap);

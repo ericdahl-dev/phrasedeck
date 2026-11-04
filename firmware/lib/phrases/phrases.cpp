@@ -22,14 +22,25 @@ bool fits(const std::string& label, const std::string& text) {
 
 }  // namespace
 
+bool blank(const std::string& s) {
+    for (size_t i = 0; i < s.size();) {
+        if (s[i] == ' ' || s[i] == '\t') ++i;
+        else if (s.compare(i, 2, "\xC2\xA0") == 0) i += 2;           // U+00A0 no-break space
+        else if (s.compare(i, 3, "\xE3\x80\x80") == 0) i += 3;       // U+3000 ideographic space
+        else return false;
+    }
+    return true;
+}
+
+// Not in fits(): fromJson uses it, and a saved list with such a label must still load at boot (#173).
 bool List::add(const std::string& label, const std::string& text, bool enter) {
-    if (buttons_.size() >= kMaxButtons || nextId_ >= kMaxCounter || !fits(label, text)) return false;
+    if (buttons_.size() >= kMaxButtons || nextId_ >= kMaxCounter || blank(label) || !fits(label, text)) return false;
     buttons_.push_back({nextId_++, 1, 0, label, text, enter});
     return true;
 }
 
 bool List::edit(size_t i, const std::string& label, const std::string& text, bool enter) {
-    if (i >= buttons_.size() || buttons_[i].edit >= kMaxCounter || !fits(label, text)) return false;
+    if (i >= buttons_.size() || buttons_[i].edit >= kMaxCounter || blank(label) || !fits(label, text)) return false;
     buttons_[i].label = label;
     buttons_[i].text = text;
     buttons_[i].enter = enter;

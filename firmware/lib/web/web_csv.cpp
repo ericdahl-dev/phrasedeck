@@ -56,6 +56,8 @@ bool control(const std::string& s, bool enterAndTab) {
     return false;
 }
 
+using phrases::blank;
+
 std::string lower(std::string s) {
     for (char& c : s) {
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
@@ -111,7 +113,7 @@ class Reader {
 
 // Why a row can't be a Button, or empty if it can.
 std::string refused(const std::string& label, const std::string& text) {
-    if (label.empty()) return "has no label";
+    if (blank(label)) return "has no label";  // only spaces would make a Button that looks blank (#173)
     if (text.empty()) return "has no Phrase";
     if (!utf8(label) || !utf8(text)) return "isn't UTF-8 (save the file as CSV UTF-8)";
     if (label.size() > phrases::kMaxLabel) return "has a label over " + std::to_string(phrases::kMaxLabel) + " bytes";
@@ -237,15 +239,17 @@ bool apply(const phrases::List& list, const Import& im, phrases::List& out, std:
     while (!r.done()) {
         ++row;
         if (!r.next(fields, error)) return fail(row, error);
-        // A blank line, or a row of empty cells (Excel writes "," for a row it thinks is used): skipped.
+        // A blank line, or a row of empty cells (Excel writes "," for a row it thinks is used), or of
+        // cells with only spaces or tabs (#173): skipped.
         bool empty = true;
-        for (const std::string& f : fields) empty = empty && f.empty();
+        for (const std::string& f : fields) empty = empty && blank(f);
         if (empty) continue;
         if (fields.size() != columns) {
             return fail(row, "has " + std::to_string(fields.size()) + (fields.size() == 1 ? " column" : " columns") +
                                  ", not " + std::to_string(columns) + " (" + names + ")");
         }
-        const std::string enter = columns == 3 ? lower(fields[2]) : "no";
+        // Spaces and tabs around it don't count, and a cell of only them is empty, so no (#173).
+        const std::string enter = columns == 3 ? lower(std::string(trim(fields[2]))) : "no";
         if (enter != "yes" && enter != "no" && !enter.empty()) return fail(row, "has an enter that isn't yes or no");
         const std::string label = lf(fields[0]), text = lf(fields[1]);
         const std::string why = refused(label, text);

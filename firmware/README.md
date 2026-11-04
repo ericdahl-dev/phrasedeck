@@ -15,12 +15,19 @@ Enter as an Enter mark after the text.
 
 The web page can also show the Buttons as a CSV file (`label,phrase,enter`, one row per Button,
 `enter` being `yes` or `no`) and import one back from a spreadsheet (#164). A file from before
-Send Enter, with only `label,phrase`, still imports, with Send Enter off. **View CSV** opens the file in the tab as text; save it
-with Ctrl+S or Cmd+S (the name is `phrasedeck-buttons.csv`). It isn't a download because Chrome
-won't download from a site with a self-signed certificate (#168). On import, **Replace all** makes the file the whole list, **Append**
-adds its rows after the Buttons. An import is all or nothing: if any row is wrong, nothing changes
-and the page names the row. Imported Buttons get new ids and, like any web edit, are confirmed on
-the panel before their first Send. Save from Excel as "CSV UTF-8".
+Send Enter, with only `label,phrase`, still imports, with Send Enter off. An `enter` cell that is
+empty or only spaces means `no`, and spaces around `yes` or `no` are ignored. **View CSV** opens
+the file in the tab as text; save it with Ctrl+S or Cmd+S as `phrasedeck-buttons.csv`. It isn't a
+download because Chrome won't download from a site with a self-signed certificate (#168). On
+import, **Replace all** makes the file the whole list, **Append** adds its rows after the Buttons.
+An import is all or nothing: if any row is wrong, nothing changes and the page names the row.
+Imported Buttons get new ids and, like any web edit, are confirmed on the panel before their first
+Send. Save from Excel as "CSV UTF-8".
+
+Blank labels and rows (#173): a label of only spaces, tabs or no-break spaces looks blank on the
+panel, so the web form and an import both refuse it. On import, a row whose cells are all empty or
+blank is skipped. A Phrase of only spaces, tabs or line breaks is kept, so a Button can type a Tab
+or a line break (a line break is Shift+Enter, which doesn't submit; turn on Send Enter for that).
 
 Wi-Fi comes from `~/.config/phrasedeck/panel-wifi.ini` (or `PHRASEDECK_WIFI_INI`), a `[wifi]`
 section with `ssid` and `password`, read at build time by `wifi_secrets.py`. Without it the panel

@@ -945,6 +945,28 @@ void applyWebEdit() {
     web_server::editDone(seq, ok);
 }
 
+// A CSV file from the web page (#164), all or nothing, on the LVGL loop like an edit. At most two
+// lists in memory: the import builds the new one beside g_phrases, which stays as it was until saved.
+void applyWebImport() {
+    if (g_busy) return;
+    web::Import im;
+    uint32_t seq;
+    if (!web_server::takeImport(im, seq)) return;
+    std::string error;
+    phrases::List next;
+    bool ok = web::apply(g_phrases, im, next, error);
+    if (ok) {
+        std::swap(g_phrases, next);
+        if (!savePhrases()) {
+            std::swap(g_phrases, next);  // not saved: the panel keeps what's on flash
+            ok = false;
+            error = "The panel couldn't save the Buttons.";
+        }
+    }
+    if (ok) rebuildGrid();
+    web_server::importDone(seq, ok, error);
+}
+
 // A finger on the top-left corner at power-on: count down on screen, and after 10 s erase the
 // panel NVS (admin password, lockouts, web key and cert, pairing, Mode), the saved Buttons and the
 // default NVS (Bluetooth bonds, so the last owner's Computer can't reconnect).
@@ -1144,6 +1166,7 @@ void loop() {
     touch_poll();
     showNet();
     applyWebEdit();
+    applyWebImport();
     lv_timer_handler();
     delay(5);
 }

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 
+#include "web_csv.h"
 #include "web_editor.h"
 
 namespace web_server {
@@ -21,5 +22,9 @@ void publish(const std::string& json);
 // takeEdit: one change waiting from the page, if any; the loop applies it, then calls editDone.
 bool takeEdit(web::Edit& e, uint32_t& seq);
 void editDone(uint32_t seq, bool ok);
+// takeImport: a CSV file waiting from the page (#164). im.csv stays valid until importDone, which
+// the loop must call, with web::apply's error if it refused the file.
+bool takeImport(web::Import& im, uint32_t& seq);
+void importDone(uint32_t seq, bool ok, const std::string& error);
 
 }  // namespace web_server

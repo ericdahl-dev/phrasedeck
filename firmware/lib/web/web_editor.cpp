@@ -101,6 +101,12 @@ std::string editorTail() {
            "<p><label>Label<br><input name=label maxlength=40 required></label></p>"
            "<p><label>Phrase<br><textarea name=text rows=4 maxlength=2000 required></textarea></label></p>"
            "<p><button>Add</button></p></form>"
+           "<h2>Spreadsheet</h2><p><a href=/buttons.csv download>Download CSV</a> (label,phrase, one row per Button)</p>"
+           "<form method=post action=/import enctype=multipart/form-data>"
+           "<p><label>CSV file<br><input type=file name=file accept=\".csv,text/csv\" required></label></p>"
+           // Append first, so it's the form's default submit: a stray Enter never replaces every Button.
+           "<p><button name=do value=append>Append</button> <button name=do value=replace>Replace all</button></p>"
+           "<p>All or nothing: if a row is wrong, nothing changes.</p></form>"
            "<form method=post action=/logout><p><button>Log out</button></p></form>";
 }
 

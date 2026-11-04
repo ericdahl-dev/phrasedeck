@@ -29,6 +29,22 @@ panel, so the web form and an import both refuse it. On import, a row whose cell
 blank is skipped. A Phrase of only spaces, tabs or line breaks is kept, so a Button can type a Tab
 or a line break (a line break is Shift+Enter, which doesn't submit; turn on Send Enter for that).
 
+## Rotate screen 180° (#190)
+
+Settings > Screen has a **Rotate screen 180°** switch, off by default, for a panel turned upside
+down (to put the USB cable on the other side, say). It takes effect at once, with no restart, and
+touch turns with it. It's saved in the panel NVS, so it survives a restart, and a factory reset
+turns it off. The factory reset corner is the top-left as the screen shows it: with the screen
+rotated, that's the glass's bottom-right corner.
+
+The flush callback turns each block of pixels LVGL draws half a turn in place in the draw
+buffer (internal RAM, or PSRAM if internal RAM was short at boot) and writes it to the mirrored place on the glass; the touch point is mirrored in
+`touch.cpp`. The math is `lib/screen_rotation`, with host tests. This needs no extra buffer, and
+with the switch off the flush only checks one flag. LVGL 9.1's `lv_display_set_rotation` doesn't
+turn pixels itself: it would need a third 16 KB buffer for `lv_draw_sw_rotate`. In dev builds,
+the serial command `rotate` toggles it and `flush` prints how many flushes ran since the last
+`flush`, and how long they took.
+
 Wi-Fi comes from `~/.config/phrasedeck/panel-wifi.ini` (or `PHRASEDECK_WIFI_INI`), a `[wifi]`
 section with `ssid` and `password`, read at build time by `wifi_secrets.py`. Without it the panel
 skips Wi-Fi.

@@ -7,10 +7,13 @@
 
 #include <Arduino.h>
 #include <esp_heap_caps.h>
+#include <esp_timer.h>
 #include <esp_private/periph_ctrl.h>
 #include <esp_rom_sys.h>
 #include <esp_system.h>
 #include <soc/lcd_cam_struct.h>
+
+#include "screen_rotation.h"
 
 LGFX display_lcd;
 
@@ -25,12 +28,36 @@ constexpr int   DRAW_LINES = 10;
 constexpr size_t DRAW_PIXELS =
     static_cast<size_t>(board::LCD_WIDTH) * DRAW_LINES;
 
-void flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
-    const int32_t w = area->x2 - area->x1 + 1;
-    const int32_t h = area->y2 - area->y1 + 1;
+// Rotate screen 180° (#190). Only the LVGL task (loop()) reads or writes it.
+bool g_rotated = false;
 
-    display_lcd.pushImageDMA(area->x1, area->y1, w, h,
+#ifdef PANEL_SERIAL_COMMANDS
+uint32_t g_flushes = 0;
+uint64_t g_flush_us = 0;
+#endif
+
+// Rotated, the pixels are turned in place in the draw buffer (internal RAM, or PSRAM if
+// display_init() had to fall back), before the copy to the framebuffer in PSRAM, so that copy
+// stays a straight memcpy per row. LVGL 9.1's own rotation
+// (lv_display_set_rotation) doesn't turn pixels: the flush would need lv_draw_sw_rotate into a
+// third draw-sized buffer (16 KB more internal RAM, or PSRAM traffic, #170). LovyanGFX's
+// setRotation leaves its memcpy path for a per-pixel copy. Off, this costs one test per flush.
+void flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
+#ifdef PANEL_SERIAL_COMMANDS
+    const int64_t start = esp_timer_get_time();
+#endif
+    const screen_rotation::Area to = screen_rotation::flush(
+        {area->x1, area->y1, area->x2, area->y2}, reinterpret_cast<uint16_t*>(px_map),
+        board::LCD_WIDTH, board::LCD_HEIGHT, g_rotated);
+    const int32_t w = to.x2 - to.x1 + 1;
+    const int32_t h = to.y2 - to.y1 + 1;
+
+    display_lcd.pushImageDMA(to.x1, to.y1, w, h,
                              reinterpret_cast<lgfx::rgb565_t*>(px_map));
+#ifdef PANEL_SERIAL_COMMANDS
+    ++g_flushes;
+    g_flush_us += static_cast<uint64_t>(esp_timer_get_time() - start);
+#endif
     lv_display_flush_ready(disp);
 }
 
@@ -179,3 +206,24 @@ bool display_init() {
 }
 
 lv_display_t* display_lvgl() { return g_disp; }
+
+void display_set_rotated(bool rotated) {
+    if (rotated == g_rotated) return;
+    g_rotated = rotated;
+    if (g_disp == nullptr) return;
+    // Every pixel on the glass moves, so all of it is drawn again on the next refresh: the screen
+    // covers the whole display, and a refresh draws every layer over what's invalid.
+    lv_obj_t* screen = lv_display_get_screen_active(g_disp);
+    if (screen != nullptr) lv_obj_invalidate(screen);
+}
+
+bool display_rotated() { return g_rotated; }
+
+#ifdef PANEL_SERIAL_COMMANDS
+void display_flush_stats(uint32_t& flushes, uint64_t& us) {
+    flushes = g_flushes;
+    us = g_flush_us;
+    g_flushes = 0;
+    g_flush_us = 0;
+}
+#endif

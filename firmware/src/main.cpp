@@ -26,6 +26,7 @@
 #include "pairing.h"
 #include "panel_mcu.h"
 #include "phrases.h"
+#include "screen_setting.h"
 #include "touch.h"
 #include "web_server.h"
 
@@ -603,6 +604,43 @@ lv_obj_t* tabText(lv_obj_t* tab, const char* text) {
     return l;
 }
 
+lv_obj_t* g_screen_note = nullptr;
+lv_obj_t* g_screen_switch = nullptr;  // while Settings is open
+
+// Rotate screen 180° (#190): saved, then turned at once, with touch. The switch toggles on release,
+// so the finger is already off the glass when everything under it moves.
+void switchRotation(lv_event_t* e) {
+    lv_obj_t* sw = static_cast<lv_obj_t*>(lv_event_get_target(e));
+    const bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    if (!screen_setting::save(on)) {
+        if (on) lv_obj_remove_state(sw, LV_STATE_CHECKED);
+        else lv_obj_add_state(sw, LV_STATE_CHECKED);
+        lv_label_set_text(g_screen_note, "Couldn't save it: try again");
+        return;
+    }
+    display_set_rotated(on);
+}
+
+void screenTab(lv_obj_t* tab) {
+    lv_obj_set_flex_flow(tab, LV_FLEX_FLOW_COLUMN);
+    lv_obj_t* row = lv_obj_create(tab);
+    lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t* sw = lv_switch_create(row);
+    lv_obj_set_size(sw, 100, 56);  // big enough for a finger
+    if (display_rotated()) lv_obj_add_state(sw, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(sw, switchRotation, LV_EVENT_VALUE_CHANGED, nullptr);
+    g_screen_switch = sw;
+    lv_obj_t* label = lv_label_create(row);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_20, 0);
+    lv_label_set_text(label, "Rotate screen 180°");
+    g_screen_note = tabText(tab, "Turns the screen upside down, for a panel with its USB cable on the other side. "
+                                 "Touch turns with it. A factory reset turns it off.");
+}
+
 // The web editor's address, as text and a QR code for a phone camera.
 void webEditorInfo(lv_obj_t* parent) {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
@@ -693,6 +731,8 @@ void openSettings() {
                               : "The panel types over Wi-Fi, through phrased on the Computer.");
     textButton(mode, s.bluetooth ? "Switch to Wi-Fi" : "Switch to Bluetooth keyboard", switchMode, nullptr);
     g_mode_note = tabText(mode, "The panel restarts to switch.");
+
+    screenTab(lv_tabview_add_tab(tabs, "Screen"));
 
     lv_obj_t* close = textButton(g_settings, LV_SYMBOL_CLOSE, closeSettings, nullptr);
     lv_obj_set_size(close, 64, 64);
@@ -981,8 +1021,9 @@ void applyWebImport() {
     web_server::importDone(seq, ok, error);
 }
 
-// A finger on the top-left corner at power-on: count down on screen, and after 10 s erase the
-// panel NVS (admin password, lockouts, web key and cert, pairing, Mode, own network password), the
+// A finger on the top-left corner at power-on (as the screen shows it, so upside down when rotated,
+// #190): count down on screen, and after 10 s erase the panel NVS (admin password, lockouts, web
+// key and cert, pairing, Mode, own network password, Rotate screen 180°), the
 // saved Buttons and the default NVS (Bluetooth bonds, so the last owner's Computer can't reconnect).
 void factoryResetIfHeld() {
     using factory_reset::Hold;
@@ -1029,6 +1070,7 @@ void factoryResetIfHeld() {
             delay(20);
             touch_poll();
         }
+        if (nvs) display_set_rotated(false);  // erased with the rest (#190)
     }
     lv_obj_delete(label);
 }
@@ -1054,10 +1096,12 @@ void setup() {
         esp_restart();
     }
     touch_init();
+    // Before the factory reset check, so its corner and countdown are the right way up (#190).
+    if (panel_store::begin()) display_set_rotated(screen_setting::load());
     factoryResetIfHeld();
     loadPhrases();
     buildPage();
-    const bool store = panel_store::begin();
+    const bool store = panel_store::begin();  // again: a factory reset closes it
     if (!store) Serial.println("phrasedeck panel: panel NVS unavailable");
     admin::begin();
     if (store && !admin::isSet()) {  // without NVS a password can't be saved: don't trap the panel in Step 1
@@ -1102,7 +1146,8 @@ void serialCommands() {
             if (i < g_phrases.size() && g_phrases.edit(i, g_phrases.at(i).label, text, g_phrases.at(i).enter) && savePhrases()) rebuildGrid();
         } else if (line == "shot") {
             // The screen, one line per row: "R" then hex (count, RGB565) runs. Copied whole first, so
-            // the picture is one moment; one write per row, so log lines land between rows.
+            // the picture is one moment; one write per row, so log lines land between rows. It's the
+            // glass as it is: upside down while Rotate screen 180° is on.
             static uint16_t* frame = static_cast<uint16_t*>(ps_malloc(board::LCD_WIDTH * board::LCD_HEIGHT * 2));
             static char out[2 + board::LCD_WIDTH * 6 + 1];
             if (frame != nullptr) display_lcd.readRect(0, 0, board::LCD_WIDTH, board::LCD_HEIGHT, frame);
@@ -1158,6 +1203,22 @@ void serialCommands() {
             Serial.printf("heap: internal free %u, largest %u, min %u; PSRAM free %u\n",
                           heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                           heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+        } else if (line == "rotate") {  // Rotate screen 180° on or off, saved, as the Screen tab does it
+            const bool on = !display_rotated();
+            const bool saved = screen_setting::save(on);
+            if (saved) display_set_rotated(on);
+            if (saved && g_settings != nullptr && g_screen_switch != nullptr) {  // the Screen tab shows it too
+                if (on) lv_obj_add_state(g_screen_switch, LV_STATE_CHECKED);
+                else lv_obj_remove_state(g_screen_switch, LV_STATE_CHECKED);
+            }
+            Serial.printf("rotate: %s\n", !saved ? "couldn't save" : on ? "on" : "off");
+        } else if (line == "flush") {  // time spent flushing since the last "flush" (#170, #190)
+            uint32_t n = 0;
+            uint64_t us = 0;
+            display_flush_stats(n, us);
+            Serial.printf("flush: %u flushes, %llu us, %llu us each, rotated %s\n", static_cast<unsigned>(n),
+                          static_cast<unsigned long long>(us), static_cast<unsigned long long>(n ? us / n : 0),
+                          display_rotated() ? "on" : "off");
         } else if (line == "btpair") {
             openBtPair();
         } else if (line == "pairscreen") {

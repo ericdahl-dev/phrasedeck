@@ -52,3 +52,14 @@ bool display_init();
 
 // The LVGL display registered by display_init(), or nullptr before it runs.
 lv_display_t* display_lvgl();
+
+// Rotate screen 180° (#190): turns what LVGL draws half a turn on the glass, from the next
+// refresh, which draws the whole screen again. touch.cpp mirrors touches to match. Call from the
+// LVGL task only. Off until called.
+void display_set_rotated(bool rotated);
+bool display_rotated();
+
+#ifdef PANEL_SERIAL_COMMANDS
+// Dev builds: flushes and the microseconds spent in them since the last call.
+void display_flush_stats(uint32_t& flushes, uint64_t& us);
+#endif

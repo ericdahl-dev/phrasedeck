@@ -1,5 +1,7 @@
 // Factory reset (#98): a finger on the top-left corner from power-on, held 10 s, erases the panel's
-// admin password, lockouts, web key and cert, pairing, own network password (#165) and Buttons.
+// admin password, lockouts, web key and cert, pairing, own network password (#165), Rotate screen
+// 180° (#190) and Buttons. The corner is the screen's as drawn: with it rotated, the glass's
+// bottom-right.
 // Needs hands on the panel, like USB.
 #pragma once
 

@@ -13,7 +13,8 @@ constexpr const char* kPartition = "panel";
 // pairing, so the panel must pair again. Any other error leaves it alone.
 bool begin();
 
-// Factory reset: erases the whole partition. Call before begin().
+// Factory reset: erases the whole partition, closing it if begin() ran (the boot reads Rotate
+// screen 180° first, #190). Call begin() after it.
 bool erase();
 
 }  // namespace panel_store

@@ -434,11 +434,14 @@ void sendResult(const net::Snapshot& s) {
     g_sending = nullptr;
     clearResult();
     if (b == nullptr) return;  // its Button was rebuilt away meanwhile (a dev serial edit): no color to clear later
-    const lv_color_t c = lv_palette_main(s.ok ? LV_PALETTE_GREEN : s.maybe ? LV_PALETTE_ORANGE : LV_PALETTE_RED);
+    const send::Color color = send::color(s.sent);
+    const lv_color_t c = lv_palette_main(color == send::Color::Green    ? LV_PALETTE_GREEN
+                                         : color == send::Color::Orange ? LV_PALETTE_ORANGE
+                                                                        : LV_PALETTE_RED);
     lv_obj_set_style_text_color(g_status, c, 0);
     lv_obj_remove_state(b, LV_STATE_DISABLED);
     lv_obj_set_style_bg_color(b, c, 0);
-    if (s.maybe) {
+    if (s.sent == send::Outcome::MaybeTyped) {
         g_maybe = b;
         return;
     }

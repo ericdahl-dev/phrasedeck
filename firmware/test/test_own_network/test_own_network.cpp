@@ -186,14 +186,12 @@ void test_the_join_qr_code_names_the_network_and_password() {
     TEST_ASSERT_EQUAL_STRING("WIFI:T:WPA;S:a\\;b\\,c\\:d;P:e\\\\f\\\"g;;", own_network::joinQr("a;b,c:d", "e\\f\"g").c_str());
 }
 
-// Sends and pairing go to phrased, which is only reachable over the panel's Wi-Fi. On its own
-// network an address from a Pair screen opened earlier could be a client of that network, so
-// nothing is sent at all.
-void test_sends_and_pairing_wait_for_the_wifi() {
-    TEST_ASSERT_EQUAL_STRING("Not typed: the panel isn't on its Wi-Fi", own_network::offWifi(false, false).c_str());
-    TEST_ASSERT_EQUAL_STRING("Not paired: the panel isn't on its Wi-Fi", own_network::offWifi(false, true).c_str());
-    TEST_ASSERT_EQUAL_STRING("", own_network::offWifi(true, false).c_str());
-    TEST_ASSERT_EQUAL_STRING("", own_network::offWifi(true, true).c_str());
+// Pairing goes to phrased, which is only reachable over the panel's Wi-Fi. On its own network an
+// address from a Pair screen opened earlier could be a client of that network, so nothing is sent
+// at all. (A Send's wait is in test_send.)
+void test_pairing_waits_for_the_wifi() {
+    TEST_ASSERT_EQUAL_STRING("Not paired: the panel isn't on its Wi-Fi", own_network::offWifi(false).c_str());
+    TEST_ASSERT_EQUAL_STRING("", own_network::offWifi(true).c_str());
 }
 
 int main() {
@@ -213,6 +211,6 @@ int main() {
     RUN_TEST(test_192_168_4_1_is_allowed_only_while_the_network_is_up);
     RUN_TEST(test_joined_only_the_wifi_address_is_allowed);
     RUN_TEST(test_the_join_qr_code_names_the_network_and_password);
-    RUN_TEST(test_sends_and_pairing_wait_for_the_wifi);
+    RUN_TEST(test_pairing_waits_for_the_wifi);
     return UNITY_END();
 }

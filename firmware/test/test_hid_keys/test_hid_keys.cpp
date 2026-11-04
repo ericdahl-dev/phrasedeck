@@ -183,37 +183,6 @@ void test_cancel_before_the_first_key_sends_nothing() {
     TEST_ASSERT_EQUAL(hid_keys::Sender::Result::NotSent, s.result());
 }
 
-// The panel can't see what landed over Bluetooth, so it never says Typed (#98 UI review). A Send
-// that stopped partway typed the start of the Phrase, so tapping again would type it twice: it's
-// Maybe typed, not Not typed (#177).
-void test_what_the_status_line_says_after_a_bluetooth_send() {
-    using R = hid_keys::Sender::Result;
-    hid_keys::Said said = hid_keys::said(R::Sent);
-    TEST_ASSERT_EQUAL_STRING("Sent as keystrokes", said.message.c_str());
-    TEST_ASSERT_TRUE(said.ok);
-    TEST_ASSERT_FALSE(said.maybe);
-
-    said = hid_keys::said(R::Stopped);
-    TEST_ASSERT_EQUAL_STRING("Maybe typed: check the Computer before tapping again", said.message.c_str());
-    TEST_ASSERT_FALSE(said.ok);
-    TEST_ASSERT_TRUE(said.maybe);
-
-    said = hid_keys::said(R::NotSent);
-    TEST_ASSERT_EQUAL_STRING("Not sent", said.message.c_str());
-    TEST_ASSERT_FALSE(said.ok);
-    TEST_ASSERT_FALSE(said.maybe);
-
-    said = hid_keys::said(R::Running);
-    TEST_ASSERT_EQUAL_STRING("Sending", said.message.c_str());
-    TEST_ASSERT_FALSE(said.ok);
-    TEST_ASSERT_FALSE(said.maybe);
-
-    said = hid_keys::refused("\xc3\xa9");
-    TEST_ASSERT_EQUAL_STRING("Not sent: a US keyboard can't type \xc3\xa9", said.message.c_str());
-    TEST_ASSERT_FALSE(said.ok);
-    TEST_ASSERT_FALSE(said.maybe);
-}
-
 // A disconnect can't send a release, and the host drops held keys with the link anyway: drop()
 // ends at once (#130 review).
 void test_drop_ends_at_once_without_a_release() {
@@ -253,10 +222,6 @@ void test_a_refused_release_is_retried_at_once() {
 void test_an_empty_plan_is_not_sent() {
     hid_keys::Sender s({}, 20);
     TEST_ASSERT_EQUAL(hid_keys::Sender::Result::NotSent, s.result());
-}
-
-void test_while_running_the_status_line_says_sending() {
-    TEST_ASSERT_EQUAL_STRING("Sending", hid_keys::said(hid_keys::Sender::Result::Running).message.c_str());
 }
 
 // The give-up is a second of time, not a count: a refused release is retried every step, so a count
@@ -412,12 +377,10 @@ int main() {
     RUN_TEST(test_a_report_the_stack_refuses_is_sent_again);
     RUN_TEST(test_cancel_releases_a_held_key_then_stops);
     RUN_TEST(test_cancel_before_the_first_key_sends_nothing);
-    RUN_TEST(test_what_the_status_line_says_after_a_bluetooth_send);
     RUN_TEST(test_drop_ends_at_once_without_a_release);
     RUN_TEST(test_it_gives_up_after_a_second_of_failures);
     RUN_TEST(test_a_refused_release_is_retried_at_once);
     RUN_TEST(test_an_empty_plan_is_not_sent);
-    RUN_TEST(test_while_running_the_status_line_says_sending);
     RUN_TEST(test_a_refused_release_keeps_trying_for_a_second);
     RUN_TEST(test_drop_wins_over_a_later_cancel);
     RUN_TEST(test_the_next_press_waits_a_whole_interval_after_a_retried_release);

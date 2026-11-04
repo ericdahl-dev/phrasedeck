@@ -10,7 +10,8 @@
 
 namespace web_server {
 
-// Starts a task that waits for Wi-Fi, loads or makes the key and cert, then serves on 443.
+// Starts a task that waits for Wi-Fi or the panel's own network, loads or makes the key and cert,
+// then serves on 443.
 bool start();
 
 // The cert's SHA-256 as AA:BB:..., what a browser shows; empty until the cert is ready.

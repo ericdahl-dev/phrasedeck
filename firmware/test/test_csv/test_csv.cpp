@@ -103,7 +103,6 @@ void test_a_malformed_row_changes_nothing() {
     refusedAt("label,phrase\nA,1\nB,\"unclosed\n", "Row 3");
     refusedAt("label,phrase\nA,1\nB,2,3\n", "Row 3");
     refusedAt("label,phrase\nA,1\nB\n", "Row 3");
-    refusedAt("label,phrase\nA,1\n\nB,2\n", "Row 3");  // a blank line in the middle is a row of one column
     refusedAt("label,phrase\nA,\"1\"x\n", "Row 2");
     refusedAt("label,phrase\nA,1\"x\n", "Row 2");
     refusedAt("label,phrase\nA,\xC3\n", "Row 2");  // not UTF-8 (a Latin-1 export)
@@ -117,6 +116,7 @@ void test_a_row_over_the_limits_changes_nothing() {
     refusedAt("label,phrase\n\"A\nB\",1\n", "Row 2");  // an Enter in a label
     refusedAt("label,phrase\nA,\"1\x01\"\n", "Row 2");
     refusedAt("label,phrase\n", "header");  // no Buttons at all
+    refusedAt("label,phrase\n,\n\n\"\",\"\"\n", "header");  // only empty rows
 }
 
 std::string rows(size_t n) {
@@ -165,7 +165,15 @@ void test_append_adds_the_rows_after_the_buttons() {
     TEST_ASSERT_TRUE(l.needsConfirm(2));
 }
 
-const std::string kType = "multipart/form-data; boundary=----WebKitFormBoundaryAbc123";
+// Excel saves rows it thinks are used as ",", and people leave blank lines: both are skipped
+// anywhere, and a row number still counts them, as the spreadsheet does.
+void test_blank_and_empty_rows_are_skipped_anywhere() {
+    TEST_ASSERT_EQUAL_STRING("A=1;B=2;", importedTexts("label,phrase\n\nA,1\n,\n\r\nB,2\n,\n,\n").c_str());
+    TEST_ASSERT_EQUAL_STRING("A=1;B=2;", importedTexts("label,phrase\r\nA,1\r\n\"\",\"\"\r\nB,2\r\n").c_str());
+    refusedAt("label,phrase\nA,1\n,\nB,\n", "Row 4");
+}
+
+const std::string kType ="multipart/form-data; boundary=----WebKitFormBoundaryAbc123";
 
 std::string part(const std::string& disposition, const std::string& data) {
     return "------WebKitFormBoundaryAbc123\r\nContent-Disposition: form-data; " + disposition + "\r\n" +
@@ -187,6 +195,25 @@ void test_an_import_form_parses_to_an_import() {
     TEST_ASSERT_EQUAL_STRING(csv.c_str(), std::string(im.csv).c_str());
 }
 
+// The body cap must take any list the panel can export: 48 Buttons of nothing but quotes, each
+// doubled in the CSV, wrapped in the form as a browser sends it. And it imports back whole.
+void test_the_largest_export_fits_the_import_cap() {
+    phrases::List l;
+    for (size_t i = 0; i < phrases::kMaxButtons; ++i) {
+        TEST_ASSERT_TRUE(l.add(std::string(phrases::kMaxLabel, '"'), std::string(phrases::kMaxText, '"')));
+    }
+    const std::string body = part("name=\"file\"; filename=\"phrasedeck-buttons.csv\"", exported(l)) +
+                             part("name=\"do\"", "replace") + kEnd;
+    TEST_ASSERT_LESS_OR_EQUAL(web::kMaxImportBody, body.size());
+    Import im;
+    TEST_ASSERT_TRUE(web::importFrom(kType, body, im));
+    phrases::List back;
+    std::string error;
+    TEST_ASSERT_TRUE_MESSAGE(importInto(back, im, error), error.c_str());
+    TEST_ASSERT_EQUAL(phrases::kMaxButtons, back.size());
+    TEST_ASSERT_EQUAL_STRING(l.at(47).text.c_str(), back.at(47).text.c_str());
+}
+
 void test_a_malformed_import_form_is_refused() {
     const std::string file = part("name=\"file\"; filename=\"b.csv\"", "label,phrase\r\nA,1\r\n");
     Import im;
@@ -201,7 +228,9 @@ void test_a_malformed_import_form_is_refused() {
 
 int main() {
     UNITY_BEGIN();
+    RUN_TEST(test_blank_and_empty_rows_are_skipped_anywhere);
     RUN_TEST(test_an_import_form_parses_to_an_import);
+    RUN_TEST(test_the_largest_export_fits_the_import_cap);
     RUN_TEST(test_a_malformed_import_form_is_refused);
     RUN_TEST(test_a_file_without_the_header_changes_nothing);
     RUN_TEST(test_a_malformed_row_changes_nothing);

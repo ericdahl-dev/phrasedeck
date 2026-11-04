@@ -85,8 +85,9 @@ void test_the_page_links_the_csv_and_has_an_import_form() {
     TEST_ASSERT_TRUE(page.find("<a href=/buttons.csv download>Download CSV</a>") != std::string::npos);
     TEST_ASSERT_TRUE(page.find("<form method=post action=/import enctype=multipart/form-data>") != std::string::npos);
     TEST_ASSERT_TRUE(page.find("<input type=file name=file") != std::string::npos);
-    TEST_ASSERT_TRUE(page.find("<button name=do value=replace>Replace all</button>") != std::string::npos);
-    TEST_ASSERT_TRUE(page.find("<button name=do value=append>Append</button>") != std::string::npos);
+    // Append first: Enter in the form submits the first button, and that mustn't replace everything.
+    TEST_ASSERT_TRUE(page.find("<button name=do value=append>Append</button> "
+                               "<button name=do value=replace>Replace all</button>") != std::string::npos);
 }
 
 int main() {

@@ -232,6 +232,10 @@ bool apply(const phrases::List& list, const Import& im, phrases::List& out, std:
     while (!r.done()) {
         ++row;
         if (!r.next(fields, error)) return fail(row, error);
+        // A blank line, or a row of empty cells (Excel writes "," for a row it thinks is used): skipped.
+        bool empty = true;
+        for (const std::string& f : fields) empty = empty && f.empty();
+        if (empty) continue;
         if (fields.size() != 2) {
             return fail(row, "has " + std::to_string(fields.size()) + (fields.size() == 1 ? " column" : " columns") +
                                  ", not 2 (label,phrase)");

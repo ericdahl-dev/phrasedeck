@@ -7,21 +7,18 @@
 #include <vector>
 
 #include "nearby.h"
+#include "send.h"
 
 namespace net {
 
-struct Helper {
-    std::string name;     // Bonjour instance host, e.g. phrased-omarchy-black2
-    std::string address;  // IPv4 the browse resolved to
-    nearby::Computer txt;
-};
+using Helper = nearby::Helper;
 
 struct Snapshot {
     std::string paired;   // the paired Computer's name, empty when not paired
     std::string message;  // the last pairing or Send result, for the status line
     unsigned messageSeq = 0;  // bumps once per handled request, even when message repeats
-    bool ok = false;          // the last request worked: paired, Typed, or Sent as keystrokes
-    bool maybe = false;       // the last Send was Maybe typed (over Bluetooth: it stopped partway)
+    bool ok = false;          // the last request was a Pair, and it paired
+    send::Outcome sent = send::Outcome::NotTyped;  // the last request was a Send: how it went (message says why)
     bool wifiConfigured = false;
     bool wifiUp = false;
     std::string ip;       // on the panel's Wi-Fi; empty when not joined

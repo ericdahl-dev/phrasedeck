@@ -18,4 +18,11 @@ struct Computer {
 // `ts`, if there, is at most 253 characters.
 bool parse(const std::map<std::string, std::string>& txt, Computer& out);
 
+// A Nearby Helper as the browse found it.
+struct Helper {
+    std::string name;     // Bonjour instance host, e.g. phrased-omarchy-black2
+    std::string address;  // IPv4 the browse resolved to
+    Computer txt;
+};
+
 }  // namespace nearby

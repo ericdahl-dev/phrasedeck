@@ -18,7 +18,6 @@
 
 #include "ble_keyboard.h"
 #include "helper_client.h"
-#include "hid_keys.h"
 #include "own_network.h"
 #include "pairing.h"
 #include "panel_store.h"
@@ -30,10 +29,9 @@ namespace {
 
 struct Request {
     enum Kind { Pair, Type } kind;
-    Helper helper;
-    std::string code, shortPin, text;
-    std::string raw;  // Type: the Phrase itself, for Bluetooth
-    bool enter = false;  // Type: Send Enter (#171), for Bluetooth; the Helper's is in text
+    Helper helper;                // Pair
+    std::string code, shortPin;   // Pair
+    send::Phrase phrase;          // Type
 };
 
 // Read once at start(), before the task: a Mode change waits for a restart.
@@ -50,11 +48,7 @@ bool loadBluetooth() {
 QueueHandle_t g_requests = nullptr;  // Request*, owned by the receiver
 
 // The pairing, in the panel NVS. The Token stays on this task: it's never in a Snapshot.
-struct Pairing {
-    std::string name, address, pin, token;
-    int port = 0;
-    bool ok() const { return !token.empty() && pin.size() == 64; }
-};
+using Pairing = send::Paired;
 Pairing g_pairing;
 
 void loadPairing() {
@@ -79,13 +73,6 @@ bool savePairing(const Pairing& pr) {
                     p.putString("token", pr.token.c_str());
     p.end();
     return ok;
-}
-
-// The Helper's own words for an error reply, if it sent any.
-std::string errorText(const std::string& body) {
-    JsonDocument doc;
-    if (deserializeJson(doc, body)) return "";
-    return doc["error"] | "";
 }
 
 SemaphoreHandle_t g_lock = nullptr;
@@ -122,7 +109,7 @@ std::vector<Helper> browse() {
 void handlePair(const Request& req, Snapshot& s) {
     // A Helper from a Pair screen opened before the Wi-Fi went: on the own network its address
     // could be one of that network's clients, so nothing is sent.
-    s.message = own_network::offWifi(s.wifiUp, true);
+    s.message = own_network::offWifi(s.wifiUp);
     if (!s.message.empty()) return;
     const Helper& h = req.helper;
     JsonDocument doc;
@@ -139,7 +126,7 @@ void handlePair(const Request& req, Snapshot& s) {
     } else if (!r.sent) {
         s.message = "Can't reach " + h.name;
     } else if (pairing::readPairReply(r.status, r.body, r.certSha256, token)) {
-        Pairing pr{h.name, h.address, r.certSha256, token, h.txt.port};
+        Pairing pr{h.name, h.address, h.txt.port, r.certSha256, token};
         // The Helper has used up its pairing window either way, so keep the pairing in RAM.
         g_pairing = pr;
         s.paired = pr.name;
@@ -155,48 +142,30 @@ void handlePair(const Request& req, Snapshot& s) {
     }
 }
 
-void handleType(const Request& req, Snapshot& s) {
-    if (!g_pairing.ok()) {
-        s.message = "Not typed: pair with a Computer first";
-        return;
+// The Send module's two seams on the panel: TLS to the Helper, and NimBLE HID reports.
+class TlsHelper : public send::HelperTransport {
+  public:
+    send::Reply post(const std::string& address, int port, const std::string& json, const std::string& token,
+                     const std::function<bool(const std::string&)>& allow) override {
+        const helper_client::Reply r = helper_client::post(address, port, "/type", json, token, allow);
+        send::Reply out;
+        out.sent = r.sent;
+        out.pinMismatch = r.pinMismatch;
+        out.status = r.status;
+        out.body = r.body;
+        return out;
     }
-    // On its own network, or still joining: phrased is only reachable over the Wi-Fi.
-    s.message = own_network::offWifi(s.wifiUp, false);
-    if (!s.message.empty()) return;
-    // A paired Computer is found again by its Pin in Bonjour, since its address can change.
-    std::string address = g_pairing.address;
-    int port = g_pairing.port;
-    for (const Helper& h : s.nearby) {
-        if (pairing::matchesPin(g_pairing.pin, h.txt.fp)) {
-            address = h.address;
-            port = h.txt.port;
-        }
-    }
-    const std::string& json = req.text;  // the whole /type body, from send::typeBody
-    const auto pinned = [](const std::string& cert) { return pairing::matchesPin(g_pairing.pin, cert); };
-    helper_client::Reply r = helper_client::post(address, port, "/type", json, g_pairing.token, pinned);
-    // A Bonjour spoofer can claim the paired Computer's fp; the Pin stops it, then try the
-    // address from pairing once, so a spoofer can't block every Send (checklist, Spoofed Bonjour).
-    if (r.pinMismatch && (address != g_pairing.address || port != g_pairing.port)) {
-        r = helper_client::post(g_pairing.address, g_pairing.port, "/type", json, g_pairing.token, pinned);
-    }
-    switch (send::outcome(r.sent, r.status)) {
-        case send::Outcome::Typed:
-            s.message = "Typed";
-            s.ok = true;
-            break;
-        case send::Outcome::MaybeTyped:
-            s.message = "Maybe typed: check the Computer before tapping again";
-            s.maybe = true;
-            break;
-        case send::Outcome::NotTyped: {
-            std::string why = r.pinMismatch ? "Pin doesn't match" : errorText(r.body);
-            if (why.empty()) why = r.status ? std::to_string(r.status) : "can't reach " + g_pairing.name;
-            s.message = "Not typed: " + why;
-            break;
-        }
-    }
-}
+};
+
+class BleKeyboard : public send::Keyboard {
+  public:
+    bool ready() override { return ble_keyboard::ready(); }
+    bool report(uint8_t mod, uint8_t code) override { return ble_keyboard::send(mod, code); }
+    unsigned disconnects() override { return ble_keyboard::disconnects(); }
+    uint32_t now() override { return millis(); }
+    void yield() override { vTaskDelay(1); }
+    void sleep(uint32_t ms) override { vTaskDelay(pdMS_TO_TICKS(ms)); }
+};
 
 // One report per interval. Most characters are one report (the next key's press releases the last,
 // #174), and the panel asks for a 15 ms connection interval; the controller sends more than one
@@ -210,54 +179,32 @@ static_assert(kKeyIntervalMs >= 1, "PANEL_KEY_INTERVAL_MS must be at least 1");
 
 std::atomic<bool> g_cancelSend{false};  // set from the UI task, read by the send loop
 
-void handleBluetoothType(const Request& req, Snapshot& s) {
-    const hid_keys::Plan p = hid_keys::plan(req.raw, req.enter);
-    hid_keys::Said r = p.ok ? hid_keys::Said{"Not sent: no Computer connected over Bluetooth", false}
-                            : hid_keys::refused(p.bad);
-    if (p.ok && ble_keyboard::ready()) {
-        hid_keys::Sender sender(p.keys, kKeyIntervalMs);
-        const unsigned disconnects = ble_keyboard::disconnects();
-        unsigned reports = 0;
-        const auto notify = [&reports](const hid_keys::Key& k) {
-            const bool ok = ble_keyboard::send(k.mod, k.code);
-            reports += ok;
-            return ok;
-        };
+send::Result sendOverBluetooth(const send::Phrase& phrase) {
+    BleKeyboard keyboard;
 #ifdef PANEL_BLE_DEBUG
-        const uint16_t itvl = ble_keyboard::connInterval();
-        Serial.printf("ble: send %u chars, interval %u.%02u ms, key interval %u ms\n",
-                      static_cast<unsigned>(p.keys.size()), itvl * 125 / 100, itvl * 125 % 100,
-                      static_cast<unsigned>(kKeyIntervalMs));
-#endif
-        const uint32_t began = millis();
-        while (!sender.done()) {
-            if (ble_keyboard::disconnects() != disconnects) sender.drop();
-            if (g_cancelSend.exchange(false)) sender.cancel();
-            sender.step(millis(), notify);
-            vTaskDelay(1);  // Sender needs a yield between steps
-        }
-        const uint32_t took = millis() - began;
-        // Gave up partway on a stalled link: a key may still be down on the Computer, which would
-        // auto-repeat it once the link recovers. Keep offering a release until it goes or the link does.
-        const uint32_t start = millis();
-        while (sender.keyDown() && ble_keyboard::disconnects() == disconnects && millis() - start < 6000 &&
-               !ble_keyboard::send(0, 0)) {
-            vTaskDelay(pdMS_TO_TICKS(kKeyIntervalMs));
-        }
-#ifdef PANEL_BLE_DEBUG
-        // Chars per second of the whole Send, as typed; the host's own timing should match.
-        Serial.printf("ble: sent %u reports for %u chars in %u ms: %u.%u chars/s\n", reports,
-                      static_cast<unsigned>(p.keys.size()), static_cast<unsigned>(took),
-                      took ? static_cast<unsigned>(p.keys.size() * 1000 / took) : 0,
-                      took ? static_cast<unsigned>(p.keys.size() * 10000 / took % 10) : 0);
+    const uint16_t itvl = ble_keyboard::connInterval();
+    Serial.printf("ble: send, interval %u.%02u ms, key interval %u ms\n", itvl * 125 / 100, itvl * 125 % 100,
+                  static_cast<unsigned>(kKeyIntervalMs));
+    send::KeyStats st;
+    const send::Result r = send::overBluetooth(phrase, keyboard, g_cancelSend, kKeyIntervalMs, &st);
+    // Chars per second of the whole Send, as typed; the host's own timing should match.
+    Serial.printf("ble: sent %u reports for %u chars in %u ms: %u.%u chars/s\n", st.reports,
+                  static_cast<unsigned>(st.keys), static_cast<unsigned>(st.tookMs),
+                  st.tookMs ? static_cast<unsigned>(st.keys * 1000 / st.tookMs) : 0,
+                  st.tookMs ? static_cast<unsigned>(st.keys * 10000 / st.tookMs % 10) : 0);
+    return r;
 #else
-        (void)took;
+    return send::overBluetooth(phrase, keyboard, g_cancelSend, kKeyIntervalMs);
 #endif
-        r = hid_keys::said(sender.result());
-    }
+}
+
+// The Mode picks where a Send goes; the Send module does the rest.
+void handleType(const Request& req, Snapshot& s) {
+    TlsHelper helper;
+    const send::Result r = g_bluetooth ? sendOverBluetooth(req.phrase)
+                                       : send::toHelper(req.phrase, g_pairing, s.wifiUp, s.nearby, helper);
+    s.sent = r.outcome;
     s.message = r.message;
-    s.ok = r.ok;
-    s.maybe = r.maybe;
 }
 
 // The panel's own network (#165). Only the web editor answers on it: phrased isn't reachable,
@@ -361,9 +308,9 @@ uint64_t nowMs() { return esp_timer_get_time() / 1000; }
 void handleRequests(Snapshot& s, TickType_t wait) {
     Request* req = nullptr;
     while (xQueueReceive(g_requests, &req, wait) == pdTRUE) {
-        s.ok = s.maybe = false;
+        s.ok = false;
+        s.sent = send::Outcome::NotTyped;
         if (req->kind == Request::Pair) handlePair(*req, s);
-        else if (g_bluetooth) handleBluetoothType(*req, s);
         else handleType(*req, s);
         Serial.printf("net: %s: %s\n", req->kind == Request::Pair ? "pair" : "type", s.message.c_str());
         delete req;
@@ -478,14 +425,14 @@ bool enqueue(Request* req) {
 }  // namespace
 
 bool pair(const Helper& h, const std::string& code, const std::string& shortPin) {
-    return enqueue(new Request{Request::Pair, h, code, shortPin, "", ""});
+    return enqueue(new Request{Request::Pair, h, code, shortPin, {}});
 }
 
 bool type(const std::string& text, const std::string& phrase, uint32_t edit, bool enter) {
     // Cleared here, not when the Send starts: a Stop tapped while this one waits in the queue (a
     // browse holds the net task about 3 s) must still stop it. One Send at a time, so none is stale.
     g_cancelSend.store(false);
-    return enqueue(new Request{Request::Type, Helper{}, "", "", send::typeBody(text, phrase, edit, enter), text, enter});
+    return enqueue(new Request{Request::Type, Helper{}, "", "", send::Phrase{text, phrase, edit, enter}});
 }
 
 bool setBluetooth(bool on) {

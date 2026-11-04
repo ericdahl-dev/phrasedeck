@@ -62,8 +62,8 @@ std::string editorAddress(const std::string& joinedIp, bool networkUp);
 // \ ; , : and " escaped.
 std::string joinQr(const std::string& name, const std::string& password);
 
-// Why a Send (pairing false) or a pairing can't go yet: phrased is reachable only over the
-// panel's Wi-Fi. Empty when it can.
-std::string offWifi(bool wifiUp, bool pairing);
+// Why a pairing can't go yet: phrased is reachable only over the panel's Wi-Fi. Empty when it can.
+// A Send's words for the same are the Send module's (send::toHelper).
+std::string offWifi(bool wifiUp);
 
 }  // namespace own_network

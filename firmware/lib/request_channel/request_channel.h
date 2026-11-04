@@ -27,6 +27,13 @@ class Rtos {
     virtual bool wait(uint32_t ms) = 0;
 };
 
+// Ticks from now until a deadline on a wrapping 32-bit tick counter (FreeRTOS's), or 0 once it has
+// passed. Deadlines are at most half the counter's range ahead.
+inline uint32_t ticksLeft(uint32_t now, uint32_t until) {
+    const uint32_t left = until - now;
+    return left <= 0x7FFFFFFFu ? left : 0;
+}
+
 using Ticket = uint32_t;
 constexpr Ticket kBusy = 0;  // submit() refused it: another request is in flight
 

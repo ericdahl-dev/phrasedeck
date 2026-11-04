@@ -6,17 +6,18 @@ namespace request_channel {
 
 Ticket Channel::submit(Request request) {
     if (rtos_ == nullptr) return kBusy;
+    Ticket t;
     {
         Guard g(*rtos_);
         if (inFlight_ != kBusy) return kBusy;
         if (++next_ == kBusy) ++next_;  // skip 0 on wrap
-        inFlight_ = next_;
+        t = inFlight_ = next_;  // copied under the lock: next_ isn't read after it's given back
         waiting_ = true;
         stop_.store(false);
         pending_ = std::move(request);
     }
     rtos_->notify();
-    return next_;
+    return t;
 }
 
 bool Channel::busy() {
@@ -53,7 +54,7 @@ bool Channel::take(Taken& out, uint32_t ms) {
                 return true;
             }
         }
-        if (waited || !rtos_->wait(ms)) return false;
+        if (waited || !rtos_->wait(ms)) return false;  // woken: look once more
     }
 }
 

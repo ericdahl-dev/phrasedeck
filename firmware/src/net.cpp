@@ -395,7 +395,11 @@ void run(void*) {
             publish(s);
             // Sends and pairing wait at most this long; between browses they're answered at once.
             const TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(10000);
-            while (xTaskGetTickCount() < until) handleRequests(s, pdTICKS_TO_MS(until - xTaskGetTickCount()));
+            // One tick reading per pass: a tick past the deadline is no wait, never a wrapped one.
+            static_assert(sizeof(TickType_t) == sizeof(uint32_t), "ticksLeft takes a 32-bit tick count");
+            for (uint32_t left; (left = request_channel::ticksLeft(xTaskGetTickCount(), until)) > 0;) {
+                handleRequests(s, pdTICKS_TO_MS(left));
+            }
         } else {
             handleRequests(s, 500);
         }

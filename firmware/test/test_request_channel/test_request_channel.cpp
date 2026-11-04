@@ -1,5 +1,6 @@
 #include <unity.h>
 
+#include <functional>
 #include <string>
 
 #include "request_channel.h"
@@ -13,12 +14,14 @@ using request_channel::Request;
 using request_channel::Ticket;
 
 // The RTOS seam with no threads: the lock checks it's taken and given in pairs, never twice, and
-// wait() reports whether a request was signaled since the last wait.
+// wait() reports whether a request was signaled since the last wait. duringWait stands in for the
+// UI task submitting while the net task waits.
 struct FakeRtos : request_channel::Rtos {
     int depth = 0, maxDepth = 0;
     bool signaled = false;
     unsigned waits = 0;
     uint32_t lastWaitMs = 0;
+    std::function<void()> duringWait;
     void lock() override {
         ++depth;
         if (depth > maxDepth) maxDepth = depth;
@@ -28,6 +31,12 @@ struct FakeRtos : request_channel::Rtos {
     bool wait(uint32_t ms) override {
         ++waits;
         lastWaitMs = ms;
+        TEST_ASSERT_EQUAL(0, depth);  // never waits holding the lock
+        if (duringWait) {
+            auto fn = duringWait;
+            duringWait = nullptr;
+            fn();
+        }
         const bool was = signaled;
         signaled = false;
         return was;
@@ -211,6 +220,36 @@ void test_one_snapshot_carries_the_network_and_bluetooth_under_one_version() {
     TEST_ASSERT_EQUAL(1, rtos.maxDepth);
 }
 
+// A request submitted while the net task waits wakes it, and the same take() returns it: it looks
+// again after the wakeup instead of waiting for the next pass (up to 10 s between browses).
+void test_a_request_submitted_during_the_wait_is_taken_by_that_take() {
+    FakeRtos rtos;
+    Channel ch;
+    ch.begin(rtos);
+    Ticket t = kBusy;
+    rtos.duringWait = [&] { t = ch.submit(typeRequest("Ship it")); };
+    request_channel::Taken taken;
+    TEST_ASSERT_TRUE(ch.take(taken, 10000));
+    TEST_ASSERT_NOT_EQUAL(kBusy, t);
+    TEST_ASSERT_EQUAL(t, taken.ticket);
+    TEST_ASSERT_EQUAL_STRING("Ship it", taken.request.phrase.text.c_str());
+    TEST_ASSERT_EQUAL(1, rtos.waits);
+    TEST_ASSERT_EQUAL(0, rtos.depth);
+}
+
+// Between browses the net task waits for requests until a deadline on the tick counter. A tick that
+// passes the deadline between the check and the wait mustn't wrap into a wait of days, and the
+// counter itself wraps.
+void test_the_wait_until_a_deadline_never_wraps() {
+    using request_channel::ticksLeft;
+    TEST_ASSERT_EQUAL_UINT32(10000, ticksLeft(0, 10000));
+    TEST_ASSERT_EQUAL_UINT32(1, ticksLeft(9999, 10000));
+    TEST_ASSERT_EQUAL_UINT32(0, ticksLeft(10000, 10000));
+    TEST_ASSERT_EQUAL_UINT32(0, ticksLeft(10001, 10000));  // passed it: no wait, not 4294967295
+    TEST_ASSERT_EQUAL_UINT32(20, ticksLeft(0xFFFFFFF6u, 10));  // the counter wrapped before the deadline
+    TEST_ASSERT_EQUAL_UINT32(0, ticksLeft(11, 0xFFFFFFF6u + 20));  // and after it
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_a_second_request_while_one_is_in_flight_is_busy);
@@ -218,5 +257,7 @@ int main() {
     RUN_TEST(test_stop_reaches_the_send_its_ticket_names);
     RUN_TEST(test_a_stale_stop_or_result_does_not_touch_the_next_send);
     RUN_TEST(test_one_snapshot_carries_the_network_and_bluetooth_under_one_version);
+    RUN_TEST(test_a_request_submitted_during_the_wait_is_taken_by_that_take);
+    RUN_TEST(test_the_wait_until_a_deadline_never_wraps);
     return UNITY_END();
 }

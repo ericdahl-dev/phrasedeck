@@ -114,13 +114,13 @@ std::string header(httpd_req_t* req, const char* name) {
     return v;
 }
 
-// On every reply: no framing, no sniffing, no caching, no referrer, and only our own CSS.
+// On every reply: no framing, no sniffing, no caching, no referrer to other sites, and only our own CSS.
 void securityHeaders(httpd_req_t* req) {
     httpd_resp_set_hdr(req, "Content-Security-Policy",
                        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
     httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
     httpd_resp_set_hdr(req, "X-Frame-Options", "DENY");
-    httpd_resp_set_hdr(req, "Referrer-Policy", "no-referrer");
+    httpd_resp_set_hdr(req, "Referrer-Policy", web::kReferrerPolicy);
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
 }
 

@@ -97,10 +97,17 @@ void test_a_session_left_unused_for_49_days_stays_ended() {
     TEST_ASSERT_FALSE(web::sessionValid(s, t, 1000 + hour + (1ull << 32) + 60000));
 }
 
+// "no-referrer" makes browsers send "Origin: null" on the page's own form POSTs, which
+// originAllowed refuses, so no one could log in. "same-origin" still sends no referrer elsewhere.
+void test_the_pages_referrer_policy_keeps_the_origin_on_its_own_posts() {
+    TEST_ASSERT_EQUAL_STRING("same-origin", web::kReferrerPolicy);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_only_the_panels_own_address_is_an_allowed_host);
     RUN_TEST(test_a_post_needs_the_panels_own_origin);
+    RUN_TEST(test_the_pages_referrer_policy_keeps_the_origin_on_its_own_posts);
     RUN_TEST(test_a_form_field_is_decoded);
     RUN_TEST(test_the_session_token_comes_from_its_cookie);
     RUN_TEST(test_a_session_matches_its_token_until_it_expires);

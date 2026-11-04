@@ -69,7 +69,17 @@ constexpr int LCD_HEIGHT = 480;
 // Elecrow LOWERED the pixel clock between V1.2 and V1.3. Read verbatim from
 // their three driver files. This single fact reconciles most of the
 // contradictory advice in circulation.
-#if CROWPANEL_ADVANCE_REV >= 130
+//
+// -DPANEL_PCLK_HZ=<Hz> overrides it, to try a lower clock against display glitches (#170): the
+// scan-out reads the framebuffer from PSRAM at 2 bytes a pixel, so 16 MHz needs 32 MB/s and 14 MHz
+// 28 MB/s. A frame is 820 x 500 clocks with these porches, so 16 MHz is 39 Hz and 14 MHz 34 Hz.
+#if defined(PANEL_PCLK_HZ)
+constexpr uint32_t LCD_PCLK_HZ = PANEL_PCLK_HZ;
+// The floor is 30 Hz (820 x 500 x 30); below it the panel flickers. The ceiling is what Elecrow
+// ship for V1.3+: this lever is for lowering the clock, and 21 MHz is the V1.2 setting.
+static_assert(LCD_PCLK_HZ >= 12300000 && LCD_PCLK_HZ <= 16000000,
+              "PANEL_PCLK_HZ: 12.3 to 16 MHz (30 to 39 Hz refresh)");
+#elif CROWPANEL_ADVANCE_REV >= 130
 constexpr uint32_t LCD_PCLK_HZ = 16000000;
 #else
 constexpr uint32_t LCD_PCLK_HZ = 21000000;

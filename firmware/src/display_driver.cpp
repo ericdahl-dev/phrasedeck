@@ -14,6 +14,9 @@
 #include <soc/lcd_cam_struct.h>
 
 #include "screen_rotation.h"
+#ifdef PANEL_PERF_LOG
+#include "frame_stats.h"
+#endif
 
 LGFX display_lcd;
 
@@ -24,12 +27,40 @@ lv_display_t* g_disp = nullptr;
 // Ten lines of partial rendering. Full double buffering at this size would be
 // 1.5 MB, which PSRAM could afford but which buys nothing here: the UI redraws
 // small regions (a pressed Button, the status line), not whole frames.
-constexpr int   DRAW_LINES = 10;
+//
+// -DPANEL_DRAW_LINES=<n> tries other heights (#170): fewer, larger flushes when a whole Page
+// redraws (a swipe), at 1.6 KB of internal RAM per line per buffer.
+#ifndef PANEL_DRAW_LINES
+#define PANEL_DRAW_LINES 10
+#endif
+constexpr int   DRAW_LINES = PANEL_DRAW_LINES;
+static_assert(DRAW_LINES >= 4 && DRAW_LINES <= 40, "PANEL_DRAW_LINES: 4 to 40");
 constexpr size_t DRAW_PIXELS =
     static_cast<size_t>(board::LCD_WIDTH) * DRAW_LINES;
 
 // Rotate screen 180° (#190). Only the LVGL task (loop()) reads or writes it.
 bool g_rotated = false;
+
+#ifdef PANEL_PERF_LOG
+// -DPANEL_PERF_LOG (#170): every 5 s, how many frames LVGL drew and how long they took, so a
+// change to the refresh period, the buffers or the clock can be judged by numbers as well as by
+// eye. The arithmetic is lib/frame_stats, tested on the host.
+frame_stats::Stats g_perf;
+
+void perf_event_cb(lv_event_t* e) {
+    if (lv_event_get_code(e) == LV_EVENT_REFR_START) {
+        frame_stats::refreshStart(g_perf, micros());
+        return;
+    }
+    frame_stats::Report r;
+    if (!frame_stats::refreshReady(g_perf, micros(), millis(), r)) return;
+    Serial.printf("perf: %.1f frames/s, frame avg %.1f ms max %.1f ms, flush %.1f ms/frame, "
+                  "%u kpx/frame, refresh period %u ms, %d-line buffers, internal free %u\n",
+                  r.framesPerSecond, r.frameAvgMs, r.frameMaxMs, r.flushMsPerFrame,
+                  static_cast<unsigned>(r.kpxPerFrame), static_cast<unsigned>(LV_DEF_REFR_PERIOD),
+                  DRAW_LINES, static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
+}
+#endif
 
 #ifdef PANEL_SERIAL_COMMANDS
 uint32_t g_flushes = 0;
@@ -43,7 +74,7 @@ uint64_t g_flush_us = 0;
 // third draw-sized buffer (16 KB more internal RAM, or PSRAM traffic, #170). LovyanGFX's
 // setRotation leaves its memcpy path for a per-pixel copy. Off, this costs one test per flush.
 void flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
-#ifdef PANEL_SERIAL_COMMANDS
+#if defined(PANEL_SERIAL_COMMANDS) || defined(PANEL_PERF_LOG)
     const int64_t start = esp_timer_get_time();
 #endif
     const screen_rotation::Area to = screen_rotation::flush(
@@ -57,6 +88,10 @@ void flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
 #ifdef PANEL_SERIAL_COMMANDS
     ++g_flushes;
     g_flush_us += static_cast<uint64_t>(esp_timer_get_time() - start);
+#endif
+#ifdef PANEL_PERF_LOG
+    frame_stats::flushed(g_perf, static_cast<uint32_t>(w * h),
+                         static_cast<uint32_t>(esp_timer_get_time() - start));
 #endif
     lv_display_flush_ready(disp);
 }
@@ -155,8 +190,8 @@ bool display_init() {
     // competing with that scanout for the same bus and starving its DMA. On
     // real hardware that shows up as occasional jitter, worse while the touch
     // controller is also active. From internal RAM a flush only writes to
-    // PSRAM, halving the contention. Two 16 KB buffers is affordable against
-    // roughly 140 KB free.
+    // PSRAM, halving the contention. Two 16 KB buffers (the default 10 lines)
+    // is affordable against roughly 140 KB free.
     //
     // Falls back to PSRAM if internal memory is short, because a jittery
     // display beats no display. The fallback must NOT ask for MALLOC_CAP_DMA:
@@ -194,11 +229,16 @@ bool display_init() {
     lv_display_set_flush_cb(g_disp, flush_cb);
     lv_display_set_buffers(g_disp, buf1, buf2, bytes,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
+#ifdef PANEL_PERF_LOG
+    lv_display_add_event_cb(g_disp, perf_event_cb, LV_EVENT_REFR_START, nullptr);
+    lv_display_add_event_cb(g_disp, perf_event_cb, LV_EVENT_REFR_READY, nullptr);
+#endif
 
-    Serial.printf("display: %dx%d up, pclk %u Hz, draw buffers in %s\n",
+    Serial.printf("display: %dx%d up, pclk %u Hz, %d-line draw buffers in %s, refresh every %u ms\n",
                   board::LCD_WIDTH, board::LCD_HEIGHT,
-                  static_cast<unsigned>(board::LCD_PCLK_HZ),
-                  internal ? "internal RAM" : "PSRAM (expect jitter)");
+                  static_cast<unsigned>(board::LCD_PCLK_HZ), DRAW_LINES,
+                  internal ? "internal RAM" : "PSRAM (expect jitter)",
+                  static_cast<unsigned>(LV_DEF_REFR_PERIOD));
     if (esp_register_shutdown_handler(stopLcdOnRestart) != ESP_OK) {
         Serial.println("display: couldn't register the restart handler (#150)");
     }

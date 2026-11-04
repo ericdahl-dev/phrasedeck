@@ -100,6 +100,27 @@ Eric's board (V1.4) was backed up on 2026-10-25 before its first flash, to Dropb
 `d113064cf5b0382a438feef4ce4f29343949d2f5d3b4d77283e786e2bbdfdb8b`). To restore Elecrow's demo:
 `esptool --port /dev/ttyUSB0 write-flash 0 crowpanel-factory-2026-10-25.bin`.
 
+## Display glitches and frame rate
+
+The panel scans its framebuffer out of PSRAM all the time (16 MHz pixel clock, 32 MB/s, about
+39 frames a second). Anything else on the same memory bus, LVGL's copies into the framebuffer and
+the CPU's cache misses on flash and PSRAM, can starve that scan-out for a moment, and the picture
+jumps for a frame (#170). LovyanGFX restarts the scan-out at every VSYNC, so it never stays
+shifted.
+
+`pio run -e crowpanel-perf` builds the same firmware with a `perf:` line in the serial log every
+5 s: frames drawn per second, average and worst frame time, the time spent copying into the
+framebuffer, and free internal RAM. `crowpanel-perf-o2` is the same at `-O2`. The levers to try
+are listed above those environments in `platformio.ini`; add them with `PLATFORMIO_BUILD_FLAGS`.
+The `crowpanel-dev` serial command `flush` gives the flush count and time since the last `flush`,
+with the screen rotated or not.
+
+Elecrow's own fix for this shake on a V1.4 board (their issue #7) is Arduino libraries rebuilt with
+PSRAM and flash at 120 MHz and code run from PSRAM (`CONFIG_SPIRAM_XIP_FROM_PSRAM`). That needs
+pioarduino's `custom_sdkconfig`, which rebuilds the framework (several GB, and it rewrites the
+shared `~/.platformio` packages). A first try with `CONFIG_SPIRAM_XIP_FROM_PSRAM=y` alone failed
+in that rebuild (`sdkconfig.h: No such file or directory`), so it isn't here yet.
+
 ## Board revision
 
 The revision is printed on the back of the board (V1.x). Set it with `-DCROWPANEL_ADVANCE_REV` in

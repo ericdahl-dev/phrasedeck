@@ -75,8 +75,10 @@ constexpr int LCD_HEIGHT = 480;
 // 28 MB/s. A frame is 820 x 500 clocks with these porches, so 16 MHz is 39 Hz and 14 MHz 34 Hz.
 #if defined(PANEL_PCLK_HZ)
 constexpr uint32_t LCD_PCLK_HZ = PANEL_PCLK_HZ;
-static_assert(LCD_PCLK_HZ >= 12000000 && LCD_PCLK_HZ <= 21000000,
-              "PANEL_PCLK_HZ: below 12 MHz the refresh drops under 30 Hz and flickers");
+// The floor is 30 Hz (820 x 500 x 30); below it the panel flickers. The ceiling is what Elecrow
+// ship for V1.3+: this lever is for lowering the clock, and 21 MHz is the V1.2 setting.
+static_assert(LCD_PCLK_HZ >= 12300000 && LCD_PCLK_HZ <= 16000000,
+              "PANEL_PCLK_HZ: 12.3 to 16 MHz (30 to 39 Hz refresh)");
 #elif CROWPANEL_ADVANCE_REV >= 130
 constexpr uint32_t LCD_PCLK_HZ = 16000000;
 #else

@@ -13,7 +13,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
-#include <atomic>
 #include <map>
 
 #include "ble_keyboard.h"
@@ -21,18 +20,37 @@
 #include "own_network.h"
 #include "pairing.h"
 #include "panel_store.h"
+#include "request_channel.h"
 #include "send.h"
 #include "wifi_secrets.h"
 
 namespace net {
 namespace {
 
-struct Request {
-    enum Kind { Pair, Type } kind;
-    Helper helper;                // Pair
-    std::string code, shortPin;   // Pair
-    send::Phrase phrase;          // Type
+using request_channel::Request;
+using Network = request_channel::Network;
+
+// The request channel's seam on the panel: a mutex for its state, and a binary semaphore that wakes
+// the net task when a request comes.
+class FreeRtos : public request_channel::Rtos {
+  public:
+    bool create() {
+        lock_ = xSemaphoreCreateMutex();
+        signal_ = xSemaphoreCreateBinary();
+        return lock_ != nullptr && signal_ != nullptr;
+    }
+    void lock() override { xSemaphoreTake(lock_, portMAX_DELAY); }
+    void unlock() override { xSemaphoreGive(lock_); }
+    void notify() override { xSemaphoreGive(signal_); }
+    bool wait(uint32_t ms) override { return xSemaphoreTake(signal_, pdMS_TO_TICKS(ms)) == pdTRUE; }
+
+  private:
+    SemaphoreHandle_t lock_ = nullptr;
+    SemaphoreHandle_t signal_ = nullptr;
 };
+
+FreeRtos g_rtos;
+request_channel::Channel g_channel;
 
 // Read once at start(), before the task: a Mode change waits for a restart.
 bool g_bluetooth = false;
@@ -44,8 +62,6 @@ bool loadBluetooth() {
     p.end();
     return on;
 }
-
-QueueHandle_t g_requests = nullptr;  // Request*, owned by the receiver
 
 // The pairing, in the panel NVS. The Token stays on this task: it's never in a Snapshot.
 using Pairing = send::Paired;
@@ -75,18 +91,21 @@ bool savePairing(const Pairing& pr) {
     return ok;
 }
 
-SemaphoreHandle_t g_lock = nullptr;
-Snapshot g_snap;
-std::atomic<unsigned> g_version{0};
+void publish(const Network& s) { g_channel.publish(s); }
 
-void publish(const Snapshot& s) {
-    xSemaphoreTake(g_lock, portMAX_DELAY);
-    const unsigned v = g_snap.version + 1;
-    g_snap = s;
-    g_snap.version = v;
-    xSemaphoreGive(g_lock);
-    g_version.store(v);
+// The Bluetooth keyboard's state, read under the channel's lock on every change (ble_keyboard::onChange).
+request_channel::Bluetooth readBluetooth() {
+    request_channel::Bluetooth b;
+    b.on = g_bluetooth;
+    if (g_bluetooth) {
+        b.ready = ble_keyboard::ready();
+        b.pairing = ble_keyboard::pairingOpen();
+        b.passkey = ble_keyboard::passkey();
+    }
+    return b;
 }
+
+void bluetoothChanged() { g_channel.updateBluetooth(readBluetooth); }
 
 std::vector<Helper> browse() {
     std::vector<Helper> out;
@@ -106,11 +125,11 @@ std::vector<Helper> browse() {
     return out;
 }
 
-void handlePair(const Request& req, Snapshot& s) {
+void handlePair(const Request& req, Network& s, Result& out) {
     // A Helper from a Pair screen opened before the Wi-Fi went: on the own network its address
     // could be one of that network's clients, so nothing is sent.
-    s.message = own_network::offWifi(s.wifiUp);
-    if (!s.message.empty()) return;
+    out.message = own_network::offWifi(s.wifiUp);
+    if (!out.message.empty()) return;
     const Helper& h = req.helper;
     JsonDocument doc;
     doc["code"] = req.code;
@@ -122,23 +141,23 @@ void handlePair(const Request& req, Snapshot& s) {
         [&](const std::string& cert) { return pairing::matchesShortPin(req.shortPin, cert); });
     std::string token;
     if (r.pinMismatch) {
-        s.message = "Pin doesn't match " + h.name + ": nothing sent";
+        out.message = "Pin doesn't match " + h.name + ": nothing sent";
     } else if (!r.sent) {
-        s.message = "Can't reach " + h.name;
+        out.message = "Can't reach " + h.name;
     } else if (pairing::readPairReply(r.status, r.body, r.certSha256, token)) {
         Pairing pr{h.name, h.address, h.txt.port, r.certSha256, token};
         // The Helper has used up its pairing window either way, so keep the pairing in RAM.
         g_pairing = pr;
         s.paired = pr.name;
-        s.ok = true;
-        s.message = savePairing(pr) ? "Paired with " + pr.name
+        out.paired = true;
+        out.message = savePairing(pr) ? "Paired with " + pr.name
                                     : "Paired with " + pr.name + ", but not saved: pair again after a restart";
     } else if (r.status == 401) {
-        s.message = "Wrong Pairing code";
+        out.message = "Wrong Pairing code";
     } else if (r.status == 404) {
-        s.message = "No pairing window: run phrased pair";
+        out.message = "No pairing window: run phrased pair";
     } else {
-        s.message = "Pairing failed (" + std::to_string(r.status) + ")";
+        out.message = "Pairing failed (" + std::to_string(r.status) + ")";
     }
 }
 
@@ -177,8 +196,6 @@ class BleKeyboard : public send::Keyboard {
 constexpr uint32_t kKeyIntervalMs = PANEL_KEY_INTERVAL_MS;
 static_assert(kKeyIntervalMs >= 1, "PANEL_KEY_INTERVAL_MS must be at least 1");
 
-std::atomic<bool> g_cancelSend{false};  // set from the UI task, read by the send loop
-
 send::Result sendOverBluetooth(const send::Phrase& phrase) {
     BleKeyboard keyboard;
 #ifdef PANEL_BLE_DEBUG
@@ -186,7 +203,7 @@ send::Result sendOverBluetooth(const send::Phrase& phrase) {
     Serial.printf("ble: send, interval %u.%02u ms, key interval %u ms\n", itvl * 125 / 100, itvl * 125 % 100,
                   static_cast<unsigned>(kKeyIntervalMs));
     send::KeyStats st;
-    const send::Result r = send::overBluetooth(phrase, keyboard, g_cancelSend, kKeyIntervalMs, &st);
+    const send::Result r = send::overBluetooth(phrase, keyboard, g_channel.stop(), kKeyIntervalMs, &st);
     // Chars per second of the whole Send, as typed; the host's own timing should match.
     Serial.printf("ble: sent %u reports for %u chars in %u ms: %u.%u chars/s\n", st.reports,
                   static_cast<unsigned>(st.keys), static_cast<unsigned>(st.tookMs),
@@ -194,17 +211,17 @@ send::Result sendOverBluetooth(const send::Phrase& phrase) {
                   st.tookMs ? static_cast<unsigned>(st.keys * 10000 / st.tookMs % 10) : 0);
     return r;
 #else
-    return send::overBluetooth(phrase, keyboard, g_cancelSend, kKeyIntervalMs);
+    return send::overBluetooth(phrase, keyboard, g_channel.stop(), kKeyIntervalMs);
 #endif
 }
 
 // The Mode picks where a Send goes; the Send module does the rest.
-void handleType(const Request& req, Snapshot& s) {
+void handleType(const Request& req, const Network& s, Result& out) {
     TlsHelper helper;
     const send::Result r = g_bluetooth ? sendOverBluetooth(req.phrase)
                                        : send::toHelper(req.phrase, g_pairing, s.wifiUp, s.nearby, helper);
-    s.sent = r.outcome;
-    s.message = r.message;
+    out.sent = r.outcome;
+    out.message = r.message;
 }
 
 // The panel's own network (#165). Only the web editor answers on it: phrased isn't reachable,
@@ -254,7 +271,7 @@ bool seedApConfig(const std::string& name, const std::string& pw) {
     return esp_wifi_deinit() == ESP_OK && ok;
 }
 
-bool startOwnNetwork(Snapshot& s) {
+bool startOwnNetwork(Network& s) {
     const std::string pw = ownPassword();
     if (pw.empty()) {
         Serial.println("net: own network: no password saved (panel NVS), not started");
@@ -294,7 +311,7 @@ bool startOwnNetwork(Snapshot& s) {
     return true;
 }
 
-void stopOwnNetwork(Snapshot& s) {
+void stopOwnNetwork(Network& s) {
     WiFi.enableAP(false);
     WiFi.setAutoReconnect(true);
     s.ownNetwork = false;
@@ -305,30 +322,29 @@ void stopOwnNetwork(Snapshot& s) {
 
 uint64_t nowMs() { return esp_timer_get_time() / 1000; }
 
-void handleRequests(Snapshot& s, TickType_t wait) {
-    Request* req = nullptr;
-    while (xQueueReceive(g_requests, &req, wait) == pdTRUE) {
-        s.ok = false;
-        s.sent = send::Outcome::NotTyped;
-        if (req->kind == Request::Pair) handlePair(*req, s);
-        else handleType(*req, s);
-        Serial.printf("net: %s: %s\n", req->kind == Request::Pair ? "pair" : "type", s.message.c_str());
-        delete req;
-        ++s.messageSeq;
-        publish(s);
-        wait = 0;
+// Runs the request in flight, if one comes within waitMs. At most one is in flight, so after one
+// it looks once more without waiting, as the queue did.
+void handleRequests(Network& s, uint32_t waitMs) {
+    request_channel::Taken t;
+    while (g_channel.take(t, waitMs)) {
+        Result r;
+        const bool isPair = t.request.kind == Request::Pair;
+        if (isPair) handlePair(t.request, s, r);
+        else handleType(t.request, s, r);
+        Serial.printf("net: %s: %s\n", isPair ? "pair" : "type", r.message.c_str());
+        if (r.paired) publish(s);  // the paired name, before the ticket's result says so
+        g_channel.finish(t.ticket, r);
+        t.request = Request();  // the Phrase's text is freed now, not when the next one comes
+        waitMs = 0;
     }
 }
 
 void run(void*) {
-    Snapshot s;
+    Network s;
     loadPairing();
     s.paired = g_pairing.ok() ? g_pairing.name : "";
     s.wifiConfigured = sizeof(WIFI_SSID) > 1;
-    if (g_bluetooth && !ble_keyboard::start()) {
-        s.message = "Bluetooth didn't start";
-        Serial.println("net: Bluetooth didn't start");
-    }
+    if (g_bluetooth && !ble_keyboard::start()) Serial.println("net: Bluetooth didn't start");
     publish(s);
     // STA even without Wi-Fi in the build: the radio on gives the RNG entropy for the own network.
     WiFi.mode(WIFI_STA);
@@ -379,9 +395,13 @@ void run(void*) {
             publish(s);
             // Sends and pairing wait at most this long; between browses they're answered at once.
             const TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(10000);
-            while (xTaskGetTickCount() < until) handleRequests(s, until - xTaskGetTickCount());
+            // One tick reading per pass: a tick past the deadline is no wait, never a wrapped one.
+            static_assert(sizeof(TickType_t) == sizeof(uint32_t), "ticksLeft takes a 32-bit tick count");
+            for (uint32_t left; (left = request_channel::ticksLeft(xTaskGetTickCount(), until)) > 0;) {
+                handleRequests(s, pdTICKS_TO_MS(left));
+            }
         } else {
-            handleRequests(s, pdMS_TO_TICKS(500));
+            handleRequests(s, 500);
         }
     }
 }
@@ -389,51 +409,40 @@ void run(void*) {
 }  // namespace
 
 bool start() {
-    g_lock = xSemaphoreCreateMutex();
-    g_requests = xQueueCreate(8, sizeof(Request*));
-    if (g_lock == nullptr || g_requests == nullptr) return false;
+    if (!g_rtos.create()) return false;
     g_bluetooth = loadBluetooth();
+    g_channel.begin(g_rtos);
+    bluetoothChanged();  // the Mode is in the first Snapshot
+    if (g_bluetooth) ble_keyboard::onChange(bluetoothChanged);
     // 16 KB: the TLS client runs on this task too (mbedTLS handshakes are stack hungry).
     return xTaskCreatePinnedToCore(run, "net", 16384, nullptr, 1, nullptr, 0) == pdPASS;
 }
 
-unsigned version() { return g_version.load() + ble_keyboard::version(); }
+unsigned version() { return g_channel.version(); }
 
-Snapshot snapshot() {
-    xSemaphoreTake(g_lock, portMAX_DELAY);
-    Snapshot s = g_snap;
-    xSemaphoreGive(g_lock);
-    s.version += ble_keyboard::version();  // the same number version() returns
-    s.bluetooth = g_bluetooth;
-    if (g_bluetooth) {
-        s.bleReady = ble_keyboard::ready();
-        s.blePairing = ble_keyboard::pairingOpen();
-        s.passkey = ble_keyboard::passkey();
-    }
-    return s;
+Snapshot snapshot() { return g_channel.snapshot(); }
+
+Ticket pair(const Helper& h, const std::string& code, const std::string& shortPin) {
+    Request req;
+    req.kind = Request::Pair;
+    req.helper = h;
+    req.code = code;
+    req.shortPin = shortPin;
+    return g_channel.submit(std::move(req));
 }
 
-namespace {
-
-bool enqueue(Request* req) {
-    // The net task runs in every build now (it runs the own network), so something always answers.
-    if (g_requests != nullptr && xQueueSend(g_requests, &req, 0) == pdTRUE) return true;
-    delete req;
-    return false;
+Ticket type(const std::string& text, const std::string& phrase, uint32_t edit, bool enter) {
+    Request req;
+    req.kind = Request::Type;
+    req.phrase = send::Phrase{text, phrase, edit, enter};
+    return g_channel.submit(std::move(req));
 }
 
-}  // namespace
+bool result(Ticket t, Result& out) { return g_channel.result(t, out); }
 
-bool pair(const Helper& h, const std::string& code, const std::string& shortPin) {
-    return enqueue(new Request{Request::Pair, h, code, shortPin, {}});
-}
+bool busy() { return g_channel.busy(); }
 
-bool type(const std::string& text, const std::string& phrase, uint32_t edit, bool enter) {
-    // Cleared here, not when the Send starts: a Stop tapped while this one waits in the queue (a
-    // browse holds the net task about 3 s) must still stop it. One Send at a time, so none is stale.
-    g_cancelSend.store(false);
-    return enqueue(new Request{Request::Type, Helper{}, "", "", send::Phrase{text, phrase, edit, enter}});
-}
+void stop(Ticket t) { g_channel.cancel(t); }
 
 bool setBluetooth(bool on) {
     Preferences p;
@@ -442,8 +451,6 @@ bool setBluetooth(bool on) {
     p.end();
     return ok;
 }
-
-void cancelBluetoothSend() { g_cancelSend.store(true); }
 
 void openBluetoothPairing(uint32_t ms) {
     if (g_bluetooth) ble_keyboard::openPairing(ms);

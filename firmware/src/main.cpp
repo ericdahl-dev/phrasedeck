@@ -58,7 +58,6 @@ void showStop(bool on) {
 }
 lv_obj_t* g_net = nullptr;
 unsigned g_net_version = 0;
-unsigned g_message_seq = 0;
 std::vector<lv_obj_t*> g_buttons;  // the grid's Buttons, by phrase index
 lv_obj_t* g_dots = nullptr;        // one dot per Page, when there's more than one
 lv_obj_t* g_tiles = nullptr;       // the Pages of Buttons, rebuilt when the web page changes them
@@ -67,7 +66,11 @@ lv_obj_t* g_sending = nullptr;  // the Button whose Send is in flight, dimmed un
 lv_obj_t* g_maybe = nullptr;    // a Maybe typed Button stays orange until the next tap
 lv_timer_t* g_flash = nullptr;  // ends the 700 ms result color on g_flashed
 lv_obj_t* g_flashed = nullptr;
-bool g_busy = false;  // a pair or Send is queued or running: further taps are refused, not queued
+// The pair or Send this screen waits on (from net::pair or net::type), or net::kBusy for none. The
+// request channel refuses a second one; this also holds edits and Mode switches until the result
+// has been shown, since a rebuild would delete the Button it colors.
+net::Ticket g_ticket = net::kBusy;
+bool waiting() { return g_ticket != net::kBusy; }
 
 // The Pair screen: which Nearby Computer, the Pairing code and the short Pin from `phrased pair`.
 lv_obj_t* g_pair = nullptr;
@@ -89,10 +92,10 @@ Wizard g_wizard = Wizard::Off;
 void wizardWeb();
 
 void closePair(lv_event_t*);
-void pairResult(const net::Snapshot& s);
+void pairResult(const net::Result& r);
 lv_obj_t* g_bt_pair = nullptr;  // the Bluetooth pairing screen
 void btPairShow(const net::Snapshot& s);
-void sendResult(const net::Snapshot& s);
+void sendResult(const net::Result& r);
 
 // Shows Wi-Fi and the paired Computer; runs on the LVGL loop, reading the net task's snapshot.
 // Nearby Computers are listed on the Pair screen, not here.
@@ -115,17 +118,17 @@ void showNet() {
     }
     lv_label_set_text(g_net, text.c_str());
     if (g_bt_pair != nullptr) btPairShow(s);
-    if (s.messageSeq != g_message_seq) {
-        g_message_seq = s.messageSeq;
-        g_busy = false;
+    net::Result r;
+    if (waiting() && net::result(g_ticket, r)) {  // a finished request bumps the version too
+        g_ticket = net::kBusy;
         showStop(false);
         lv_obj_remove_local_style_prop(g_status, LV_STYLE_TEXT_COLOR, 0);  // only Send results are colored
         if (g_pairing_now) {  // also after Cancel and reopen, so a reopened screen still gets its result
             g_pairing_now = false;
-            if (g_pair != nullptr) pairResult(s);
+            if (g_pair != nullptr) pairResult(r);
         }
-        if (g_sending != nullptr) sendResult(s);
-        lv_label_set_text(g_status, s.message.c_str());
+        if (g_sending != nullptr) sendResult(r);
+        lv_label_set_text(g_status, r.message.c_str());
     }
 }
 
@@ -136,13 +139,13 @@ void closePair(lv_event_t*) {
     if (g_wizard == Wizard::Pair) wizardWeb();  // paired or skipped
 }
 
-// Queues a request unless one is already in flight; says so either way.
-bool startRequest(bool queued, const std::string& sending) {
-    if (!queued) {
+// Waits on ticket t, unless the request channel said Busy; says so either way.
+bool startRequest(net::Ticket t, const std::string& sending) {
+    if (t == net::kBusy) {
         lv_label_set_text(g_status, "Busy: try again in a moment");
         return false;
     }
-    g_busy = true;
+    g_ticket = t;
     lv_label_set_text(g_status, sending.c_str());
     return true;
 }
@@ -162,23 +165,24 @@ void submitPair(lv_event_t*) {
     const std::string pin = lv_textarea_get_text(g_pin);
     if (!pairing::readyToPair(code, pin) || g_pair_index >= g_pair_helpers.size() || g_pairing_now) return;
     const net::Helper& h = g_pair_helpers[g_pair_index];
-    if (g_busy || !net::pair(h, code, pin)) {
+    const net::Ticket t = waiting() ? net::kBusy : net::pair(h, code, pin);
+    if (t == net::kBusy) {
         lv_label_set_text(g_pair_note, "Busy: try again in a moment");
         return;
     }
-    g_busy = true;
+    g_ticket = t;
     g_pairing_now = true;
     lv_obj_add_state(g_pair_go, LV_STATE_DISABLED);
     lv_label_set_text(g_pair_note, ("Pairing with " + h.name + "...").c_str());
 }
 
 // Paired: close. Anything else stays on this screen, so the code and Pin can be fixed in place.
-void pairResult(const net::Snapshot& s) {
-    if (s.ok) {
+void pairResult(const net::Result& r) {
+    if (r.paired) {
         closePair(nullptr);
         return;
     }
-    lv_label_set_text(g_pair_note, s.message.c_str());
+    lv_label_set_text(g_pair_note, r.message.c_str());
     pairInputChanged(nullptr);
 }
 
@@ -429,19 +433,19 @@ void clearResult() {
 
 // Like the iPhone: the Button flashes green (Typed), orange (Maybe typed) or red (Not typed) for
 // 700 ms, the status line in the same color. Maybe typed stays until the next tap.
-void sendResult(const net::Snapshot& s) {
+void sendResult(const net::Result& r) {
     lv_obj_t* b = g_sending;
     g_sending = nullptr;
     clearResult();
     if (b == nullptr) return;  // its Button was rebuilt away meanwhile (a dev serial edit): no color to clear later
-    const send::Color color = send::color(s.sent);
+    const send::Color color = send::color(r.sent);
     const lv_color_t c = lv_palette_main(color == send::Color::Green    ? LV_PALETTE_GREEN
                                          : color == send::Color::Orange ? LV_PALETTE_ORANGE
                                                                         : LV_PALETTE_RED);
     lv_obj_set_style_text_color(g_status, c, 0);
     lv_obj_remove_state(b, LV_STATE_DISABLED);
     lv_obj_set_style_bg_color(b, c, 0);
-    if (s.sent == send::Outcome::MaybeTyped) {
+    if (r.sent == send::Outcome::MaybeTyped) {
         g_maybe = b;
         return;
     }
@@ -460,7 +464,7 @@ void sendPhrase(size_t i) {
 }
 
 void stopSend(lv_event_t*) {
-    net::cancelBluetoothSend();
+    net::stop(g_ticket);
     showStop(false);
     lv_label_set_text(g_status, "Stopping...");
 }
@@ -472,7 +476,7 @@ void closeConfirm(lv_event_t*) {
 
 void confirmSend(lv_event_t* e) {
     closeConfirm(e);
-    if (g_busy) {
+    if (waiting()) {
         lv_label_set_text(g_status, "Still sending the last one: wait for it");
         return;
     }
@@ -538,7 +542,7 @@ void openConfirm(size_t i) {
 void tap(size_t i) {
     if (millis() - g_rebuiltMs < 300) return;  // the grid just changed under the finger
     clearResult();
-    if (g_busy) {
+    if (waiting()) {
         lv_label_set_text(g_status, "Still sending the last one: wait for it");
         return;
     }
@@ -586,7 +590,7 @@ lv_obj_t* g_mode_note = nullptr;
 
 // Mode is read once at boot (net::start), so a switch restarts the panel.
 void switchMode(lv_event_t*) {
-    if (g_busy) {  // a restart would cut a Send or a pairing off partway
+    if (waiting()) {  // a restart would cut a Send or a pairing off partway
         lv_label_set_text(g_mode_note, "Wait for the Send or pairing to finish");
         return;
     }
@@ -989,7 +993,7 @@ void rebuildGrid() {
 // One change from the web page, applied here on the LVGL loop. Waits while a Send is in flight, as
 // its result colors a Button the rebuild would delete; the page then says "busy".
 void applyWebEdit() {
-    if (g_busy) return;
+    if (waiting()) return;
     web::Edit e;
     uint32_t seq;
     if (!web_server::takeEdit(e, seq)) return;
@@ -1006,7 +1010,7 @@ void applyWebEdit() {
 // A CSV file from the web page (#164), all or nothing, on the LVGL loop like an edit. At most two
 // lists in memory: the import builds the new one beside g_phrases, which stays as it was until saved.
 void applyWebImport() {
-    if (g_busy) return;
+    if (waiting()) return;
     web::Import im;
     uint32_t seq;
     if (!web_server::takeImport(im, seq)) return;
@@ -1148,6 +1152,18 @@ void setup() {
 }
 
 #ifdef PANEL_SERIAL_COMMANDS
+// The serial pair and type go through the request channel like a tap: Busy while one is in flight
+// or a tap's result is still to be shown, and the result shows on the status line.
+template <typename Submit>
+void serialRequest(const char* what, Submit submit) {
+    const net::Ticket t = waiting() ? net::kBusy : submit();
+    if (t == net::kBusy) {
+        Serial.printf("%s: busy\n", what);
+        return;
+    }
+    g_ticket = t;
+}
+
 // Dev builds only (env crowpanel-dev): the same pair and Send the screen does, from serial.
 void serialCommands() {
     static std::string line;
@@ -1162,10 +1178,10 @@ void serialCommands() {
             unsigned index = 0;
             const auto nearby = net::snapshot().nearby;
             if (sscanf(line.c_str() + 5, "%u %7s %23[0-9a-fA-F ]", &index, code, pin) == 3 && index < nearby.size()) {
-                net::pair(nearby[index], code, pin);
+                serialRequest("pair", [&] { return net::pair(nearby[index], code, pin); });
             }
         } else if (line.rfind("type ", 0) == 0) {
-            net::type(line.substr(5));
+            serialRequest("type", [&] { return net::type(line.substr(5)); });
         } else if (line.rfind("tap ", 0) == 0) {
             tap(strtoul(line.c_str() + 4, nullptr, 10));  // as a finger would, "Send?" included
         } else if (line.rfind("edit ", 0) == 0) {  // stands in for the web page until it exists

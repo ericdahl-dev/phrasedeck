@@ -32,7 +32,8 @@ bool pairingOpen();
 // The 6-digit passkey to show while a Computer pairs, or -1 for none.
 int32_t passkey();
 
-// Bumps on every change to ready(), pairingOpen() or passkey().
-unsigned version();
+// fn runs after every change to ready(), pairingOpen() or passkey(), on the task that made it (the
+// NimBLE host task, or the caller of openPairing() and closePairing()). Set it before start().
+void onChange(void (*fn)());
 
 }  // namespace ble_keyboard

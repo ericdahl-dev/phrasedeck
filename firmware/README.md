@@ -25,7 +25,8 @@ skips Wi-Fi.
 If the panel can't join its Wi-Fi within 30 s of boot, or the build has no Wi-Fi, it starts its
 own WPA2 network, `Phrasedeck-XXXX` (the last 4 hex digits of its MAC), for at most 2 clients. The
 password is made on the panel the first time and kept in the panel NVS; a factory reset makes a new
-one. The screen shows the name, the password and the web editor's address, `https://192.168.4.1/`.
+one. The screen shows the name, the password, a QR code that joins a phone to it, and the web
+editor's address, `https://192.168.4.1/`. Pairing and Sends wait for the panel's Wi-Fi.
 Only the web editor answers on it (HTTPS on 443): no `phrased`, no mDNS, no DNS, no captive portal.
 Sends in Wi-Fi Mode need the panel's Wi-Fi; Bluetooth Mode works as usual.
 

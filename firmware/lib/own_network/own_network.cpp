@@ -63,4 +63,26 @@ std::string editorAddress(const std::string& joinedIp, bool networkUp) {
     return networkUp ? kAddress : "";
 }
 
+namespace {
+
+std::string qrEscaped(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        if (strchr("\\;,:\"", c) != nullptr) out += '\\';
+        out += c;
+    }
+    return out;
+}
+
+}  // namespace
+
+std::string joinQr(const std::string& name, const std::string& password) {
+    return "WIFI:T:WPA;S:" + qrEscaped(name) + ";P:" + qrEscaped(password) + ";;";
+}
+
+std::string offWifi(bool wifiUp, bool pairing) {
+    if (wifiUp) return "";
+    return pairing ? "Not paired: the panel isn't on its Wi-Fi" : "Not typed: the panel isn't on its Wi-Fi";
+}
+
 }  // namespace own_network

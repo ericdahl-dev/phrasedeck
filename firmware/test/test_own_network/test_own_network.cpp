@@ -179,6 +179,23 @@ void test_joined_only_the_wifi_address_is_allowed() {
     TEST_ASSERT_EQUAL_STRING("192.168.1.58", own_network::editorAddress("192.168.1.58", true).c_str());
 }
 
+// A phone camera joins the network from a QR code: the Wi-Fi format, with \ ; , : and " escaped.
+void test_the_join_qr_code_names_the_network_and_password() {
+    TEST_ASSERT_EQUAL_STRING("WIFI:T:WPA;S:Phrasedeck-1A2B;P:abcdefghjkmn;;",
+                             own_network::joinQr("Phrasedeck-1A2B", "abcdefghjkmn").c_str());
+    TEST_ASSERT_EQUAL_STRING("WIFI:T:WPA;S:a\\;b\\,c\\:d;P:e\\\\f\\\"g;;", own_network::joinQr("a;b,c:d", "e\\f\"g").c_str());
+}
+
+// Sends and pairing go to phrased, which is only reachable over the panel's Wi-Fi. On its own
+// network an address from a Pair screen opened earlier could be a client of that network, so
+// nothing is sent at all.
+void test_sends_and_pairing_wait_for_the_wifi() {
+    TEST_ASSERT_EQUAL_STRING("Not typed: the panel isn't on its Wi-Fi", own_network::offWifi(false, false).c_str());
+    TEST_ASSERT_EQUAL_STRING("Not paired: the panel isn't on its Wi-Fi", own_network::offWifi(false, true).c_str());
+    TEST_ASSERT_EQUAL_STRING("", own_network::offWifi(true, false).c_str());
+    TEST_ASSERT_EQUAL_STRING("", own_network::offWifi(true, true).c_str());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_the_network_is_named_after_the_mac);
@@ -195,5 +212,7 @@ int main() {
     RUN_TEST(test_the_wifi_is_retried_less_often_while_someone_is_on_the_network);
     RUN_TEST(test_192_168_4_1_is_allowed_only_while_the_network_is_up);
     RUN_TEST(test_joined_only_the_wifi_address_is_allowed);
+    RUN_TEST(test_the_join_qr_code_names_the_network_and_password);
+    RUN_TEST(test_sends_and_pairing_wait_for_the_wifi);
     return UNITY_END();
 }

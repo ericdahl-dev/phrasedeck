@@ -58,4 +58,12 @@ constexpr const char* kAddress = "192.168.4.1";
 // panel is on its Wi-Fi, kAddress only while its own network is up, else none ("").
 std::string editorAddress(const std::string& joinedIp, bool networkUp);
 
+// What a phone camera reads to join the network: WIFI:T:WPA;S:<name>;P:<password>;; with
+// \ ; , : and " escaped.
+std::string joinQr(const std::string& name, const std::string& password);
+
+// Why a Send (pairing false) or a pairing can't go yet: phrased is reachable only over the
+// panel's Wi-Fi. Empty when it can.
+std::string offWifi(bool wifiUp, bool pairing);
+
 }  // namespace own_network

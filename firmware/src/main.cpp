@@ -92,32 +92,53 @@ lv_obj_t* g_bt_pair = nullptr;  // the Bluetooth pairing screen
 void btPairShow(const net::Snapshot& s);
 void sendResult(const net::Snapshot& s);
 
-// The panel's own network (#165): a bar along the bottom with its name, password and the editor's
-// address, while it's up. Over the Buttons' lower edge, under any overlay.
+// The panel's own network (#165): a bar along the bottom with its name, password, the editor's
+// address and a QR code that joins a phone to it, while it's up. Over the Buttons' lower edge,
+// under any overlay.
 lv_obj_t* g_own = nullptr;
+lv_obj_t* g_own_text = nullptr;
+lv_obj_t* g_own_qr = nullptr;
+std::string g_own_shown;  // what the bar shows now, so an unrelated snapshot change doesn't redraw it
+
+constexpr int32_t kJoinQrSize = 96;
 
 void showOwnNetwork(const net::Snapshot& s) {
     if (!s.ownNetwork) {
         if (g_own != nullptr) lv_obj_delete(g_own);
-        g_own = nullptr;
+        g_own = g_own_text = g_own_qr = nullptr;
+        g_own_shown.clear();
         return;
     }
     if (g_own == nullptr) {
-        g_own = lv_label_create(lv_screen_active());
-        lv_obj_set_width(g_own, board::LCD_WIDTH);
-        lv_label_set_long_mode(g_own, LV_LABEL_LONG_WRAP);
+        g_own = lv_obj_create(lv_screen_active());
+        lv_obj_set_size(g_own, board::LCD_WIDTH, kJoinQrSize + 16);
+        lv_obj_set_style_radius(g_own, 0, 0);
+        lv_obj_set_style_border_width(g_own, 0, 0);
         lv_obj_set_style_pad_hor(g_own, 16, 0);
-        lv_obj_set_style_pad_ver(g_own, 6, 0);
-        lv_obj_set_style_bg_opa(g_own, LV_OPA_COVER, 0);
+        lv_obj_set_style_pad_ver(g_own, 8, 0);
         lv_obj_set_style_bg_color(g_own, lv_color_hex(0x1C2026), 0);
+        lv_obj_remove_flag(g_own, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(g_own, LV_OBJ_FLAG_CLICKABLE);  // a tap on the bar stops here, not on a Button under it
         lv_obj_align(g_own, LV_ALIGN_BOTTOM_MID, 0, -24);  // above the Page dots
+        g_own_text = lv_label_create(g_own);
+        lv_obj_set_width(g_own_text, board::LCD_WIDTH - 32 - kJoinQrSize - 16);
+        lv_label_set_long_mode(g_own_text, LV_LABEL_LONG_WRAP);
+        lv_obj_align(g_own_text, LV_ALIGN_LEFT_MID, 0, 0);
+        g_own_qr = lv_qrcode_create(g_own);
+        lv_qrcode_set_size(g_own_qr, kJoinQrSize);
+        lv_obj_align(g_own_qr, LV_ALIGN_RIGHT_MID, 0, 0);
         lv_obj_move_background(g_own);
         lv_obj_move_background(g_tiles);  // so the Buttons are under it, and the overlays above
     }
-    std::string text = "Wi-Fi " + s.ownName + "   Password " + s.ownPassword + "   Editor https://" +
+    // At most 3 lines at this width, so it fits beside the code.
+    std::string text = "Join Wi-Fi " + s.ownName + ", password " + s.ownPassword + " (or scan the code), then open https://" +
                        own_network::kAddress + "/";
     if (!s.bluetooth) text += "\nNo Sends until the panel is back on its Wi-Fi.";
-    lv_label_set_text(g_own, text.c_str());
+    if (text == g_own_shown) return;
+    g_own_shown = text;
+    lv_label_set_text(g_own_text, text.c_str());
+    const std::string qr = own_network::joinQr(s.ownName, s.ownPassword);
+    lv_qrcode_update(g_own_qr, qr.data(), qr.size());
 }
 
 // Shows Wi-Fi and the paired Computer; runs on the LVGL loop, reading the net task's snapshot.
@@ -650,6 +671,13 @@ void webEditorInfo(lv_obj_t* parent) {
     tabText(parent, ("Open " + url + " in a browser " + where + " and log in with the admin password.\n"
                      "The browser warns about the certificate. Its SHA-256 fingerprint must be this; if not, don't log in:\n" +
                      (fp.empty() ? std::string("(still being made: open this again in a moment)") : fp)).c_str());
+    if (s.ip.empty()) {  // a phone joins the own network first, from this code
+        tabText(parent, ("Join " + s.ownName + " with a phone camera, then scan the address below it:").c_str());
+        const std::string join = own_network::joinQr(s.ownName, s.ownPassword);
+        lv_obj_t* joinQr = lv_qrcode_create(parent);
+        lv_qrcode_set_size(joinQr, 180);
+        lv_qrcode_update(joinQr, join.data(), join.size());
+    }
     lv_obj_t* qr = lv_qrcode_create(parent);
     lv_qrcode_set_size(qr, 180);
     lv_qrcode_update(qr, url.data(), url.size());

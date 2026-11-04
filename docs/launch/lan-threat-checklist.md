@@ -137,10 +137,12 @@ listener (47812) and the app's choice of route.
       password is random (12 characters, 60 bits), made on the panel, kept in the panel NVS, shown
       on the screen and never logged; anyone who can see the screen can join, as anyone who can
       touch it can type. A factory reset makes a new one. The Wi-Fi driver also keeps a copy in the
-      default NVS, which the reset erases too. Known limitation: on the very first start the radio
-      may beacon its default open network for a moment before the WPA2 settings apply (Arduino
-      enables the AP before it sets its config). A client that joined in that moment would reach
-      only the same HTTPS editor behind the admin password, and is dropped when the config applies.
+      default NVS, which the reset erases too. The WPA2 settings are written to the driver with the
+      radio off, before the AP starts, so it never beacons the driver's default open network.
+      Pairing and Sends are refused while the panel isn't on its Wi-Fi, so nothing goes to a client
+      of its own network. The screen also shows a QR code that joins a phone to the network.
+- Try: after a factory reset, a scan never shows an open `ESP_` network while the panel starts
+  its own.
 - [ ] Bluetooth Mode (#94): the 2-minute pairing window (Settings, behind the admin password)
       trusts whoever types the shown passkey first, and replaces the paired Computer. If yours
       didn't connect, someone nearby may have: open pairing again. Done closes the window early.

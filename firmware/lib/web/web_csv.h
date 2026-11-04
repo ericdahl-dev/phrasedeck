@@ -13,6 +13,12 @@ namespace web {
 // The most a POST /import body may be: a full list with every byte quoted, plus the form's parts.
 constexpr size_t kMaxImportBody = 200 * 1024;
 
+// The export's headers (#168). It opens in the tab as text, not as a download: Chrome won't
+// download from a site with a self-signed certificate, even after the user clicks past the warning.
+// The file name still applies when the user saves the page.
+constexpr const char* kCsvContentType = "text/plain; charset=utf-8";
+constexpr const char* kCsvDisposition = "inline; filename=\"phrasedeck-buttons.csv\"";
+
 // The export, sent in parts: csvHead() once, then csvRow() for each Button in panel order.
 // RFC 4180 with CRLF between rows; a field with a comma, quote or line break is quoted. The head
 // starts with a UTF-8 BOM, which Excel needs to read the file as UTF-8.

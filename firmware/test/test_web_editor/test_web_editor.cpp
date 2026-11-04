@@ -79,10 +79,13 @@ void test_a_stale_edit_changes_nothing() {
     TEST_ASSERT_EQUAL(2, l.size());
 }
 
-// #164: a link to download the Buttons as CSV, and a plain form (no JavaScript) to import a file.
+// #164: a link to the Buttons as CSV, and a plain form (no JavaScript) to import a file. The link
+// opens the CSV in the tab (#168): Chrome won't download from a site with a self-signed certificate.
 void test_the_page_links_the_csv_and_has_an_import_form() {
     const std::string page = web::editorPage(twoButtons());
-    TEST_ASSERT_TRUE(page.find("<a href=/buttons.csv download>Download CSV</a>") != std::string::npos);
+    TEST_ASSERT_TRUE(page.find("<a href=/buttons.csv>View CSV</a> (save it with Ctrl+S or Cmd+S)") !=
+                     std::string::npos);
+    TEST_ASSERT_TRUE(page.find(" download") == std::string::npos);
     TEST_ASSERT_TRUE(page.find("<form method=post action=/import enctype=multipart/form-data>") != std::string::npos);
     TEST_ASSERT_TRUE(page.find("<input type=file name=file") != std::string::npos);
     // Append first: Enter in the form submits the first button, and that mustn't replace everything.

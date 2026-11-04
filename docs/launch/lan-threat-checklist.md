@@ -134,13 +134,13 @@ listener (47812) and the app's choice of route.
       the web editor (HTTPS on 443, the same admin password, session and lockout): no `phrased`
       traffic, no mDNS (it runs only on the panel's Wi-Fi, after this network stops), no DNS, no
       captive portal. The Host and Origin checks accept `192.168.4.1` only while it's up. Its
-      password is random (12 characters, 60 bits), made on the panel, kept in the panel NVS, shown
-      on the screen and never logged; anyone who can see the screen can join, as anyone who can
-      touch it can type. A factory reset makes a new one. The Wi-Fi driver also keeps a copy in the
+      password is random (12 characters, 60 bits), made on the panel, kept in the panel NVS and never
+      logged. It's shown, with a QR code that joins a phone, only in Settings > Web editor (behind
+      the admin password) and the first-boot wizard's last step. A factory reset makes a new one. The Wi-Fi driver also keeps a copy in the
       default NVS, which the reset erases too. The WPA2 settings are written to the driver with the
       radio off, before the AP starts, so it never beacons the driver's default open network.
       Pairing and Sends are refused while the panel isn't on its Wi-Fi, so nothing goes to a client
-      of its own network. The screen also shows a QR code that joins a phone to the network.
+      of its own network.
 - Try: after a factory reset, a scan never shows an open `ESP_` network while the panel starts
   its own.
 - [ ] Bluetooth Mode (#94): the 2-minute pairing window (Settings, behind the admin password)

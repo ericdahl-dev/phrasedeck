@@ -180,17 +180,35 @@ class DeviceCallbacks : public BLEDeviceCallbacks {
 // units. The host picks the interval, and BlueZ starts at 30-50 ms, so every report waits that long.
 // 15 ms with latency 0 is inside every host's rules: Apple's accessory guidelines allow min = max =
 // 15 ms, and Linux and Windows take anything from 7.5 ms. Override to A/B, e.g.
-// -DPANEL_BLE_CONN_MIN=6 -DPANEL_BLE_CONN_MAX=12 for 7.5-15 ms.
+// -DPANEL_BLE_CONN_MIN=6 -DPANEL_BLE_CONN_MAX=12 for 7.5-15 ms: that breaks Apple's rules (a Mac
+// or an iPhone may refuse it or drop the link), so it's for testing with Linux or Windows only.
 #ifndef PANEL_BLE_CONN_MIN
 #define PANEL_BLE_CONN_MIN 12
 #endif
 #ifndef PANEL_BLE_CONN_MAX
 #define PANEL_BLE_CONN_MAX 12
 #endif
-constexpr uint16_t kSupervisionTimeout = 400;  // 4 s, in 10 ms units: within Apple's 2-6 s
+// Apple: min = max = 15 ms, or min >= 11.25 ms (HID) with max at least 15 ms above min.
+#if !((PANEL_BLE_CONN_MIN == 12 && PANEL_BLE_CONN_MAX == 12) || \
+      (PANEL_BLE_CONN_MIN >= 9 && PANEL_BLE_CONN_MIN + 12 <= PANEL_BLE_CONN_MAX))
+#warning "PANEL_BLE_CONN_MIN/MAX break Apple's connection parameter rules: test with Linux or Windows only"
+#endif
+// 2 s, in 10 ms units: Apple's minimum. The timeout is how long a stalled link can hold a key down
+// before the host drops it and its keys; longer would let a stall run into the host's auto-repeat
+// (BlueZ's own default is 420 ms, which this replaces, so keep it at the shortest every host takes).
+constexpr uint16_t kSupervisionTimeout = 200;
 
-// Asks for a short interval. The host may refuse or pick another; onConnParamsUpdate logs it.
+// Asks for a short interval, unless the host already gave one at least that short (a Mac at
+// 11.25 ms mustn't be slowed to 15). The host may refuse or pick another; onConnParamsUpdate logs it.
 void requestFastInterval(uint16_t handle) {
+    ble_gap_conn_desc d;
+    if (ble_gap_conn_find(handle, &d) == 0 && d.conn_itvl <= PANEL_BLE_CONN_MAX) {
+#ifdef PANEL_BLE_DEBUG
+        Serial.printf("ble: connection interval %u.%02u ms already, no request\n", d.conn_itvl * 125 / 100,
+                      d.conn_itvl * 125 % 100);
+#endif
+        return;
+    }
     ble_gap_upd_params params{};
     params.itvl_min = PANEL_BLE_CONN_MIN;
     params.itvl_max = PANEL_BLE_CONN_MAX;

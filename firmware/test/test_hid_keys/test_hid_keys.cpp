@@ -159,9 +159,9 @@ void test_a_report_the_stack_refuses_is_sent_again() {
 
 // Cancel with a key down: its release still goes, so the Computer isn't left with a held key.
 void test_cancel_releases_a_held_key_then_stops() {
-    hid_keys::Sender s(hid_keys::plan("abc", false).keys, 20);
+    hid_keys::Sender s(hid_keys::plan("aBc", false).keys, 20);
     Stack stack;
-    run(s, stack, 40);  // press a, release, press b (at 0, 20, 40 ms): b is down
+    run(s, stack, 40);  // press a, release, press B (at 0, 20, 40 ms): B is down, c not typed
     TEST_ASSERT_EQUAL(3, stack.sent.size());
 
     s.cancel();
@@ -358,6 +358,36 @@ void test_a_stall_with_a_key_down_says_so() {
     TEST_ASSERT_FALSE(done.keyDown());
 }
 
+// Cancel when the next planned report is already a release: that release goes and nothing more,
+// so a Send that typed every key still says Sent (#178 review).
+void test_cancel_before_a_planned_release_sends_just_that_release() {
+    hid_keys::Sender s(hid_keys::plan("ab", false).keys, 20);
+    Stack stack;
+    run(s, stack, 20);  // a at 0, b at 20: only b's release is left
+    s.cancel();
+    run(s, stack, 200, 21);
+    expectSent({{0, 0x04}, {0, 0x05}, kRelease}, stack);
+    TEST_ASSERT_FALSE(s.keyDown());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Sent, s.result());
+
+    hid_keys::Sender t(hid_keys::plan("aa", false).keys, 20);
+    Stack stack2;
+    run(t, stack2, 0);  // a is down; its planned release is next
+    t.cancel();
+    run(t, stack2, 200, 1);
+    expectSent({{0, 0x04}, kRelease}, stack2);
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Stopped, t.result());
+}
+
+// Capitals in a row hold Shift across the rollover: Shift+A, then Shift+B, then one release.
+void test_shift_is_held_across_capitals() {
+    hid_keys::Sender s(hid_keys::plan("AB", false).keys, 20);
+    Stack stack;
+    run(s, stack, 200);
+    expectSent({{kShift, 0x04}, {kShift, 0x05}, kRelease}, stack);
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Sent, s.result());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_letters_and_digits);
@@ -385,5 +415,7 @@ int main() {
     RUN_TEST(test_cancel_mid_rollover_sends_a_release_not_the_next_key);
     RUN_TEST(test_repeats_and_capitals_type_in_order);
     RUN_TEST(test_a_stall_with_a_key_down_says_so);
+    RUN_TEST(test_cancel_before_a_planned_release_sends_just_that_release);
+    RUN_TEST(test_shift_is_held_across_capitals);
     return UNITY_END();
 }

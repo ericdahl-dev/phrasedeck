@@ -11,8 +11,9 @@ namespace hid_keys {
 
 constexpr uint8_t kShift = 0x02;  // left Shift in the report's modifier byte
 
-// One key press. The sender sends a report with this key down, then an all-zero release report,
-// each paced, so a repeated key ("aa") reads as two presses. If a send fails, retry that report.
+// One key press: a report with this key down. The Sender releases it with an all-zero report, or
+// with the next key's press when that rolls over (see Sender), so a repeated key ("aa") still reads
+// as two presses.
 struct Key {
     uint8_t mod;   // modifier byte
     uint8_t code;  // HID usage (keyboard page)
@@ -77,10 +78,16 @@ class Sender {
             end_ = next_;
             releasing_ = false;
         } else if ((request & kCancel) && !done()) {
-            // A key that's down still gets its own release, even when the next report was a press
-            // that would have released it: a cancel mustn't type one more key.
-            end_ = next_;
-            releasing_ = down_;
+            const Key& planned = reports_[next_];
+            if (planned.code == 0 && planned.mod == 0) {
+                // The next planned report is a release: it goes, and nothing after it.
+                end_ = next_ + 1;
+            } else {
+                // A key that's down still gets its own release, even when the next report was a
+                // press that would have released it: a cancel mustn't type one more key.
+                end_ = next_;
+                releasing_ = down_;
+            }
         }
         if (done()) return;
         // A failed report that would let go of a held key goes again at once, so the key can't

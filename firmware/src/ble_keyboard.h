@@ -20,6 +20,10 @@ bool send(uint8_t mod, uint8_t code);
 // Bumps when the paired Computer disconnects, so a send loop can drop() its Sender.
 unsigned disconnects();
 
+// The paired Computer's connection interval in 1.25 ms units, or 0 when it isn't connected. The
+// panel asks for 15 ms once the Computer is trusted (#174); the host decides.
+uint16_t connInterval();
+
 // Lets a new Computer pair for ms, replacing the one paired now. Advertises meanwhile.
 void openPairing(uint32_t ms);
 void closePairing();

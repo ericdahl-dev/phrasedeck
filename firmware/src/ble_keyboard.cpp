@@ -176,7 +176,59 @@ class DeviceCallbacks : public BLEDeviceCallbacks {
     }
 };
 
+// The connection parameters the panel asks the Computer for once it's trusted (#174), in 1.25 ms
+// units. The host picks the interval, and BlueZ starts at 30-50 ms, so every report waits that long.
+// 15 ms with latency 0 is inside every host's rules: Apple's accessory guidelines allow min = max =
+// 15 ms, and Linux and Windows take anything from 7.5 ms. Override to A/B, e.g.
+// -DPANEL_BLE_CONN_MIN=6 -DPANEL_BLE_CONN_MAX=12 for 7.5-15 ms: that breaks Apple's rules (a Mac
+// or an iPhone may refuse it or drop the link), so it's for testing with Linux or Windows only.
+#ifndef PANEL_BLE_CONN_MIN
+#define PANEL_BLE_CONN_MIN 12
+#endif
+#ifndef PANEL_BLE_CONN_MAX
+#define PANEL_BLE_CONN_MAX 12
+#endif
+// Apple: min = max = 15 ms, or min >= 11.25 ms (HID) with max at least 15 ms above min.
+#if !((PANEL_BLE_CONN_MIN == 12 && PANEL_BLE_CONN_MAX == 12) || \
+      (PANEL_BLE_CONN_MIN >= 9 && PANEL_BLE_CONN_MIN + 12 <= PANEL_BLE_CONN_MAX))
+#warning "PANEL_BLE_CONN_MIN/MAX break Apple's connection parameter rules: test with Linux or Windows only"
+#endif
+// 2 s, in 10 ms units: Apple's minimum. The timeout is how long a stalled link can hold a key down
+// before the host drops it and its keys; longer would let a stall run into the host's auto-repeat
+// (BlueZ's own default is 420 ms, which this replaces, so keep it at the shortest every host takes).
+constexpr uint16_t kSupervisionTimeout = 200;
+
+// Asks for a short interval, unless the host already gave one at least that short (a Mac at
+// 11.25 ms mustn't be slowed to 15). The host may refuse or pick another; onConnParamsUpdate logs it.
+void requestFastInterval(uint16_t handle) {
+    ble_gap_conn_desc d;
+    if (ble_gap_conn_find(handle, &d) == 0 && d.conn_itvl <= PANEL_BLE_CONN_MAX) {
+#ifdef PANEL_BLE_DEBUG
+        Serial.printf("ble: connection interval %u.%02u ms already, no request\n", d.conn_itvl * 125 / 100,
+                      d.conn_itvl * 125 % 100);
+#endif
+        return;
+    }
+    ble_gap_upd_params params{};
+    params.itvl_min = PANEL_BLE_CONN_MIN;
+    params.itvl_max = PANEL_BLE_CONN_MAX;
+    params.latency = 0;
+    params.supervision_timeout = kSupervisionTimeout;
+    const int rc = ble_gap_update_params(handle, &params);
+    if (rc != 0) log_w("connection parameter request failed: %d", rc);
+}
+
 class ServerCallbacks : public BLEServerCallbacks {
+    void onConnParamsUpdate(uint16_t handle, uint16_t interval, uint16_t latency, uint16_t timeout,
+                            uint8_t status) override {
+        if (static_cast<int>(handle) != g_trusted.load()) return;
+#ifdef PANEL_BLE_DEBUG
+        Serial.printf("ble: connection interval %u.%02u ms, latency %u, timeout %u ms, status %u\n",
+                      interval * 125 / 100, interval * 125 % 100, latency, timeout * 10, status);
+#else
+        (void)interval, (void)latency, (void)timeout, (void)status;
+#endif
+    }
     void onConnect(BLEServer*, ble_gap_conn_desc* d) override {
         g_grace[d->conn_handle].open(millis(), bt_pairing::kGraceMs);
         // NimBLE stops advertising on a connect. Keep it up while no paired Computer is here, so a
@@ -304,6 +356,7 @@ class SecurityCallbacks : public BLESecurityCallbacks {
         }
         g_trusted.store(d->conn_handle);
         if (g_notifying.count(d->conn_handle)) g_subscribed.store(d->conn_handle);
+        requestFastInterval(d->conn_handle);
         if (!windowOpen()) BLEDevice::stopAdvertising();  // one Computer: nobody else needs to find it
         bump();
     }
@@ -403,6 +456,13 @@ bool send(uint8_t mod, uint8_t code) {
 }
 
 unsigned disconnects() { return g_disconnects.load(); }
+
+uint16_t connInterval() {
+    const int handle = g_trusted.load();
+    ble_gap_conn_desc d;
+    if (!g_started.load() || handle == kNone || ble_gap_conn_find(static_cast<uint16_t>(handle), &d) != 0) return 0;
+    return d.conn_itvl;
+}
 
 void openPairing(uint32_t ms) {
     if (!g_started.load()) return;

@@ -198,9 +198,15 @@ void handleType(const Request& req, Snapshot& s) {
     }
 }
 
-// One report per interval: a press, then its release. 20 ms leaves the host a connection event for
-// each, so 100 characters take about 4 s.
-constexpr uint32_t kKeyIntervalMs = 20;
+// One report per interval. Most characters are one report (the next key's press releases the last,
+// #174), and the panel asks for a 15 ms connection interval; the controller sends more than one
+// report in a connection event, in order. 10 ms makes about 80 characters a second of plain text.
+// Override to A/B on the device: -DPANEL_KEY_INTERVAL_MS=20 was the speed before #174.
+#ifndef PANEL_KEY_INTERVAL_MS
+#define PANEL_KEY_INTERVAL_MS 10
+#endif
+constexpr uint32_t kKeyIntervalMs = PANEL_KEY_INTERVAL_MS;
+static_assert(kKeyIntervalMs >= 1, "PANEL_KEY_INTERVAL_MS must be at least 1");
 
 std::atomic<bool> g_cancelSend{false};  // set from the UI task, read by the send loop
 
@@ -211,20 +217,42 @@ void handleBluetoothType(const Request& req, Snapshot& s) {
     if (p.ok && ble_keyboard::ready()) {
         hid_keys::Sender sender(p.keys, kKeyIntervalMs);
         const unsigned disconnects = ble_keyboard::disconnects();
-        const auto notify = [](const hid_keys::Key& k) { return ble_keyboard::send(k.mod, k.code); };
+        unsigned reports = 0;
+        const auto notify = [&reports](const hid_keys::Key& k) {
+            const bool ok = ble_keyboard::send(k.mod, k.code);
+            reports += ok;
+            return ok;
+        };
+#ifdef PANEL_BLE_DEBUG
+        const uint16_t itvl = ble_keyboard::connInterval();
+        Serial.printf("ble: send %u chars, interval %u.%02u ms, key interval %u ms\n",
+                      static_cast<unsigned>(p.keys.size()), itvl * 125 / 100, itvl * 125 % 100,
+                      static_cast<unsigned>(kKeyIntervalMs));
+#endif
+        const uint32_t began = millis();
         while (!sender.done()) {
             if (ble_keyboard::disconnects() != disconnects) sender.drop();
             if (g_cancelSend.exchange(false)) sender.cancel();
             sender.step(millis(), notify);
             vTaskDelay(1);  // Sender needs a yield between steps
         }
+        const uint32_t took = millis() - began;
         // Gave up partway on a stalled link: a key may still be down on the Computer, which would
         // auto-repeat it once the link recovers. Keep offering a release until it goes or the link does.
         const uint32_t start = millis();
-        while (sender.result() == hid_keys::Sender::Result::Stopped && ble_keyboard::disconnects() == disconnects &&
-               millis() - start < 6000 && !ble_keyboard::send(0, 0)) {
+        while (sender.keyDown() && ble_keyboard::disconnects() == disconnects && millis() - start < 6000 &&
+               !ble_keyboard::send(0, 0)) {
             vTaskDelay(pdMS_TO_TICKS(kKeyIntervalMs));
         }
+#ifdef PANEL_BLE_DEBUG
+        // Chars per second of the whole Send, as typed; the host's own timing should match.
+        Serial.printf("ble: sent %u reports for %u chars in %u ms: %u.%u chars/s\n", reports,
+                      static_cast<unsigned>(p.keys.size()), static_cast<unsigned>(took),
+                      took ? static_cast<unsigned>(p.keys.size() * 1000 / took) : 0,
+                      took ? static_cast<unsigned>(p.keys.size() * 10000 / took % 10) : 0);
+#else
+        (void)took;
+#endif
         r = hid_keys::said(sender.result());
     }
     s.message = r.message;

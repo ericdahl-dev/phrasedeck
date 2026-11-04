@@ -159,9 +159,9 @@ void test_a_report_the_stack_refuses_is_sent_again() {
 
 // Cancel with a key down: its release still goes, so the Computer isn't left with a held key.
 void test_cancel_releases_a_held_key_then_stops() {
-    hid_keys::Sender s(hid_keys::plan("abc", false).keys, 20);
+    hid_keys::Sender s(hid_keys::plan("aBc", false).keys, 20);
     Stack stack;
-    run(s, stack, 40);  // press a, release, press b (at 0, 20, 40 ms): b is down
+    run(s, stack, 40);  // press a, release, press B (at 0, 20, 40 ms): B is down, c not typed
     TEST_ASSERT_EQUAL(3, stack.sent.size());
 
     s.cancel();
@@ -289,6 +289,105 @@ void test_the_next_press_waits_a_whole_interval_after_a_retried_release() {
     TEST_ASSERT_EQUAL(3, stack.sent.size());
 }
 
+static void expectSent(const std::vector<Key>& want, const Stack& stack) {
+    TEST_ASSERT_EQUAL(want.size(), stack.sent.size());
+    for (size_t i = 0; i < want.size(); i++) {
+        TEST_ASSERT_EQUAL_HEX8_MESSAGE(want[i].mod, stack.sent[i].mod, "modifier");
+        TEST_ASSERT_EQUAL_HEX8_MESSAGE(want[i].code, stack.sent[i].code, "usage");
+    }
+}
+
+// Two different keys roll over: the press of the next one is the release of the last, as a fast
+// typist's fingers do, so a character costs one report instead of two (#174).
+void test_a_different_next_key_rolls_over_in_one_report() {
+    hid_keys::Sender s(hid_keys::plan("ab", false).keys, 20);
+    Stack stack;
+    run(s, stack, 100);
+    expectSent({{0, 0x04}, {0, 0x05}, kRelease}, stack);
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Sent, s.result());
+}
+
+// A change of Shift never rolls over: in one report a host could take the new key before the
+// modifier change, and "Ab" would type "AB". A release goes in between instead.
+void test_a_change_of_shift_keeps_its_release() {
+    hid_keys::Sender s(hid_keys::plan("aBc", false).keys, 20);
+    Stack stack;
+    run(s, stack, 200);
+    expectSent({{0, 0x04}, kRelease, {kShift, 0x05}, kRelease, {0, 0x06}, kRelease}, stack);
+}
+
+// Cancel while b is down and the next report is c's press (which would release b): the release
+// goes on its own, so a cancel never types one more key.
+void test_cancel_mid_rollover_sends_a_release_not_the_next_key() {
+    hid_keys::Sender s(hid_keys::plan("abc", false).keys, 20);
+    Stack stack;
+    run(s, stack, 20);  // a at 0, b at 20: b is down
+    s.cancel();
+    run(s, stack, 200, 21);
+    expectSent({{0, 0x04}, {0, 0x05}, kRelease}, stack);
+    TEST_ASSERT_FALSE(s.keyDown());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Stopped, s.result());
+}
+
+// Repeated letters and capitals, as in the device test: "ll" keeps its release so it isn't merged
+// into one press, and nothing is reordered.
+void test_repeats_and_capitals_type_in_order() {
+    hid_keys::Sender s(hid_keys::plan("Hello, LL", false).keys, 20);
+    Stack stack;
+    run(s, stack, 1000);
+    const Key H{kShift, 0x0B}, e{0, 0x08}, l{0, 0x0F}, o{0, 0x12}, comma{0, 0x36}, space{0, 0x2C}, L{kShift, 0x0F};
+    expectSent({H, kRelease, e, l, kRelease, l, o, comma, space, kRelease, L, kRelease, L, kRelease}, stack);
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Sent, s.result());
+}
+
+// A link that stalls while a key is down: the Sender gives up after a second and says the key is
+// still down, so the BLE task keeps offering a release; once a release goes, nothing is down.
+void test_a_stall_with_a_key_down_says_so() {
+    hid_keys::Sender s(hid_keys::plan("ab", false).keys, 20);
+    Stack stack;
+    run(s, stack, 19);  // a is down; b's press would release it
+    stack.fail = 1000000;
+    run(s, stack, 1100, 20);
+    TEST_ASSERT_TRUE(s.done());
+    TEST_ASSERT_TRUE(s.keyDown());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Stopped, s.result());
+
+    hid_keys::Sender done(hid_keys::plan("ab", false).keys, 20);
+    Stack ok;
+    run(done, ok, 200);
+    TEST_ASSERT_FALSE(done.keyDown());
+}
+
+// Cancel when the next planned report is already a release: that release goes and nothing more,
+// so a Send that typed every key still says Sent (#178 review).
+void test_cancel_before_a_planned_release_sends_just_that_release() {
+    hid_keys::Sender s(hid_keys::plan("ab", false).keys, 20);
+    Stack stack;
+    run(s, stack, 20);  // a at 0, b at 20: only b's release is left
+    s.cancel();
+    run(s, stack, 200, 21);
+    expectSent({{0, 0x04}, {0, 0x05}, kRelease}, stack);
+    TEST_ASSERT_FALSE(s.keyDown());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Sent, s.result());
+
+    hid_keys::Sender t(hid_keys::plan("aa", false).keys, 20);
+    Stack stack2;
+    run(t, stack2, 0);  // a is down; its planned release is next
+    t.cancel();
+    run(t, stack2, 200, 1);
+    expectSent({{0, 0x04}, kRelease}, stack2);
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Stopped, t.result());
+}
+
+// Capitals in a row hold Shift across the rollover: Shift+A, then Shift+B, then one release.
+void test_shift_is_held_across_capitals() {
+    hid_keys::Sender s(hid_keys::plan("AB", false).keys, 20);
+    Stack stack;
+    run(s, stack, 200);
+    expectSent({{kShift, 0x04}, {kShift, 0x05}, kRelease}, stack);
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Sent, s.result());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_letters_and_digits);
@@ -311,5 +410,12 @@ int main() {
     RUN_TEST(test_a_refused_release_keeps_trying_for_a_second);
     RUN_TEST(test_drop_wins_over_a_later_cancel);
     RUN_TEST(test_the_next_press_waits_a_whole_interval_after_a_retried_release);
+    RUN_TEST(test_a_different_next_key_rolls_over_in_one_report);
+    RUN_TEST(test_a_change_of_shift_keeps_its_release);
+    RUN_TEST(test_cancel_mid_rollover_sends_a_release_not_the_next_key);
+    RUN_TEST(test_repeats_and_capitals_type_in_order);
+    RUN_TEST(test_a_stall_with_a_key_down_says_so);
+    RUN_TEST(test_cancel_before_a_planned_release_sends_just_that_release);
+    RUN_TEST(test_shift_is_held_across_capitals);
     return UNITY_END();
 }

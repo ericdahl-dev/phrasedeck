@@ -1,11 +1,12 @@
-# Compiles the panel firmware (#68). Compile only: flashing needs the board.
+# Compiles the panel firmware (#68) and the USB dongle spike (#198), which shares firmware/lib.
+# Compile only: flashing needs the board.
 name: firmware
 
 on:
   pull_request:
   push:
     branches: [main]
-    paths: ["firmware/**", ".github/workflows/firmware.yml"]
+    paths: ["firmware/**", "dongle/**", ".github/workflows/firmware.yml"]
 
 jobs:
   firmware:
@@ -21,12 +22,12 @@ jobs:
       # a pull request doesn't touch these paths.
       - id: changes
         working-directory: .
-        run: .github/scripts/touches.sh '^(firmware/|\.github/workflows/firmware\.yml$|\.github/scripts/touches\.sh$)'
+        run: .github/scripts/touches.sh '^(firmware/|dongle/|\.github/workflows/firmware\.yml$|\.github/scripts/touches\.sh$)'
       - uses: actions/cache@v4
         if: steps.changes.outputs.run == 'true'
         with:
           path: ~/.platformio
-          key: pio-${{ hashFiles('firmware/platformio.ini') }}
+          key: pio-${{ hashFiles('firmware/platformio.ini', 'dongle/platformio.ini') }}
       - uses: astral-sh/setup-uv@v6
         if: steps.changes.outputs.run == 'true'
       - run: uv tool install platformio==6.2.0
@@ -47,6 +48,12 @@ jobs:
       - run: pio test -e native
         if: steps.changes.outputs.run == 'true'
       - run: pio run -e crowpanel
+        if: steps.changes.outputs.run == 'true'
+      - run: pio test -e native
+        working-directory: dongle
+        if: steps.changes.outputs.run == 'true'
+      - run: pio run -e dongle
+        working-directory: dongle
         if: steps.changes.outputs.run == 'true'
       # Keep only what this build used, so the saved cache doesn't grow with every commit.
       - run: tools/prune_build_cache.sh ~/.cache/phrasedeck/pio-build-cache "$RUNNER_TEMP/pio-build-start"

@@ -36,4 +36,10 @@ int32_t passkey();
 // NimBLE host task, or the caller of openPairing() and closePairing()). Set it before start().
 void onChange(void (*fn)());
 
+#ifdef PANEL_PHONE_BLE
+// Gives the one advertising set to the keyboard (HID) identity or the phone link's (#199), whichever
+// should advertise now. Any task.
+void refreshAdvertising();
+#endif
+
 }  // namespace ble_keyboard

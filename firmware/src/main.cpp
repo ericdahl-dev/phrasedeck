@@ -27,6 +27,9 @@
 #include "pairing.h"
 #include "panel_mcu.h"
 #include "phrases.h"
+#ifdef PANEL_PHONE_BLE
+#include "phone_ble.h"
+#endif
 #include "screen_setting.h"
 #include "touch.h"
 #include "web_server.h"
@@ -1151,6 +1154,18 @@ void setup() {
     Serial.printf("phrasedeck panel: ready, %s\n", heapReport().c_str());
 }
 
+#ifdef PANEL_PHONE_BLE
+// The phone link spike (#199): the passkey a phone pairs with, on the status line while it shows.
+void showPhonePasskey() {
+    static int32_t shown = -1;
+    const int32_t key = phone_ble::passkey();
+    if (key == shown) return;
+    shown = key;
+    const std::string text = key < 0 ? "" : "Phone pairing: enter " + bt_pairing::passkeyText(key) + " on the phone";
+    lv_label_set_text(g_status, text.c_str());
+}
+#endif
+
 #ifdef PANEL_SERIAL_COMMANDS
 // The serial pair and type go through the request channel like a tap: Busy while one is in flight
 // or a tap's result is still to be shown, and the result shows on the status line.
@@ -1266,6 +1281,11 @@ void serialCommands() {
                           display_rotated() ? "on" : "off");
         } else if (line == "btpair") {
             openBtPair();
+#ifdef PANEL_PHONE_BLE
+        } else if (line == "phonepair") {
+            // STUB for the spike: a real build opens this from Settings behind the admin password.
+            phone_ble::openWindow(120000);
+#endif
         } else if (line == "pairscreen") {
             openPair(nullptr);
         } else if (line.rfind("key ", 0) == 0 && g_pair != nullptr) {  // as the on-screen keys would
@@ -1286,6 +1306,9 @@ void loop() {
 #endif
     touch_poll();
     showNet();
+#ifdef PANEL_PHONE_BLE
+    showPhonePasskey();
+#endif
     applyWebEdit();
     applyWebImport();
     lv_timer_handler();

@@ -20,6 +20,12 @@
 #include "ble_params.h"
 #include "bt_pairing.h"
 #include "panel_store.h"
+#ifdef PANEL_PHONE_BLE
+#include <freertos/semphr.h>
+
+#include "phone_ble.h"
+#include "phone_link.h"
+#endif
 
 namespace ble_keyboard {
 namespace {
@@ -54,6 +60,12 @@ const uint8_t kReportMap[] = {
 
 constexpr int kNone = -1;
 
+#ifdef PANEL_PHONE_BLE
+// Advertising changes come from the host task and from openPairing()/closePairing() and the phone
+// link's window, so the stop and start of refreshAdvertising() go one task at a time.
+SemaphoreHandle_t g_advLock = nullptr;
+#endif
+
 std::atomic<bool> g_started{false};  // NimBLE is up: the API is safe to call
 BLEServer* g_server = nullptr;
 BLECharacteristic* g_input = nullptr;
@@ -82,6 +94,25 @@ bool windowOpen() {
 // inside a critical section: the hook takes the request channel's lock.
 void bump() {
     if (void (*fn)() = g_onChange.load()) fn();
+}
+
+// Where the keyboard starts or stops advertising. With the phone link (#199) both go through
+// refreshAdvertising(), which also gives the one advertising set to the phone identity when the
+// keyboard doesn't need it.
+void startAdvertising() {
+#ifdef PANEL_PHONE_BLE
+    refreshAdvertising();
+#else
+    BLEDevice::startAdvertising();
+#endif
+}
+
+void stopAdvertising() {
+#ifdef PANEL_PHONE_BLE
+    refreshAdvertising();
+#else
+    BLEDevice::stopAdvertising();
+#endif
 }
 
 // The paired Computer's identity address, in the panel NVS so a factory reset forgets it. Only a
@@ -163,8 +194,20 @@ void forgetAllBut(const ble_addr_t* keep) {
     int n = 0;
     if (ble_store_util_bonded_peers(peers, &n, MYNEWT_VAL(BLE_STORE_MAX_BONDS)) != 0) n = 0;
     int forgotten = 0;
+#ifdef PANEL_PHONE_BLE
+    uint8_t raw[7];
+    ble_addr_t phone{};
+    const bool hasPhone = phone_ble::bondedPhone(raw);
+    if (hasPhone) {
+        phone.type = raw[0];
+        memcpy(phone.val, raw + 1, 6);
+    }
+#endif
     for (int i = 0; i < n; ++i) {
         if (keep != nullptr && ble_addr_cmp(&peers[i], keep) == 0) continue;
+#ifdef PANEL_PHONE_BLE
+        if (hasPhone && ble_addr_cmp(&peers[i], &phone) == 0) continue;  // the phone link's bond
+#endif
         ble_gap_conn_desc d;
         if (ble_gap_conn_find_by_addr(&peers[i], &d) == 0) ble_gap_terminate(d.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
         ble_store_util_delete_peer(&peers[i]);
@@ -240,7 +283,7 @@ class ServerCallbacks : public BLEServerCallbacks {
         g_grace[d->conn_handle].open(millis(), bt_pairing::kGraceMs);
         // NimBLE stops advertising on a connect. Keep it up while no paired Computer is here, so a
         // stranger who connects and sits can't lock the paired one out, and while a window is open.
-        if (g_trusted.load() == kNone || windowOpen()) BLEDevice::startAdvertising();
+        if (g_trusted.load() == kNone || windowOpen()) startAdvertising();
     }
     void onDisconnect(BLEServer*, ble_gap_conn_desc* d) override {
         int handle = d->conn_handle;
@@ -262,7 +305,7 @@ class ServerCallbacks : public BLEServerCallbacks {
             g_forget.erase(forget);
         }
         // advertiseOnDisconnect is off by default: without this the Computer can't come back.
-        if (g_trusted.load() == kNone || windowOpen()) BLEDevice::startAdvertising();
+        if (g_trusted.load() == kNone || windowOpen()) startAdvertising();
         bump();
     }
 };
@@ -364,13 +407,13 @@ class SecurityCallbacks : public BLESecurityCallbacks {
         g_trusted.store(d->conn_handle);
         if (g_notifying.count(d->conn_handle)) g_subscribed.store(d->conn_handle);
         requestFastInterval(d->conn_handle);
-        if (!windowOpen()) BLEDevice::stopAdvertising();  // one Computer: nobody else needs to find it
+        if (!windowOpen()) stopAdvertising();  // one Computer: nobody else needs to find it
         bump();
     }
 };
 
 void pairingClosed() {
-    if (g_started.load() && g_trusted.load() != kNone) BLEDevice::stopAdvertising();
+    if (g_started.load() && g_trusted.load() != kNone) stopAdvertising();
     bump();
 }
 
@@ -430,6 +473,11 @@ bool start() {
     g_input = hid->inputReport(1);
     g_input->setCallbacks(new InputCallbacks());
     hid->startServices();
+#ifdef PANEL_PHONE_BLE
+    g_advLock = xSemaphoreCreateMutex();
+    if (g_advLock == nullptr) return false;
+    if (!phone_ble::start()) log_e("phone link didn't start");  // the keyboard still works without it
+#endif
 
     BLEAdvertising* adv = BLEDevice::getAdvertising();
     adv->setAppearance(0x03C1);  // HID keyboard
@@ -439,7 +487,7 @@ bool start() {
         ble_npl_callout_reset(&g_tick, ble_npl_time_ms_to_ticks32(1000)) != 0) {
         return false;
     }
-    BLEDevice::startAdvertising();
+    startAdvertising();
     g_started.store(true);
     return true;
 }
@@ -476,7 +524,7 @@ void openPairing(uint32_t ms) {
     portENTER_CRITICAL(&g_windowLock);
     g_window.open(millis(), ms);
     portEXIT_CRITICAL(&g_windowLock);
-    BLEDevice::startAdvertising();
+    startAdvertising();
     bump();
 }
 
@@ -498,6 +546,29 @@ void closePairing() {
 }
 
 bool pairingOpen() { return windowOpen(); }
+
+#ifdef PANEL_PHONE_BLE
+// One advertising set (legacy advertising: the prebuilt NimBLE has no extended advertising, #199).
+// The Computer's identity (public address, HID) keeps it whenever it would advertise without the
+// phone link; otherwise the phone identity (random static address, the Phrase service only) gets it.
+void refreshAdvertising() {
+    if (g_advLock == nullptr) return;
+    xSemaphoreTake(g_advLock, portMAX_DELAY);
+    const bool keyboard = g_trusted.load() == kNone || windowOpen();
+    const auto which =
+        phone_link::advertise(keyboard, phone_ble::connected(), phone_ble::bonded(), phone_ble::windowOpen());
+    ble_gap_adv_stop();
+    if (which == phone_link::Advertise::Keyboard) {
+        // The phone identity's start set the controller's advertising data: have the library set ours
+        // again (any setter marks it stale).
+        BLEDevice::getAdvertising()->setAppearance(0x03C1);
+        BLEDevice::startAdvertising();
+    } else if (which == phone_link::Advertise::Phone) {
+        phone_ble::startAdvertising();
+    }
+    xSemaphoreGive(g_advLock);
+}
+#endif
 
 int32_t passkey() { return g_passkey.load(); }
 

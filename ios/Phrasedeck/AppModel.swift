@@ -12,14 +12,14 @@ protocol HelperAPI: Sendable {
 
 extension HelperClient: HelperAPI {}
 
-/// The app's state: computers on this device, their status dots, and the
-/// result of the last send. Sends once and never retries.
+/// The app's state: computers on this device, their status dots, and the banner for the last
+/// Send. The Courier carries each Send and status check (#206).
 @MainActor
 @Observable
 final class AppModel {
-    enum Status: Equatable { case unknown, reachable, notReady, unreachable }
+    typealias Status = Courier.Status
     /// Which way the status check last reached a computer.
-    enum RouteKind: Equatable { case home, tailnet, bluetooth }
+    typealias RouteKind = Courier.RouteKind
 
     struct Feedback: Equatable {
         enum Tone: Equatable {
@@ -55,12 +55,11 @@ final class AppModel {
     }
 
     let computers: Computers
+    let courier: Courier
     private let device: String
 
     private(set) var statuses: [UUID: Status] = [:]
     private(set) var statusRoutes: [UUID: RouteKind] = [:]
-    /// Computers already asked for /info this run.
-    private var infoAsked: Set<UUID> = []
     private(set) var feedback: Feedback?
     /// Counts banners shown, so the same message twice restarts its auto-close.
     private(set) var feedbackShown = 0
@@ -76,6 +75,7 @@ final class AppModel {
 
     init(computers: Computers, device: String) {
         self.computers = computers
+        self.courier = Courier(computers: computers)
         self.device = device
     }
 
@@ -86,54 +86,15 @@ final class AppModel {
         guard let helper = selectedHelper else {
             return show(Feedback(tone: .red, message: "Not typed: add a computer first.", addComputer: true))
         }
-        if let dongle = helper.dongle { return await send(text: text, enter: enter, to: helper, through: dongle) }
-        let route = computers.route(for: helper)
-        do {
-            try await computers.connection(to: helper, via: route).type(text: text, enter: enter)
-            return show(Feedback(tone: .success, message: nil))
-        } catch let failure as HelperClient.Failure where route != .tailnet && helper.hasTailnetHost
-                    && (failure == .unreachable || failure == .pinMismatch) {
-            // Nothing reached the helper (refused, or a wrong certificate before the token was
-            // sent), so the tailnet gets one try. A LAN timeout may have typed: never retried.
-            do {
-                try await computers.connection(to: helper, via: .tailnet).type(text: text, enter: enter)
-                return show(Feedback(tone: .success, message: failure == .pinMismatch
-                    ? "Typed: sent over the tailnet. On the home network, \(helper.name) showed a different certificate. Scan its QR code to pair again."
-                    : nil, pairAgain: failure == .pinMismatch ? helper : nil))
-            } catch let tailnetFailure as HelperClient.Failure {
-                return show(Outcome.send(failure == .pinMismatch ? failure : tailnetFailure, on: helper))
-            } catch {
-                return show(Feedback(tone: .red, message: "Not typed: \(helper.name): \(error.localizedDescription)"))
-            }
-        } catch let failure as HelperClient.Failure {
-            return show(Outcome.send(failure, on: helper))
-        } catch {
-            return show(Feedback(tone: .red, message: "Not typed: \(helper.name): \(error.localizedDescription)"))
-        }
+        let delivery = await courier.send(text, enter: enter, to: helper)
+        return show(Outcome.send(delivery, on: helper))
     }
 
     /// The Computer a Bluetooth Send is typing on, which Stop can end (#202).
-    private(set) var sendingTo: Helper?
-
-    /// The Bluetooth route (#202): one Send to the dongle, its Result as the Outcome.
-    private func send(text: String, enter: Bool, to helper: Helper, through dongle: UUID) async -> Feedback {
-        let sender = computers.dongles
-        // A second tap while one types is busy; it doesn't take over Stop.
-        let owns = !sender.isSending
-        if owns { sendingTo = helper }
-        defer { if owns { sendingTo = nil } }
-        do {
-            try await sender.send(text, enter: enter, to: dongle, token: computers.token(for: helper))
-            return show(Feedback(tone: .success, message: nil))
-        } catch let failure as Dongle.Failure {
-            return show(Outcome.send(failure, on: helper))
-        } catch {
-            return show(Feedback(tone: .red, message: "Not typed: \(helper.name): \(error.localizedDescription)"))
-        }
-    }
+    var sendingTo: Helper? { courier.sending?.dongle == nil ? nil : courier.sending }
 
     /// Ends the Bluetooth Send in progress; its Outcome comes from the dongle's Result.
-    func stop() async { await computers.dongles.stop() }
+    func stop() async { await courier.stop() }
 
     func dismissFeedback() { feedback = nil }
 
@@ -149,41 +110,11 @@ final class AppModel {
 
     func statusRoute(of helper: Helper) -> RouteKind? { statusRoutes[helper.id] }
 
-    /// Checks the route a send would take, then the tailnet if that fails.
-    /// Over the tailnet it also learns the LAN fingerprint from /info once.
+    /// Checks the Computer by the Route a Send would take (the Courier's check).
     func refreshStatus(of helper: Helper) async {
-        // A dongle's Computer: connected, or not in range (#202).
-        if let dongle = helper.dongle {
-            statuses[helper.id] = await computers.dongles.isReachable(dongle) ? .reachable : .unreachable
-            statusRoutes[helper.id] = .bluetooth
-            return
-        }
-        let route = computers.route(for: helper)
-        if route != .tailnet, let health = try? await computers.connection(to: helper, via: route).health() {
-            statuses[helper.id] = health.accessibilityOK ? .reachable : .notReady
-            statusRoutes[helper.id] = .home
-            return
-        }
-        guard helper.hasTailnetHost else {
-            statuses[helper.id] = .unreachable
-            statusRoutes[helper.id] = nil
-            return
-        }
-        do {
-            let health = try await computers.connection(to: helper, via: .tailnet).health()
-            statuses[helper.id] = health.accessibilityOK ? .reachable : .notReady
-            statusRoutes[helper.id] = .tailnet
-        } catch {
-            statuses[helper.id] = .unreachable
-            statusRoutes[helper.id] = nil
-            return
-        }
-        guard helper.certSHA256 == nil, !infoAsked.contains(helper.id) else { return }
-        infoAsked.insert(helper.id)
-        if let info = try? await computers.connection(to: helper, via: .tailnet).info(), let fp = info.certSHA256 {
-            // Best effort: the next status check asks again if this can't be saved.
-            try? computers.learn(fp, lanPort: info.lanPort, for: helper.id)
-        }
+        let (status, route) = await courier.check(helper)
+        statuses[helper.id] = status
+        statusRoutes[helper.id] = route
     }
 
     // MARK: home network (#11)
@@ -196,8 +127,6 @@ final class AppModel {
     var unpairedNearby: [NearbyService] {
         nearby.filter { service in !helpers.contains { service.matches($0) } }
     }
-
-    func route(for helper: Helper) -> HelperClient.Route { computers.route(for: helper) }
 
     // MARK: computers
 

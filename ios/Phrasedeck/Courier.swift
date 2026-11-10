@@ -1,7 +1,11 @@
 import Foundation
 import Observation
 
-/// Carries a Send to a Computer by the right Route and brings back what happened to it (#206).
+/// Carries a Send to a Computer by the right Route and brings back what happened to it, and
+/// checks whether a Computer can be reached and by which Route (#206). It's the one place that
+/// chooses the Route, falls back to the tailnet, and decides Typed, Maybe typed or Not typed. It
+/// takes one Send at a time, across every Computer and Route, and never retries one that may
+/// have left the phone.
 @MainActor
 @Observable
 final class Courier {
@@ -40,7 +44,7 @@ final class Courier {
         case dongle(Dongle.Failure)
         /// An error neither route names, by its description.
         case unrecognized(String)
-        /// Refused before sending: this Computer's Send was still in flight.
+        /// Refused before sending: the Send to this Computer was still in flight.
         case inFlight(Helper)
     }
 
@@ -98,12 +102,15 @@ final class Courier {
     func check(_ computer: Helper) async -> (Status, RouteKind?) {
         // A dongle's Computer: connected, or not in range (#202).
         if let dongle = computer.dongle {
-            return (await computers.dongles.isReachable(dongle) ? .reachable : .unreachable, .bluetooth)
+            let inRange = await computers.dongles.isReachable(dongle)
+            return (inRange ? .reachable : .unreachable, .bluetooth)
         }
         let attempt = await reach(computer, retryingIf: { _ in true }) { try await $0.health() }
         guard case let .success(health) = attempt.result else { return (.unreachable, nil) }
         if attempt.route == .tailnet { await learnPin(of: computer) }
-        return (health.accessibilityOK ? .reachable : .notReady, attempt.route == .tailnet ? .tailnet : .home)
+        let status: Status = health.accessibilityOK ? .reachable : .notReady
+        let kind: RouteKind = attempt.route == .tailnet ? .tailnet : .home
+        return (status, kind)
     }
 
     /// Asks a Computer without a Pin for its /info over the tailnet, never the home network.
@@ -133,7 +140,7 @@ final class Courier {
     }
 
     /// Refused, or a wrong certificate before the Token went out: nothing reached the Helper.
-    private static func leftNothing(_ error: any Error) -> Bool {
+    nonisolated private static func leftNothing(_ error: any Error) -> Bool {
         error as? HelperClient.Failure == .unreachable || error as? HelperClient.Failure == .pinMismatch
     }
 

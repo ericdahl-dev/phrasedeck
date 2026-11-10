@@ -109,20 +109,16 @@ struct AppModelTests {
     /// The Mac with a stored fingerprint, seen nearby on the LAN.
     func nearbyModel() throws -> AppModel {
         let model = try model()
-        var pinned = mac
-        pinned.certSHA256 = Self.pin
-        pinned.lanPort = 47812
         try model.computers.learn(Self.pin, lanPort: 47812, for: mac.id)
         // A fresh model reads the stored fingerprint back.
         let fresh = AppModel(computers: makeComputers(), device: "Eric's iPhone")
-        _ = pinned
         fresh.setNearby([Self.home])
         return fresh
     }
 
     static let lanRoute = HelperClient.Route.lan(host: "192.168.1.20", port: 47812, pin: pin)
 
-    // MARK: route choice (#11)
+    // MARK: the banner (the Courier's own tests cover routes, fallback, busy and status: #206)
 
     /// With no Computer, a send says so and the banner offers Add, so it stays up (UX review).
     @Test func withNoComputerTheBannerOffersAdd() async throws {
@@ -135,63 +131,8 @@ struct AppModelTests {
         #expect(!feedback.autoCloses)
     }
 
-    @Test func withNothingNearbyTheTailnetIsUsed() async throws {
-        let model = try model()
-        #expect(model.route(for: mac) == .tailnet)
-    }
-
-    @Test func nearbyWithoutAFingerprintStaysOnTheTailnet() async throws {
-        let model = try model()
-        model.setNearby([Self.home])
-        #expect(model.route(for: mac) == .tailnet)
-    }
-
-    @Test func nearbyWithAFingerprintUsesTheLANAddressWithThePin() async throws {
-        let model = try nearbyModel()
-        #expect(model.route(for: try #require(model.selectedHelper)) == Self.lanRoute)
-    }
-
-    @Test func aDifferentNearbyComputerDoesNotCount() async throws {
-        let model = try nearbyModel()
-        model.setNearby([NearbyService(tailnetName: "omarchy-black2.tail1fdac.ts.net", address: Self.home.address)])
-        #expect(model.route(for: try #require(model.selectedHelper)) == .tailnet)
-    }
-
-    @Test func aSendGoesOverTheLANOnceWhenNearby() async throws {
-        let model = try nearbyModel()
-
-        let feedback = await model.send(text: "yes", enter: true)
-
-        #expect(feedback.tone == .success)
-        #expect(lan.typed.count == 1 && api.typed.isEmpty)
-        #expect(routes.log == [Self.lanRoute])
-    }
-
-    @Test func anUnreachableLANFallsBackToTheTailnetOnce() async throws {
-        lan.typeError = .unreachable
-        let model = try nearbyModel()
-
-        let feedback = await model.send(text: "yes", enter: true)
-
-        #expect(feedback.tone == .success)
-        #expect(lan.typed.count == 1 && api.typed.count == 1)
-        #expect(routes.log == [Self.lanRoute, .tailnet])
-    }
-
-    @Test(arguments: [HelperClient.Failure.noReply, .unauthorized, .server(500)])
-    func otherLANFailuresAreNotRetriedOnTheTailnet(failure: HelperClient.Failure) async throws {
-        lan.typeError = failure
-        let model = try nearbyModel()
-
-        let feedback = await model.send(text: "yes", enter: true)
-
-        #expect(feedback.tone != .success)
-        #expect(lan.typed.count == 1 && api.typed.isEmpty)
-    }
-
-    /// Nothing reached the helper on a pin mismatch, so the tailnet is safe
-    /// to try once; the note says what happened, so it's never silent.
-    @Test func aPinMismatchSendsOverTheTailnetWithAVisibleNote() async throws {
+    /// Typed over the tailnet after a pin mismatch: the banner says so and offers Pair again.
+    @Test func aPinMismatchShowsAVisibleNote() async throws {
         lan.typeError = .pinMismatch
         let model = try nearbyModel()
 
@@ -199,23 +140,33 @@ struct AppModelTests {
 
         #expect(feedback.tone == .success)
         #expect(feedback.message?.hasPrefix("Typed: sent over the tailnet") == true)
-        #expect(feedback.message?.contains("certificate") == true)
-        // It asks to pair again, so it offers the button and stays up.
         #expect(feedback.pairAgain?.id == model.selectedHelper?.id)
-        #expect(!feedback.autoCloses)
-        #expect(lan.typed.count == 1 && api.typed.count == 1)
-        #expect(routes.log == [Self.lanRoute, .tailnet])
+        #expect(model.feedback == feedback)
     }
 
-    @Test func aPinMismatchWithTheTailnetDownIsARedErrorThatSaysNothingWasSent() async throws {
-        lan.typeError = .pinMismatch
-        api.typeError = .unreachable
-        let model = try nearbyModel()
+    /// The bug #206 fixed: an error the app doesn't know shows Maybe typed, not "safe to tap again".
+    @Test func anUnrecognizedErrorShowsMaybeTyped() async throws {
+        api.typeOther = CancellationError()
+        let model = try model()
 
-        let feedback = await model.send(text: "yes", enter: true)
+        #expect(await model.send(text: "yes", enter: true).tone == .amber)
+    }
 
-        #expect(feedback.tone == .red)
-        #expect(feedback.message?.hasPrefix("Not typed:") == true)
+    /// The other bug #206 fixed: a double tap on a Helper's Computer sends once.
+    @Test func aSecondTapDuringASendShowsBusyAndSendsNothing() async throws {
+        api.holdType = true
+        let model = try model()
+        let first = Task { await model.send(text: "one", enter: false) }
+        try #require(await api.waitForTyping())
+
+        let second = await model.send(text: "two", enter: false)
+
+        #expect(second.message == "Not typed: lib-2833 is busy. Tap again.")
+        // Stop is for a dongle's Send only.
+        #expect(model.sendingTo == nil)
+        api.finishTyping()
+        #expect(await first.value.tone == .success)
+        #expect(api.typed.count == 1)
     }
 
     @Test(arguments: ["192.168.1.20", "10.0.0.5", "fe80::1", "169.254.1.1", "8.8.8.8", "mac.local", "Mac.local."])
@@ -251,40 +202,6 @@ struct AppModelTests {
         let model = try model()
         model.setNearby([service])
         #expect(model.helpers.first?.certSHA256 == nil)
-        #expect(model.route(for: mac) == .tailnet)
-        await model.refreshStatus(of: mac)
-        #expect(model.helpers.first?.certSHA256 == nil)
-    }
-
-    @Test func aMatchingTXTFingerprintMakesAComputerNearby() async throws {
-        let model = try nearbyModel()
-        let byPin = NearbyService(tailnetName: nil, address: LANAddress(host: "192.168.1.44", port: 47812),
-                                  advertisedFingerprint: Self.pin)
-
-        model.setNearby([byPin])
-
-        #expect(model.route(for: try #require(model.selectedHelper))
-                == .lan(host: "192.168.1.44", port: 47812, pin: Self.pin))
-    }
-
-    @Test func aDifferentTXTFingerprintDoesNotMakeItNearby() async throws {
-        let model = try nearbyModel()
-        model.setNearby([NearbyService(tailnetName: nil, address: Self.home.address,
-                                       advertisedFingerprint: String(repeating: "cd", count: 32))])
-
-        #expect(model.route(for: try #require(model.selectedHelper)) == .tailnet)
-    }
-
-    @Test func aLANOnlyComputerFollowsItsBonjourAddress() async throws {
-        lan.pairResult = .success(Pairing(token: "t", certSHA256: Self.pin, lanPort: 47900))
-        let model = try model(withMac: false)
-        _ = await model.addHelper(from: Self.hostlessLink)
-        let added = try #require(model.helpers.first)
-
-        model.setNearby([NearbyService(tailnetName: nil, address: LANAddress(host: "192.168.1.77", port: 47900),
-                                       advertisedFingerprint: Self.pin)])
-
-        #expect(model.route(for: added) == .lan(host: "192.168.1.77", port: 47900, pin: Self.pin))
     }
 
     @Test(arguments: [["v": "1"], ["v": "2", "ts": "a.tail1.ts.net"], ["v": "1", "ts": "evil.example.com"],
@@ -296,40 +213,6 @@ struct AppModelTests {
     @Test func aTXTWithOnlyAFingerprintIsANearbyLANOnlyHelper() throws {
         let service = try #require(NearbyService(txt: ["v": "1", "fp": Self.pin.uppercased()], address: nil))
         #expect(service.tailnetName == nil && service.advertisedFingerprint == Self.pin)
-    }
-
-    @Test func theTailnetStatusCheckLearnsTheFingerprintFromInfo() async throws {
-        api.infoResult = .success(LANInfo(certSHA256: Self.pin, lanPort: 47812))
-        let model = try model()
-
-        await model.refreshStatus(of: mac)
-        await model.refreshStatus(of: mac)
-
-        #expect(model.helpers.first?.certSHA256 == Self.pin)
-        #expect(model.helpers.first?.lanPort == 47812)
-        #expect(api.infoCount == 1)
-        #expect(model.statusRoute(of: mac) == .tailnet)
-    }
-
-    @Test func infoIsNeverAskedOverTheLAN() async throws {
-        let model = try nearbyModel()
-
-        await model.refreshStatus(of: try #require(model.selectedHelper))
-
-        #expect(lan.infoCount == 0 && api.infoCount == 0)
-        #expect(lan.healthCount == 1)
-        #expect(model.statusRoute(of: try #require(model.selectedHelper)) == .home)
-    }
-
-    @Test func theStatusCheckFallsBackToTheTailnetWhenTheLANFails() async throws {
-        lan.healthResult = .failure(.pinMismatch)
-        let model = try nearbyModel()
-        let helper = try #require(model.selectedHelper)
-
-        await model.refreshStatus(of: helper)
-
-        #expect(model.status(of: helper) == .reachable)
-        #expect(model.statusRoute(of: helper) == .tailnet)
     }
 
     // MARK: pairing from a QR code with LAN fields (#11)
@@ -388,7 +271,6 @@ struct AppModelTests {
         let route = HelperClient.Route.lan(host: "192.168.1.30", port: 47900, pin: Self.pin)
         #expect(routes.log == [route])
         #expect(added.lanHost == "192.168.1.30" && added.certSHA256 == Self.pin)
-        #expect(model.route(for: added) == route)
 
         _ = await model.send(text: "x", enter: false)
         #expect(routes.log.last == route)
@@ -402,19 +284,6 @@ struct AppModelTests {
 
         #expect(error != nil)
         #expect(api.paired.isEmpty && model.helpers.isEmpty)
-    }
-
-    @Test func aHostlessComputerWhoseLANFailsIsNotRetriedOnTheTailnet() async throws {
-        lan.pairResult = .success(Pairing(token: "t", certSHA256: Self.pin, lanPort: 47900))
-        let model = try model(withMac: false)
-        _ = await model.addHelper(from: Self.hostlessLink)
-        let added = try #require(model.helpers.first)
-        lan.typeError = .unreachable
-
-        let feedback = await model.send(text: "x", enter: false)
-
-        #expect(feedback.tone == .red)
-        #expect(api.typed.isEmpty)
     }
 
     @Test func aQRPairingWhoseResponseFingerprintDiffersIsRejected() async throws {
@@ -474,7 +343,7 @@ struct AppModelTests {
 
         let feedback = await model.send(text: "x", enter: false)
 
-        #expect(feedback == Outcome.send(failure, on: mac))
+        #expect(feedback == Outcome.send(.failed(failure), on: mac))
         #expect(api.typed.count == 1)
         #expect(model.feedback == feedback)
     }
@@ -500,11 +369,11 @@ struct AppModelTests {
 
     // MARK: status dot
 
-    @Test func statusFollowsHealth() async throws {
+    @Test func theStatusDotShowsWhatTheCheckFound() async throws {
         let model = try model()
 
         await model.refreshStatus(of: mac)
-        #expect(model.status(of: mac) == .reachable)
+        #expect(model.status(of: mac) == .reachable && model.statusRoute(of: mac) == .tailnet)
 
         api.healthResult = .success(Health(hostname: "lib-2833", os: "darwin", accessibilityOK: false))
         await model.refreshStatus(of: mac)
@@ -512,7 +381,7 @@ struct AppModelTests {
 
         api.healthResult = .failure(.unreachable)
         await model.refreshStatus(of: mac)
-        #expect(model.status(of: mac) == .unreachable)
+        #expect(model.status(of: mac) == .unreachable && model.statusRoute(of: mac) == nil)
     }
 
     // MARK: adding, pairing, deleting

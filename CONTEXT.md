@@ -118,6 +118,10 @@ _Avoid_: client, phone (other things pair too)
 One tap's attempt to type a Button's Phrase on a Computer.
 _Avoid_: request, call, job
 
+**Courier**:
+The part of the app that carries a Send to a Computer by the right Route and brings back whether it was Typed, Maybe typed or Not typed. It also checks whether a Computer can be reached, and by which Route. It takes one Send at a time, across all Computers.
+_Avoid_: sender, client, transport, dispatcher
+
 **Typed**:
 The Send finished; the whole Phrase was typed.
 

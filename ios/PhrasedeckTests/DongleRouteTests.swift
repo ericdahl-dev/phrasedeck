@@ -2,8 +2,9 @@ import Foundation
 import Testing
 @testable import Phrasedeck
 
-/// A Computer reached through a Phrasedeck dongle (#202): adding it, sending to it and its
-/// status, through the app model, with a fake in place of Bluetooth.
+/// A Computer reached through a Phrasedeck dongle (#202): adding it, and the banner and Stop for
+/// its Sends, through the app model, with a fake in place of Bluetooth. The Courier's own tests
+/// cover the Bluetooth route itself (#206).
 @MainActor
 @Suite(.serialized)
 struct DongleRouteTests {
@@ -89,20 +90,7 @@ struct DongleRouteTests {
         #expect(try tokens.get(model.helpers[0].id) == other)
     }
 
-    // MARK: sending
-
-    @Test func aSendGoesOverBluetoothWithTheDonglesToken() async throws {
-        let model = try await modelWithDongle()
-
-        let feedback = await model.send(text: "hi", enter: true)
-
-        #expect(feedback.tone == .success)
-        let begin = try #require(link.writes.first)
-        #expect(link.writes.count == 1)
-        #expect(begin[2] == 0x01)  // Send Enter
-        #expect(begin.dropFirst(5).prefix(16) == DongleFrameTests.token)
-        #expect(helperAPI.typed.isEmpty)
-    }
+    // MARK: the banner and Stop
 
     @Test func theDonglesResultBecomesTheOutcome() async throws {
         let model = try await modelWithDongle()
@@ -113,23 +101,6 @@ struct DongleRouteTests {
         #expect(feedback.tone == .red)
         #expect(feedback.message == "Not typed: a US keyboard can't type “é”.")
         #expect(model.feedback == feedback)
-    }
-
-    @Test func aDongleOutOfRangeIsNotTyped() async throws {
-        let model = try await modelWithDongle()
-        link.openError = .notInRange
-
-        let feedback = await model.send(text: "hi", enter: false)
-
-        #expect(feedback.tone == .red)
-        #expect(link.writes.isEmpty)
-    }
-
-    @Test func aLinkLostMidSendIsMaybeTyped() async throws {
-        let model = try await modelWithDongle()
-        link.dropAfterWrite = 0
-
-        #expect(await model.send(text: "hi", enter: false).tone == .amber)
     }
 
     @Test func stopEndsTheSendAsMaybeTyped() async throws {
@@ -145,30 +116,6 @@ struct DongleRouteTests {
         #expect(feedback.tone == .amber)
         #expect(feedback.message == "Maybe typed: Phrasedeck dongle stopped partway.")
         #expect(model.sendingTo == nil)
-    }
-
-    // MARK: status
-
-    @Test func aDongleInRangeIsReachableOverBluetooth() async throws {
-        let model = try await modelWithDongle()
-        let dongle = try #require(model.selectedHelper)
-
-        await model.refreshStatus(of: dongle)
-
-        #expect(model.status(of: dongle) == .reachable)
-        #expect(model.statusRoute(of: dongle) == .bluetooth)
-        #expect(helperAPI.healthCount == 0)
-    }
-
-    @Test func aDongleOutOfRangeIsUnreachable() async throws {
-        let model = try await modelWithDongle()
-        let dongle = try #require(model.selectedHelper)
-        link.openError = .notInRange
-
-        await model.refreshStatus(of: dongle)
-
-        #expect(model.status(of: dongle) == .unreachable)
-        #expect(model.statusRoute(of: dongle) == .bluetooth)
     }
 
     @Test func removingADongleRemovesItsToken() async throws {
@@ -206,7 +153,7 @@ struct DongleOutcomeTests {
         (.result(.unknown(0x42)), .red, "Not typed: Desk dongle failed (error 66)."),
     ])
     func eachFailureHasItsWording(failure: Dongle.Failure, tone: AppModel.Feedback.Tone, message: String) {
-        let feedback = Outcome.send(failure, on: dongle)
+        let feedback = Outcome.send(.failed(failure), on: dongle)
         #expect(feedback.tone == tone)
         #expect(feedback.message == message)
         // Pair again is the Helper's sheet; a dongle is removed and added again instead.

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import Phrasedeck
 
@@ -23,10 +24,37 @@ struct OutcomeTests {
         (.pinMismatch, .red, "Not typed: lib-2833's certificate didn't match. Scan its QR code to pair again."),
     ])
     func eachSendFailureHasItsWording(failure: HelperClient.Failure, tone: AppModel.Feedback.Tone, message: String) {
-        let feedback = Outcome.send(failure, on: mac)
+        let feedback = Outcome.send(.failed(failure), on: mac)
         #expect(feedback.tone == tone)
         #expect(feedback.message == message)
         #expect(feedback.pairAgain == (failure == .unauthorized ? mac : nil))
+    }
+
+    /// A Send that was Typed shows no message, unless it took the tailnet after a wrong certificate.
+    @Test func typedSaysSoOnlyAfterAPinMismatch() {
+        #expect(Outcome.send(.typed(nil), on: mac) == AppModel.Feedback(tone: .success, message: nil))
+
+        let feedback = Outcome.send(.typed(.helper(.pinMismatch)), on: mac)
+        #expect(feedback.tone == .success)
+        #expect(feedback.message == "Typed: sent over the tailnet. On the home network, lib-2833 showed a different certificate. Scan its QR code to pair again.")
+        // It asks to pair again, so it offers the button and stays up.
+        #expect(feedback.pairAgain == mac)
+        #expect(!feedback.autoCloses)
+    }
+
+    /// An error neither route names may have typed (#206).
+    @Test func anUnrecognizedErrorIsMaybeTyped() {
+        let feedback = Outcome.send(.failed(CocoaError(.featureUnsupported)), on: mac)
+        #expect(feedback.tone == .amber)
+        #expect(feedback.message == "Maybe typed: lib-2833: \(CocoaError(.featureUnsupported).localizedDescription)")
+    }
+
+    /// A tap while another Send is in flight names the Computer that's busy.
+    @Test func aTapDuringASendIsBusy() {
+        let dongle = Helper(name: "Desk dongle", host: "", dongle: UUID())
+        let feedback = Outcome.send(.notTyped(.inFlight(dongle)), on: mac)
+        #expect(feedback.tone == .red)
+        #expect(feedback.message == "Not typed: Desk dongle is busy. Tap again.")
     }
 
     @Test(arguments: [
@@ -46,9 +74,9 @@ struct OutcomeTests {
 
     /// A banner closes itself after a few seconds unless it asks for something (UX review).
     @Test func onlyBannersThatAskForSomethingStayUp() {
-        #expect(Outcome.send(.unreachable, on: mac).autoCloses)
-        #expect(Outcome.send(.noReply, on: mac).autoCloses)
-        #expect(!Outcome.send(.unauthorized, on: mac).autoCloses)
+        #expect(Outcome.send(.failed(HelperClient.Failure.unreachable), on: mac).autoCloses)
+        #expect(Outcome.send(.failed(HelperClient.Failure.noReply), on: mac).autoCloses)
+        #expect(!Outcome.send(.failed(HelperClient.Failure.unauthorized), on: mac).autoCloses)
     }
 
     /// What the Button shows for a moment after a send, and VoiceOver says.

@@ -224,3 +224,22 @@ app route:
 - What the app does when the Bluetooth link drops after a Send went but before its Result:
   Maybe typed, as with the Helper.
 - iOS background: whether the app can keep the link up, or connects per Send (about 1 s).
+- **The first USB attach fails on Linux.** After each plug-in, the kernel logs
+  `device descriptor read/64, error -110`, and the next try, about 15 s later, works. Not fixed;
+  what the code and the core show so far:
+  - At power-on the S3's USB pins belong to the USB-Serial/JTAG unit. It is hardware: it pulls
+    D+ up at once, before any code runs, so the Computer starts enumerating it (`303a:1001`).
+  - A few hundred ms later, with `ARDUINO_USB_CDC_ON_BOOT=1`, the core's `Serial.begin()` in
+    `app_main` (before `setup()`) resets the USB peripheral and hands the pins to the OTG
+    controller for TinyUSB. Nothing holds D+ low in between long enough for the Computer to see
+    an unplug, so its request in flight goes unanswered. Linux waits 5 s for each try of a
+    control request and retries, which fits the -110 and the 15 s.
+  - That's a likely cause, not a confirmed one, and no host test can show it. To check it:
+    `sudo dmesg -w` with timestamps while plugging in; and plug in with BOOT held (the ROM only,
+    no handover): if the bootloader enumerates cleanly every time, the handover is the trigger.
+  - A fix to try then: start USB from `setup()` instead (`ARDUINO_USB_CDC_ON_BOOT=0`), and
+    before it, hold D+ low for about 100 ms through the USB-Serial/JTAG pull override (the core's
+    `usb_switch_to_cdc_jtag()` uses the same registers), so the Computer sees a clean unplug and
+    then the TinyUSB device. Burning the eFuse that turns the USB-Serial/JTAG unit off would also
+    do it, but that can't be undone and loses the ROM's USB flashing.
+  - Also worth noting on the Mac and the work Computer: whether they show the same delay.

@@ -19,7 +19,9 @@ final class Courier {
                 default: return .notTyped(.helper(failure))
                 }
             default:
-                return .notTyped(.helper(.unreachable))
+                // Not one the Courier knows left nothing behind (a canceled task, say): the Send
+                // may have gone out, so it's never "safe to tap again".
+                return .maybeTyped(.unrecognized(error.localizedDescription))
             }
         }
     }
@@ -28,6 +30,8 @@ final class Courier {
     enum Reason: Equatable {
         case helper(HelperClient.Failure)
         case dongle(Dongle.Failure)
+        /// An error neither route names, by its description.
+        case unrecognized(String)
     }
 
     private let computers: Computers

@@ -16,10 +16,18 @@ final class Courier {
         case dongle(Dongle.Failure)
     }
 
-    init(computers: Computers) {}
+    private let computers: Computers
 
-    // Skeleton for the red run: nothing is sent yet.
+    init(computers: Computers) { self.computers = computers }
+
     func send(_ phrase: String, enter: Bool, to computer: Helper) async -> Delivery {
-        .notTyped(.helper(.unreachable))
+        do {
+            try await computers.connection(to: computer, via: .tailnet).type(text: phrase, enter: enter)
+            return .typed(nil)
+        } catch let failure as HelperClient.Failure {
+            return .notTyped(.helper(failure))
+        } catch {
+            return .notTyped(.helper(.unreachable))
+        }
     }
 }

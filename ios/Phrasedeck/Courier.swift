@@ -155,7 +155,7 @@ final class Courier {
         do {
             let value = try await call(computers.connection(to: computer, via: chosen))
             return Attempt(result: .success(value), first: nil, route: chosen)
-        } catch where chosen != .tailnet && computer.hasTailnetHost && retries(error) {
+        } catch let error where chosen != .tailnet && computer.hasTailnetHost && retries(error) {
             let first = error as? HelperClient.Failure
             do {
                 let value = try await call(computers.connection(to: computer, via: .tailnet))

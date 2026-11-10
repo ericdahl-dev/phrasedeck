@@ -137,6 +137,14 @@ void test_the_speed_phrase_is_n_typable_characters_in_numbered_lines() {
     TEST_ASSERT_EQUAL_STRING(p.substr(5, 58).c_str(), p.substr(69, 58).c_str());
 }
 
+// A dongle with no key interval saved types at 10 ms, the panel's pace: at 1 ms a Windows Computer
+// garbled keys (an Enter partway through, a lost Shift). One saved with `interval` keeps its own.
+void test_the_key_interval_is_10_ms_unless_one_is_saved() {
+    TEST_ASSERT_EQUAL_UINT32(10, usb_typing::keyInterval(false, 0));
+    TEST_ASSERT_EQUAL_UINT32(1, usb_typing::keyInterval(true, 1));
+    TEST_ASSERT_EQUAL_UINT32(0, usb_typing::keyInterval(true, 0));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_a_phrase_types_and_is_typed);
@@ -146,5 +154,6 @@ int main() {
     RUN_TEST(test_the_key_interval_spaces_reports);
     RUN_TEST(test_the_speed_line_gives_characters_per_second);
     RUN_TEST(test_the_speed_phrase_is_n_typable_characters_in_numbered_lines);
+    RUN_TEST(test_the_key_interval_is_10_ms_unless_one_is_saved);
     return UNITY_END();
 }

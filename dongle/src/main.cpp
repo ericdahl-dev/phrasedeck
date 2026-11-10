@@ -20,9 +20,6 @@ namespace {
 constexpr int kBootPin = 0;  // BOOT, active low
 constexpr uint32_t kResetHoldMs = 5000;
 constexpr uint32_t kTypingStack = 8192;
-#ifndef DONGLE_KEY_INTERVAL_MS
-#define DONGLE_KEY_INTERVAL_MS 1  // see README: try 0 (one report per USB frame) on each Computer
-#endif
 
 // The one Send being typed. The task that wins g_typing (false -> true) fills it and wakes the
 // typing task, which clears g_typing when done; nobody else touches it in between.
@@ -35,7 +32,7 @@ struct Job {
 Job g_job;
 std::atomic<bool> g_typing{false};
 std::atomic<bool> g_stop{false};
-std::atomic<uint32_t> g_interval{DONGLE_KEY_INTERVAL_MS};
+std::atomic<uint32_t> g_interval{usb_typing::kDefaultKeyIntervalMs};
 TaskHandle_t g_typingTask = nullptr;
 
 phrase_link::Receiver g_receiver;  // host task only
@@ -100,7 +97,8 @@ void typingTask(void*) {
 void loadInterval() {
     Preferences p;
     if (!p.begin("dongle-dev", true)) return;
-    g_interval.store(p.getUInt("interval", DONGLE_KEY_INTERVAL_MS));
+    // A dongle that saved an interval keeps it; one that never did types at the default.
+    g_interval.store(usb_typing::keyInterval(p.isKey("interval"), p.getUInt("interval", 0)));
     p.end();
 }
 

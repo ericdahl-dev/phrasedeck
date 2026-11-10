@@ -151,9 +151,18 @@ speed: 2000 chars, 2032 reports in 2140 ms: 934 chars/s, 0.95 reports/ms, key in
 heap (after a Send): internal free ..., largest ..., least since boot ..., ...
 ```
 
-The interval is saved in NVS and starts at 1 ms. To find the minimum that is still reliable on a
-Computer, run `speed` at `interval 0`, then 1, 2 and 4, and compare the editor's text with the
-expected Phrase: 32 lines of `NNNN Hello! The quick brown fox jumps over 22 lazy dogs: 012345`,
+The interval starts at 10 ms, the same as the panel's Bluetooth keyboard. `interval <ms>` saves
+another one in NVS, and a dongle keeps the interval it saved, even after a new firmware with a
+different default.
+
+**Faster intervals can garble text on some computers.** At 1 ms, a Windows work Computer typed
+`a?b A?B` as `a?b`, an Enter, then `a/b`: keys mixed up and a Shift lost, although a key log on
+Linux showed the dongle sent the right keys. At 10 ms it typed correctly. Go below 10 ms only on a
+Computer where `speed` shows no errors at that interval.
+
+To find the minimum that is still reliable on a Computer, run `speed` at `interval 0`, then 2, 4
+and 10 (1 types about as fast as 0: the pacer counts whole milliseconds, and each report already
+waits for a 1 ms frame), and compare the editor's text with the expected Phrase: 32 lines of `NNNN Hello! The quick brown fox jumps over 22 lazy dogs: 012345`,
 numbered from 0001, the last one cut at 2000 characters. A dropped or doubled key shows as a line
 that's off. The fastest interval with no errors over a few runs, on every Computer, is the one
 to keep.
@@ -164,7 +173,8 @@ the host has taken it. `reports/ms` in the speed line is the measured share of f
 carried a report: near 1.00 means USB is the limit. Most keys take one report, because the next
 key's press releases the last (#174); a doubled letter or a Shift change adds a release, so 2000
 characters take a few more than 2000 reports. The ceiling is about 1000 characters/s, against
-about 50 for the panel's Bluetooth keyboard at its 10 ms interval.
+about 50 for the panel's Bluetooth keyboard at its 10 ms interval. At the dongle's own 10 ms
+default it types about as fast as the panel; what it gains there is a steadier link.
 
 ## Test on each Computer
 
@@ -178,7 +188,7 @@ For the Mac, Linux and the work Computer:
    - Work Computer: note whether it asks for approval, blocks the device, or blocks only the
      serial port (the keyboard can still work without it).
 2. Bond the phone (once per dongle, not per Computer) and send `hi` as above.
-3. Run `speed` at `interval 0`, 1 and 2 and note the chars/s and any errors. Without a serial
+3. Run `speed` at `interval 0`, 2 and 10 and note the chars/s and any errors. Without a serial
    monitor on the work Computer, send a long Phrase from nRF Connect instead.
 4. Unplug the cable while a long Phrase types: Result `01` (Maybe typed), and no key stays held.
 5. Put the Computer to sleep and wake it: the dongle types again after it wakes.

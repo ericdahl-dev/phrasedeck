@@ -296,6 +296,40 @@ struct CourierTests {
 
         #expect(await send.value.isMaybeTyped)
     }
+
+    // MARK: one Send at a time
+
+    @Test func aSecondTapWhileAHelperSendIsInFlightIsBusy() async throws {
+        api.holdType = true
+        let (courier, _) = try courier()
+        let first = Task { await courier.send("one", enter: false, to: mac) }
+        try #require(await api.waitForTyping())
+
+        #expect(await courier.send("two", enter: false, to: mac) == .notTyped(.inFlight(mac)))
+
+        api.finishTyping()
+        #expect(await first.value == .typed(nil))
+        #expect(api.typed.map(\.text) == ["one"])
+    }
+
+    /// Across Computers and Routes too: a Helper's Send waits for the dongle's to end.
+    @Test func aTapForAnotherComputerWhileTheDongleTypesIsBusy() async throws {
+        let computers = makeComputers()
+        try computers.add(mac)
+        try computers.add(dongle)
+        try tokens.set(DongleFrameTests.tokenHex, for: dongle.id)
+        let courier = Courier(computers: computers)
+        link.answer = { _ in [] }
+        let first = Task { await courier.send("hi", enter: false, to: dongle) }
+        try #require(await link.waitForBegin())
+
+        #expect(await courier.send("yes", enter: false, to: mac) == .notTyped(.inFlight(dongle)))
+        #expect(api.typed.isEmpty)
+
+        await courier.stop()
+        _ = await first.value
+        #expect(await courier.send("yes", enter: false, to: mac) == .typed(nil))
+    }
 }
 
 extension Courier.Delivery {

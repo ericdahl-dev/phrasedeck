@@ -18,10 +18,29 @@ final class FakeHelperAPI: HelperAPI, @unchecked Sendable {
         .success(Health(hostname: "lib-2833", os: "darwin", accessibilityOK: true))
 
     var typed: [(text: String, enter: Bool)] { lock.withLock { _typed } }
+
+    /// When set, `type` waits until `finishTyping()`, as a slow Send does.
+    var holdType = false
+    private var typing: CheckedContinuation<Void, Never>?
+
+    /// Lets a Send started in a Task reach `type`; false if it never does.
+    func waitForTyping() async -> Bool {
+        for _ in 0..<10_000 where lock.withLock({ typing == nil }) { await Task.yield() }
+        return lock.withLock { typing != nil }
+    }
+
+    func finishTyping() {
+        let continuation = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            defer { typing = nil }
+            return typing
+        }
+        continuation?.resume()
+    }
     var paired: [(code: String, device: String)] { lock.withLock { _paired } }
 
     func type(text: String, enter: Bool) async throws {
         lock.withLock { _typed.append((text, enter)) }
+        if holdType { await withCheckedContinuation { continuation in lock.withLock { typing = continuation } } }
         if let typeError { throw typeError }
         if let typeOther { throw typeOther }
     }

@@ -100,7 +100,12 @@ pio device monitor                     # serial log and commands (115200; any ba
 - **Later flashes:** the firmware's CDC port resets into the bootloader when the uploader opens it
   at 1200 baud (`use_1200bps_touch`), so `-t upload` works without BOOT.
 - With the firmware running, the Computer sees "Phrasedeck dongle" by "Phrasedeck", USB vendor
-  0x303A (Espressif), product 0x0002: a keyboard and a serial port.
+  0x303A (Espressif), product 0x1001: a keyboard and a serial port. 0x1001 is the Arduino core's
+  ID for every ESP32-S3 board (its `pins_arduino.h`), and also the ID of the ROM's "USB
+  JTAG/serial debug unit", so `lsusb` shows the same `303a:1001` in the bootloader and in the
+  firmware; the names and the interfaces tell them apart. A device allowlist that keys on IDs
+  can't tell this dongle from any other S3 board; a product ID of its own is an open question.
+  `src/usb_keyboard.cpp` checks the IDs at build time, so this line and the code can't drift.
 
 ## Bond and send with nRF Connect
 
@@ -186,7 +191,7 @@ For the Mac, Linux and the work Computer:
 1. Plug the dongle in. Check it shows up as a keyboard:
    - Mac: a "Keyboard Setup Assistant" may ask to identify the keyboard: close it (ANSI is
      right). System Information > USB lists "Phrasedeck dongle".
-   - Linux: `lsusb` shows `303a:0002`, and `sudo dmesg | tail` shows a HID keyboard and
+   - Linux: `lsusb` shows `303a:1001`, and `sudo dmesg | tail` shows a HID keyboard and
      `cdc_acm`.
    - Work Computer: note whether it asks for approval, blocks the device, or blocks only the
      serial port (the keyboard can still work without it).

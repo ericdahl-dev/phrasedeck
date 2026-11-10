@@ -9,6 +9,12 @@
 #include "tusb.h"
 
 namespace usb_keyboard {
+
+// The IDs the Computer sees, as the README gives them. They come from the esp32s3 variant's
+// pins_arduino.h, so a core update that changes them fails the build here.
+static_assert(USB_VID == 0x303A, "README: USB vendor 0x303A");
+static_assert(USB_PID == 0x1001, "README: USB product 0x1001");
+
 namespace {
 
 // USBHIDKeyboard adds the boot keyboard interface and its report descriptor. Its sendReport()

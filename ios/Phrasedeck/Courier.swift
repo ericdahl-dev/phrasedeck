@@ -1,7 +1,9 @@
 import Foundation
+import Observation
 
 /// Carries a Send to a Computer by the right Route and brings back what happened to it (#206).
 @MainActor
+@Observable
 final class Courier {
     /// What happened to a Send: Typed, Maybe typed or Not typed, each with its reason.
     enum Delivery: Equatable {
@@ -17,6 +19,12 @@ final class Courier {
                 switch failure {
                 case .noReply, .failedPartway: return .maybeTyped(.helper(failure))
                 default: return .notTyped(.helper(failure))
+                }
+            case let failure as Dongle.Failure:
+                switch failure {
+                // After the Begin: the link dropped, no Result came, or it stopped partway.
+                case .lost, .noResult, .result(.stoppedPartway): return .maybeTyped(.dongle(failure))
+                default: return .notTyped(.dongle(failure))
                 }
             default:
                 // Not one the Courier knows left nothing behind (a canceled task, say): the Send
@@ -34,11 +42,23 @@ final class Courier {
         case unrecognized(String)
     }
 
-    private let computers: Computers
+    @ObservationIgnored private let computers: Computers
+    /// The Computer a Send is on its way to, until its Delivery.
+    private(set) var sending: Helper?
 
     init(computers: Computers) { self.computers = computers }
 
     func send(_ phrase: String, enter: Bool, to computer: Helper) async -> Delivery {
+        if let dongle = computer.dongle {
+            sending = computer
+            defer { sending = nil }
+            do {
+                try await computers.dongles.send(phrase, enter: enter, to: dongle, token: computers.token(for: computer))
+                return .typed(nil)
+            } catch {
+                return .failed(error)
+            }
+        }
         let attempt = await reach(computer, retryingIf: Self.leftNothing) {
             try await $0.type(text: phrase, enter: enter)
         }
@@ -53,6 +73,9 @@ final class Courier {
             return delivery
         }
     }
+
+    /// Ends the Bluetooth Send in progress; its Delivery comes from the dongle's Result.
+    func stop() async { await computers.dongles.stop() }
 
     // MARK: routes
 

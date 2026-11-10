@@ -17,6 +17,9 @@ struct Helper: Codable, Hashable, Identifiable, Sendable {
     /// The LAN address from a QR code made with Tailscale off; such a
     /// computer has an empty `host` and is reached only this way.
     var lanHost: String?
+    /// For a Computer reached through a Phrasedeck dongle (#202), the dongle's Bluetooth
+    /// identifier; nil for a Computer with a Helper.
+    var dongle: UUID?
 
     /// The machine name from a MagicDNS name ("lib-2833" for
     /// lib-2833.tail1fdac.ts.net); other hosts as they are.
@@ -92,11 +95,16 @@ final class Computers {
 
     var selected: Helper? { all.first { $0.id == selectedID } }
 
-    init(defaults: UserDefaults = .standard, tokens: any TokenVault = TokenStore(),
+    /// The Bluetooth route to Computers with a dongle (#202).
+    @ObservationIgnored let dongles: DongleSender
+
+    init(defaults: UserDefaults = .standard, tokens: any TokenVault = TokenStore(), dongles: DongleSender? = nil,
          connect: @escaping Connect = { HelperClient(helper: $0, token: $1, route: $2) }) {
         self.defaults = defaults
         self.tokens = tokens
         self.connect = connect
+        // Bluetooth starts (and iOS asks for it) only when a dongle is first scanned for or reached.
+        self.dongles = dongles ?? DongleSender(link: CoreBluetoothDongles())
         all = defaults.data(forKey: Self.helpersKey)
             .flatMap { try? JSONDecoder().decode([Helper].self, from: $0) } ?? []
         let stored = defaults.string(forKey: Self.selectedKey).flatMap(UUID.init(uuidString:))
@@ -135,6 +143,9 @@ final class Computers {
 
     func setToken(_ token: String, for helper: Helper) throws { try tokens.set(token, for: helper.id) }
 
+    /// The computer's token, for the Bluetooth route; HelperClient gets its own through `connection`.
+    func token(for helper: Helper) -> String? { (try? tokens.get(helper.id)) ?? nil }
+
     /// Adds a newly paired computer; if the record can't be saved, its token is removed too.
     func add(_ helper: Helper) throws {
         do {
@@ -170,3 +181,4 @@ final class Computers {
         all = helpers
     }
 }
+

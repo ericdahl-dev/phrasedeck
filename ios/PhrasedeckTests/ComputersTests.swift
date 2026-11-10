@@ -130,6 +130,8 @@ struct HelperLANFieldTests {
 
         #expect(helpers == [Helper(id: id, name: "lib-2833", host: "lib-2833", port: 47811)])
         #expect(helpers.first?.certSHA256 == nil && helpers.first?.lanPort == nil)
+        // And it's a Helper's Computer, not a dongle's (#202).
+        #expect(helpers.first?.dongle == nil)
     }
 
     @Test func learningAFingerprintReplacesTheComputerInPlace() throws {

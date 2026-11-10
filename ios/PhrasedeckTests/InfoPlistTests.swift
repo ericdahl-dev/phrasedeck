@@ -36,4 +36,10 @@ struct InfoPlistTests {
         let usage = try #require(info["NSCameraUsageDescription"] as? String)
         #expect(usage.contains("QR"))
     }
+
+    /// Sending to a USB dongle goes over Bluetooth (#202), and iOS asks first.
+    @Test func explainsBluetooth() throws {
+        let usage = try #require(info["NSBluetoothAlwaysUsageDescription"] as? String)
+        #expect(usage.contains("dongle"))
+    }
 }

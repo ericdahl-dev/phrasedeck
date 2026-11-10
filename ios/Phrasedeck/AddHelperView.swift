@@ -100,6 +100,16 @@ struct AddHelperView: View {
                              : "Scanning needs the camera. Allow it in Settings, or type the name and code below.")
                     }
                     Section {
+                        NavigationLink {
+                            AddDongleView { dismiss() }
+                        } label: {
+                            Label("USB dongle", systemImage: "cable.connector")
+                        }
+                        .accessibilityIdentifier("addHelper.dongle")
+                    } footer: {
+                        Text("A Phrasedeck dongle plugged into the computer types for it over USB. That computer needs no Helper.")
+                    }
+                    Section {
                         TextField("Tailnet name, e.g. omarchy-laptop", text: $host)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()

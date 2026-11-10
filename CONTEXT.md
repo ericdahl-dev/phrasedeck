@@ -1,11 +1,11 @@
 # phrasedeck
 
-An iPhone deck of buttons that types saved phrases into a computer, through a small program running on that computer.
+An iPhone deck of buttons that types saved phrases into a computer, through a small program running on that computer, or a USB dongle plugged into it.
 
 ## Language
 
 **Computer**:
-A machine paired with the phone, as the phone knows it: a name, an address and a token.
+A machine paired with the phone, as the phone knows it: a name, how to reach it (an address, or its Dongle) and a token.
 _Avoid_: server, host, machine, device
 
 **Helper**:
@@ -55,7 +55,7 @@ _Avoid_: size class, device width, breakpoint
 ## Reaching a Computer
 
 **Route**:
-The path a phrase takes from the phone to a Computer. There are two: the Tailnet route and the Home network route.
+The path a phrase takes from the phone to a Computer. There are three: the Tailnet route and the Home network route, to a Helper, and the Bluetooth route, to a Dongle.
 _Avoid_: connection, transport, channel
 
 **Tailnet route**:
@@ -65,6 +65,14 @@ _Avoid_: VPN, remote, Tailscale route
 **Home network route**:
 Directly over the same Wi-Fi, encrypted and checked against the Computer's Pin. Used only when the Computer is Nearby.
 _Avoid_: LAN, local, Bonjour, direct
+
+**Bluetooth route**:
+From the phone to a Dongle over Bluetooth LE, encrypted by the bond, with the Dongle's Token in every Send. The Dongle types the Phrase on its Computer as a USB keyboard. It works only within Bluetooth range.
+_Avoid_: BLE, wireless, connection, transport
+
+**Dongle**:
+A Phrasedeck USB dongle: a small board plugged into a Computer, which the Computer sees as an ordinary USB keyboard. The phone sends it Phrases over the Bluetooth route, and it types them, so that Computer needs no Helper. It takes one phone at a time.
+_Avoid_: stick, adapter, receiver, device (that's what pairs with a Helper)
 
 **Pin**:
 The Computer's identity, which the phone remembers from pairing. On the Home network route, a Computer that doesn't match its Pin isn't trusted, and nothing is sent.
@@ -89,8 +97,16 @@ What the QR code holds: the Pairing code, where to reach the Computer, and its P
 _Avoid_: QR (that's only how it's shown), invite link
 
 **Token**:
-The secret a Device keeps after pairing, and shows the Helper with every Send.
+The secret a Device keeps after pairing, and shows the Helper with every Send. A Dongle has one too: the phone reads it once, in the 2 minutes after the bond, and shows it to the Dongle with every Send.
 _Avoid_: key, password, credential
+
+**Passkey**:
+The 6 digits iOS asks for when the phone first bonds with a Dongle. For now the Dongle prints them on its USB serial port.
+_Avoid_: PIN (it clashes with Pin), Pairing code (that's the Helper's)
+
+**Bond**:
+The pairing between the phone and a Dongle, made once with the Passkey and kept by both. Holding BOOT on the Dongle for 5 seconds forgets it.
+_Avoid_: link, connection
 
 **Device**:
 Anything paired with a Helper that sends Phrases (a phone, an iPad, a desk panel), holding its own Token. Revoking a Device cuts off only that one.

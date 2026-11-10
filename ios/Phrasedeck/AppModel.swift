@@ -19,7 +19,7 @@ extension HelperClient: HelperAPI {}
 final class AppModel {
     enum Status: Equatable { case unknown, reachable, notReady, unreachable }
     /// Which way the status check last reached a computer.
-    enum RouteKind: Equatable { case home, tailnet }
+    enum RouteKind: Equatable { case home, tailnet, bluetooth }
 
     struct Feedback: Equatable {
         enum Tone: Equatable {
@@ -86,6 +86,7 @@ final class AppModel {
         guard let helper = selectedHelper else {
             return show(Feedback(tone: .red, message: "Not typed: add a computer first.", addComputer: true))
         }
+        if let dongle = helper.dongle { return await send(text: text, enter: enter, to: helper, through: dongle) }
         let route = computers.route(for: helper)
         do {
             try await computers.connection(to: helper, via: route).type(text: text, enter: enter)
@@ -111,6 +112,29 @@ final class AppModel {
         }
     }
 
+    /// The Computer a Bluetooth Send is typing on, which Stop can end (#202).
+    private(set) var sendingTo: Helper?
+
+    /// The Bluetooth route (#202): one Send to the dongle, its Result as the Outcome.
+    private func send(text: String, enter: Bool, to helper: Helper, through dongle: UUID) async -> Feedback {
+        let sender = computers.dongles
+        // A second tap while one types is busy; it doesn't take over Stop.
+        let owns = !sender.isSending
+        if owns { sendingTo = helper }
+        defer { if owns { sendingTo = nil } }
+        do {
+            try await sender.send(text, enter: enter, to: dongle, token: computers.token(for: helper))
+            return show(Feedback(tone: .success, message: nil))
+        } catch let failure as Dongle.Failure {
+            return show(Outcome.send(failure, on: helper))
+        } catch {
+            return show(Feedback(tone: .red, message: "Not typed: \(helper.name): \(error.localizedDescription)"))
+        }
+    }
+
+    /// Ends the Bluetooth Send in progress; its Outcome comes from the dongle's Result.
+    func stop() async { await computers.dongles.stop() }
+
     func dismissFeedback() { feedback = nil }
 
     private func show(_ feedback: Feedback) -> Feedback {
@@ -128,6 +152,12 @@ final class AppModel {
     /// Checks the route a send would take, then the tailnet if that fails.
     /// Over the tailnet it also learns the LAN fingerprint from /info once.
     func refreshStatus(of helper: Helper) async {
+        // A dongle's Computer: connected, or not in range (#202).
+        if let dongle = helper.dongle {
+            statuses[helper.id] = await computers.dongles.isReachable(dongle) ? .reachable : .unreachable
+            statusRoutes[helper.id] = .bluetooth
+            return
+        }
         let route = computers.route(for: helper)
         if route != .tailnet, let health = try? await computers.connection(to: helper, via: route).health() {
             statuses[helper.id] = health.accessibilityOK ? .reachable : .notReady
@@ -224,6 +254,31 @@ final class AppModel {
             try computers.add(helper)
         } catch {
             return "Couldn't save \(helper.name): \(error.localizedDescription)"
+        }
+        selectedHelperID = helper.id
+        return nil
+    }
+
+    /// The dongles advertising the service nearby (#202).
+    func scanForDongles() -> AsyncThrowingStream<[FoundDongle], any Error> { computers.dongles.scan() }
+
+    /// Bonds with a dongle the scan found, keeps its Token and adds its Computer, or gives the
+    /// one already here the new Token (after a BOOT reset). Returns a message, or nil on success.
+    func addDongle(_ found: FoundDongle) async -> String? {
+        let token: String
+        do {
+            token = try await computers.dongles.pair(found.id)
+        } catch let failure as Dongle.Failure {
+            return Outcome.pairDongle(failure, named: found.name)
+        } catch {
+            return "Couldn't pair with \(found.name): \(error.localizedDescription)"
+        }
+        let helper = helpers.first { $0.dongle == found.id } ?? Helper(name: found.name, host: "", dongle: found.id)
+        do {
+            try computers.setToken(token, for: helper)
+            if !helpers.contains(where: { $0.id == helper.id }) { try computers.add(helper) }
+        } catch {
+            return "Couldn't save \(found.name): \(error.localizedDescription)"
         }
         selectedHelperID = helper.id
         return nil

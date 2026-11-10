@@ -48,6 +48,8 @@ targets:
         NSBonjourServices: [_phrasedeck._tcp]
         NSLocalNetworkUsageDescription: phrasedeck looks for your computers on the home network so it can reach them without Tailscale.
         NSCameraUsageDescription: phrasedeck uses the camera only to scan the QR code that phrased pair shows, to add a computer.
+        # Sends Phrases to a Phrasedeck USB dongle over Bluetooth (#202).
+        NSBluetoothAlwaysUsageDescription: phrasedeck uses Bluetooth to send Phrases to your Phrasedeck USB dongle, which types them on its computer.
         # No encryption beyond what the OS provides (TestFlight export compliance).
         ITSAppUsesNonExemptEncryption: false
         # Not empty once the entitlements above are set; the app syncs only then.

@@ -168,8 +168,10 @@ class BleKeyboard : public send::Keyboard {
 };
 
 // One report per interval. Most characters are one report (the next key's press releases the last,
-// #174), and the panel asks for a 15 ms connection interval; the controller sends more than one
-// report in a connection event, in order. 10 ms makes about 80 characters a second of plain text.
+// #174); a change of Shift costs two more, one on its own before the key and one after (#204), so a
+// capital in lowercase text is four, and the Shift-only report is held a whole interval. The panel
+// asks for a 15 ms connection interval; the controller sends more than one report in a connection
+// event, in order. 10 ms makes about 80 characters a second of plain text.
 // Override to A/B on the device: -DPANEL_KEY_INTERVAL_MS=20 was the speed before #174.
 #ifndef PANEL_KEY_INTERVAL_MS
 #define PANEL_KEY_INTERVAL_MS 10

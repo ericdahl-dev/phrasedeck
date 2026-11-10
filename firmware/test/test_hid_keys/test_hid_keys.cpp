@@ -161,12 +161,13 @@ void test_a_report_the_stack_refuses_is_sent_again() {
 void test_cancel_releases_a_held_key_then_stops() {
     hid_keys::Sender s(hid_keys::plan("aBc", false).keys, 20);
     Stack stack;
-    run(s, stack, 40);  // press a, release, press B (at 0, 20, 40 ms): B is down, c not typed
-    TEST_ASSERT_EQUAL(3, stack.sent.size());
+    run(s, stack, 60);  // a, release, Shift, B (at 0, 20, 40, 60 ms): B is down, c not typed
+    TEST_ASSERT_EQUAL(4, stack.sent.size());
 
     s.cancel();
-    run(s, stack, 200, 41);
-    TEST_ASSERT_EQUAL(4, stack.sent.size());
+    run(s, stack, 200, 61);
+    TEST_ASSERT_EQUAL(6, stack.sent.size());  // B up with Shift held, then all up
+    TEST_ASSERT_TRUE((Key{kShift, 0}) == stack.sent[4]);
     TEST_ASSERT_TRUE(kRelease == stack.sent.back());
     TEST_ASSERT_TRUE(s.done());
     TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Stopped, s.result());
@@ -284,12 +285,13 @@ void test_a_different_next_key_rolls_over_in_one_report() {
 }
 
 // A change of Shift never rolls over: in one report a host could take the new key before the
-// modifier change, and "Ab" would type "AB". A release goes in between instead.
+// modifier change, and "Ab" would type "AB". Shift goes down and up on its own around B (#204).
 void test_a_change_of_shift_keeps_its_release() {
     hid_keys::Sender s(hid_keys::plan("aBc", false).keys, 20);
     Stack stack;
     run(s, stack, 200);
-    expectSent({{0, 0x04}, kRelease, {kShift, 0x05}, kRelease, {0, 0x06}, kRelease}, stack);
+    const Key shift{kShift, 0};
+    expectSent({{0, 0x04}, kRelease, shift, {kShift, 0x05}, shift, kRelease, {0, 0x06}, kRelease}, stack);
 }
 
 // Cancel while b is down and the next report is c's press (which would release b): the release
@@ -312,7 +314,10 @@ void test_repeats_and_capitals_type_in_order() {
     Stack stack;
     run(s, stack, 1000);
     const Key H{kShift, 0x0B}, e{0, 0x08}, l{0, 0x0F}, o{0, 0x12}, comma{0, 0x36}, space{0, 0x2C}, L{kShift, 0x0F};
-    expectSent({H, kRelease, e, l, kRelease, l, o, comma, space, kRelease, L, kRelease, L, kRelease}, stack);
+    const Key shift{kShift, 0};
+    expectSent({shift, H, shift, kRelease, e, l, kRelease, l, o, comma, space, kRelease,  //
+                shift, L, shift, kRelease, shift, L, shift, kRelease},
+               stack);
     TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Sent, s.result());
 }
 
@@ -355,13 +360,87 @@ void test_cancel_before_a_planned_release_sends_just_that_release() {
     TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Stopped, t.result());
 }
 
-// Capitals in a row hold Shift across the rollover: Shift+A, then Shift+B, then one release.
+// Capitals in a row hold Shift across the rollover: Shift on its own, Shift+A, then Shift+B, then
+// B up with Shift held, then all up. Only the first capital needs the Shift-only report (#204).
 void test_shift_is_held_across_capitals() {
     hid_keys::Sender s(hid_keys::plan("AB", false).keys, 20);
     Stack stack;
     run(s, stack, 200);
-    expectSent({{kShift, 0x04}, {kShift, 0x05}, kRelease}, stack);
+    const Key shift{kShift, 0};
+    expectSent({shift, {kShift, 0x04}, {kShift, 0x05}, shift, kRelease}, stack);
     TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Sent, s.result());
+}
+
+// Windows can miss a Shift that goes down in the same report as its key, and type "/" for "?"
+// (#204). Shift goes down on its own first, and the key goes up before Shift does.
+void test_shift_goes_down_on_its_own_before_a_shifted_key() {
+    hid_keys::Sender s(hid_keys::plan("?", false).keys, 20);
+    Stack stack;
+    run(s, stack, 200);
+    const Key shift{kShift, 0}, q{kShift, 0x38};
+    expectSent({shift, q, shift, kRelease}, stack);
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Sent, s.result());
+}
+
+// The Phrase from Windows (#204): "a?b A?B" typed "a?b a/b". Shift goes down on its own before ?
+// and before A, stays held from A through B, and the last key goes up before Shift does.
+void test_a_question_mark_and_capitals_from_windows() {
+    hid_keys::Sender s(hid_keys::plan("a?b A?B", false).keys, 20);
+    Stack stack;
+    run(s, stack, 1000);
+    const Key shift{kShift, 0}, a{0, 0x04}, b{0, 0x05}, q{kShift, 0x38}, space{0, 0x2C}, A{kShift, 0x04},
+        B{kShift, 0x05};
+    expectSent({a, kRelease, shift, q, shift, kRelease, b, space, kRelease,  //
+                shift, A, q, B, shift, kRelease},
+               stack);
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Sent, s.result());
+}
+
+// Cancel with the last key down and only its release left: the release with Shift held, then all
+// up. Every key went, so it's still Sent (#178), and nothing is left held.
+void test_cancel_with_the_last_shifted_key_down_is_still_sent() {
+    hid_keys::Sender s(hid_keys::plan("?", false).keys, 20);
+    Stack stack;
+    run(s, stack, 20);  // Shift at 0, ? at 20
+    s.cancel();
+    run(s, stack, 200, 21);
+    const Key shift{kShift, 0};
+    expectSent({shift, {kShift, 0x38}, shift, kRelease}, stack);
+    TEST_ASSERT_FALSE(s.keyDown());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Sent, s.result());
+}
+
+// Stop with Shift down on its own, before its key: the key isn't typed, and the release lets go of
+// Shift, so no modifier is left held on the Computer (#204).
+void test_cancel_with_only_shift_down_releases_it() {
+    hid_keys::Sender s(hid_keys::plan("a?b", false).keys, 20);
+    Stack stack;
+    run(s, stack, 40);  // a at 0, its release at 20, Shift on its own at 40
+    s.cancel();
+    run(s, stack, 200, 41);
+    expectSent({{0, 0x04}, kRelease, {kShift, 0}, kRelease}, stack);
+    TEST_ASSERT_FALSE(s.keyDown());
+    TEST_ASSERT_EQUAL(hid_keys::Sender::Result::Stopped, s.result());
+}
+
+static void expectReports(const char* text, const std::vector<Key>& want) {
+    const std::vector<Key> got = hid_keys::Sender::reports(hid_keys::plan(text, false).keys);
+    TEST_ASSERT_EQUAL_MESSAGE(want.size(), got.size(), text);
+    for (size_t i = 0; i < want.size(); i++) {
+        TEST_ASSERT_EQUAL_HEX8_MESSAGE(want[i].mod, got[i].mod, text);
+        TEST_ASSERT_EQUAL_HEX8_MESSAGE(want[i].code, got[i].code, text);
+    }
+}
+
+// Each change of Shift costs a Shift-only report before the key and one after it; a plain letter
+// is still one report, or two before a change (#204).
+void test_the_reports_for_each_change_of_shift() {
+    const Key shift{kShift, 0}, a{0, 0x04}, A{kShift, 0x04}, q{kShift, 0x38};
+    expectReports("A", {shift, A, shift, kRelease});
+    expectReports("aA", {a, kRelease, shift, A, shift, kRelease});
+    expectReports("Aa", {shift, A, shift, kRelease, a, kRelease});
+    // The same key twice can't roll over, so each ? is a press of its own, Shift and all.
+    expectReports("??", {shift, q, shift, kRelease, shift, q, shift, kRelease});
 }
 
 int main() {
@@ -391,5 +470,10 @@ int main() {
     RUN_TEST(test_a_stall_with_a_key_down_says_so);
     RUN_TEST(test_cancel_before_a_planned_release_sends_just_that_release);
     RUN_TEST(test_shift_is_held_across_capitals);
+    RUN_TEST(test_shift_goes_down_on_its_own_before_a_shifted_key);
+    RUN_TEST(test_a_question_mark_and_capitals_from_windows);
+    RUN_TEST(test_cancel_with_the_last_shifted_key_down_is_still_sent);
+    RUN_TEST(test_cancel_with_only_shift_down_releases_it);
+    RUN_TEST(test_the_reports_for_each_change_of_shift);
     return UNITY_END();
 }

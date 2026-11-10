@@ -11,9 +11,9 @@ namespace hid_keys {
 
 constexpr uint8_t kShift = 0x02;  // left Shift in the report's modifier byte
 
-// One key press: a report with this key down. The Sender releases it with an all-zero report, or
-// with the next key's press when that rolls over (see Sender), so a repeated key ("aa") still reads
-// as two presses.
+// One key press: a report with this key down. The Sender releases it (see Sender::reports), or lets
+// the next key's press release it when that rolls over, so a repeated key ("aa") still reads as two
+// presses.
 struct Key {
     uint8_t mod;   // modifier byte
     uint8_t code;  // HID usage (keyboard page)
@@ -50,9 +50,9 @@ class Pacer {
     bool started_ = false;
 };
 
-// Sends a Plan's keys as HID reports, one per Pacer interval: each key's press, and an all-zero
-// release unless the next key rolls over (a different usage with the same modifiers: its press
-// releases this one, #174), then a release at the end. step(), done(), keyDown() and result() belong
+// Sends a Plan's keys as HID reports, one per Pacer interval: each key's press, and a release unless
+// the next key rolls over (a different usage with the same modifiers: its press releases this one,
+// #174), then a release at the end. A change of modifiers gets reports of its own (see reports()). step(), done(), keyDown() and result() belong
 // to the BLE task; call step() often. notify sends one report and returns false when the stack
 // didn't take it: that report goes again next interval, or at once while a key is down, so a held
 // key can't reach the host's auto-repeat. After a second of failures in a row it gives up, and
@@ -63,7 +63,7 @@ class Pacer {
 // itself) and wins over a cancel.
 class Sender {
   public:
-    // Stopped: ended partway, so some keys were typed.
+    // Stopped: ended partway, so some keys may have been typed (or only Shift went down).
     enum class Result { Running, Sent, Stopped, NotSent };
 
     Sender(const std::vector<Key>& keys, uint32_t intervalMs) : reports_(reports(keys)), pacer_(intervalMs), end_(reports_.size()) {}
@@ -78,10 +78,13 @@ class Sender {
             end_ = next_;
             releasing_ = false;
         } else if ((request & kCancel) && !done()) {
-            const Key& planned = reports_[next_];
-            if (planned.code == 0 && planned.mod == 0) {
-                // The next planned report is a release: it goes, and nothing after it.
-                end_ = next_ + 1;
+            // A release is the all-zero report, or a key going up with its modifiers held and then
+            // the all-zero report (#204). A Shift-only report before a press isn't one: a press follows.
+            size_t release = next_;
+            while (release < reports_.size() && reports_[release].code == 0 && reports_[release].mod != 0) release++;
+            if (release < reports_.size() && reports_[release].code == 0 && reports_[release].mod == 0) {
+                // The next planned reports are a release: they go, and nothing after them.
+                end_ = release + 1;
             } else {
                 // A key that's down still gets its own release, even when the next report was a
                 // press that would have released it: a cancel mustn't type one more key.
@@ -118,14 +121,26 @@ class Sender {
         return next_ == reports_.size() ? Result::Sent : Result::Stopped;
     }
 
-    // The reports for keys, in order: each key's press, and an all-zero release after it unless the
-    // next key can roll over (see rollsOver), then a release at the end.
+    // The reports for keys, in order: each key's press, and a release after it unless the next key
+    // can roll over (see rollsOver), then a release at the end. Windows can miss a modifier that
+    // goes down in the same report as its key (#204: "A?B" typed "a/b"), so a key whose modifiers
+    // differ from what's held gets a report with just those modifiers first, a Pacer interval ahead.
+    // A release of a key with modifiers lets the key go first, modifiers still held, then all zero.
+    // So "a?b" is a, release, Shift, Shift+?, Shift, release, b, release; "AB" is Shift, Shift+A,
+    // Shift+B, Shift, release: rollover keeps Shift held, and only the first capital pays for it.
     static std::vector<Key> reports(const std::vector<Key>& keys) {
         std::vector<Key> out;
         out.reserve(keys.size() * 2);
+        uint8_t held = 0;  // the modifiers the host has down
         for (size_t i = 0; i < keys.size(); i++) {
-            out.push_back(keys[i]);
-            if (i + 1 == keys.size() || !rollsOver(keys[i], keys[i + 1])) out.push_back(Key{0, 0});
+            const Key& k = keys[i];
+            if (k.mod != held) out.push_back(Key{k.mod, 0});
+            held = k.mod;
+            out.push_back(k);
+            if (i + 1 < keys.size() && rollsOver(k, keys[i + 1])) continue;
+            if (held != 0) out.push_back(Key{held, 0});
+            out.push_back(Key{0, 0});
+            held = 0;
         }
         return out;
     }

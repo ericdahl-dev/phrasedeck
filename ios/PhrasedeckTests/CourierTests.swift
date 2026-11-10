@@ -53,4 +53,149 @@ struct CourierTests {
         #expect(api.typed.first?.enter == true)
         #expect(routes.log == [.tailnet])
     }
+
+    // MARK: the Home network route and the one tailnet fallback
+
+    static let pin = String(repeating: "ab", count: 32)
+    static let home = NearbyService(tailnetName: "lib-2833.tail1fdac.ts.net",
+                                    address: LANAddress(host: "192.168.1.20", port: 47812))
+    static let homeRoute = HelperClient.Route.lan(host: "192.168.1.20", port: 47812, pin: pin)
+
+    /// The Mac with its Pin stored, seen nearby on the home network.
+    func nearby() throws -> (Courier, Helper) {
+        let (courier, computers) = try courier()
+        try computers.learn(Self.pin, lanPort: 47812, for: mac.id)
+        computers.setNearby([Self.home])
+        return (courier, try #require(computers.all.first))
+    }
+
+    /// Paired with Tailscale off: reached only on the home network.
+    func hostless(in computers: Computers) throws -> Helper {
+        var hostless = Helper(name: "192.168.1.30", host: "")
+        hostless.lanHost = "192.168.1.30"
+        hostless.certSHA256 = Self.pin
+        hostless.lanPort = 47900
+        try computers.add(hostless)
+        return hostless
+    }
+
+    @Test func aSendGoesOverTheHomeNetworkOnceWhenNearby() async throws {
+        let (courier, pinned) = try nearby()
+
+        #expect(await courier.send("yes", enter: true, to: pinned) == .typed(nil))
+        #expect(lan.typed.count == 1 && api.typed.isEmpty)
+        #expect(routes.log == [Self.homeRoute])
+    }
+
+    @Test func nearbyWithoutAPinStaysOnTheTailnet() async throws {
+        let (courier, computers) = try courier()
+        computers.setNearby([Self.home])
+
+        _ = await courier.send("yes", enter: true, to: mac)
+
+        #expect(routes.log == [.tailnet])
+    }
+
+    @Test func aDifferentNearbyComputerDoesNotCount() async throws {
+        let (courier, computers) = try courier()
+        try computers.learn(Self.pin, lanPort: 47812, for: mac.id)
+        computers.setNearby([NearbyService(tailnetName: "omarchy-black2.tail1fdac.ts.net", address: Self.home.address)])
+
+        _ = await courier.send("yes", enter: true, to: try #require(computers.all.first))
+
+        #expect(routes.log == [.tailnet])
+    }
+
+    @Test func aMatchingAdvertisedFingerprintMakesAComputerNearby() async throws {
+        let (courier, computers) = try courier()
+        try computers.learn(Self.pin, lanPort: 47812, for: mac.id)
+        computers.setNearby([NearbyService(tailnetName: nil, address: LANAddress(host: "192.168.1.44", port: 47812),
+                                           advertisedFingerprint: Self.pin)])
+
+        _ = await courier.send("yes", enter: true, to: try #require(computers.all.first))
+
+        #expect(routes.log == [.lan(host: "192.168.1.44", port: 47812, pin: Self.pin)])
+    }
+
+    @Test func aDifferentAdvertisedFingerprintDoesNotMakeItNearby() async throws {
+        let (courier, computers) = try courier()
+        try computers.learn(Self.pin, lanPort: 47812, for: mac.id)
+        computers.setNearby([NearbyService(tailnetName: nil, address: Self.home.address,
+                                           advertisedFingerprint: String(repeating: "cd", count: 32))])
+
+        _ = await courier.send("yes", enter: true, to: try #require(computers.all.first))
+
+        #expect(routes.log == [.tailnet])
+    }
+
+    /// Its QR code's address, or where Bonjour sees it now.
+    @Test func aComputerWithoutATailnetNameUsesItsHomeNetworkAddress() async throws {
+        let computers = makeComputers()
+        let hostless = try hostless(in: computers)
+        let courier = Courier(computers: computers)
+
+        _ = await courier.send("x", enter: false, to: hostless)
+        computers.setNearby([NearbyService(tailnetName: nil, address: LANAddress(host: "192.168.1.77", port: 47900),
+                                           advertisedFingerprint: Self.pin)])
+        _ = await courier.send("x", enter: false, to: hostless)
+
+        #expect(routes.log == [.lan(host: "192.168.1.30", port: 47900, pin: Self.pin),
+                               .lan(host: "192.168.1.77", port: 47900, pin: Self.pin)])
+    }
+
+    @Test func anUnreachableHomeNetworkFallsBackToTheTailnetOnce() async throws {
+        lan.typeError = .unreachable
+        let (courier, pinned) = try nearby()
+
+        #expect(await courier.send("yes", enter: true, to: pinned) == .typed(nil))
+        #expect(lan.typed.count == 1 && api.typed.count == 1)
+        #expect(routes.log == [Self.homeRoute, .tailnet])
+    }
+
+    /// Anything else may have reached the Helper, so the tailnet never gets a second try.
+    @Test(arguments: [HelperClient.Failure.noReply, .failedPartway, .unauthorized, .busy, .server(502)])
+    func otherHomeNetworkFailuresAreNotRetried(failure: HelperClient.Failure) async throws {
+        lan.typeError = failure
+        let (courier, pinned) = try nearby()
+
+        #expect(await courier.send("yes", enter: true, to: pinned) != .typed(nil))
+        #expect(lan.typed.count == 1 && api.typed.isEmpty)
+    }
+
+    /// Nothing reached the Helper on a Pin mismatch, so the tailnet gets its one try, and the
+    /// result says what happened on the home network.
+    @Test func aPinMismatchSendsOverTheTailnetAndSaysSo() async throws {
+        lan.typeError = .pinMismatch
+        let (courier, pinned) = try nearby()
+
+        #expect(await courier.send("yes", enter: true, to: pinned) == .typed(.helper(.pinMismatch)))
+        #expect(routes.log == [Self.homeRoute, .tailnet])
+    }
+
+    @Test func aPinMismatchWithTheTailnetDownIsNotTypedForThePin() async throws {
+        lan.typeError = .pinMismatch
+        api.typeError = .unreachable
+        let (courier, pinned) = try nearby()
+
+        #expect(await courier.send("yes", enter: true, to: pinned) == .notTyped(.helper(.pinMismatch)))
+    }
+
+    /// The tailnet try may have typed, and that matters more than the Pin.
+    @Test func aPinMismatchThenNoReplyOverTheTailnetIsMaybeTyped() async throws {
+        lan.typeError = .pinMismatch
+        api.typeError = .noReply
+        let (courier, pinned) = try nearby()
+
+        #expect(await courier.send("yes", enter: true, to: pinned) == .maybeTyped(.helper(.noReply)))
+    }
+
+    @Test func aComputerWithoutATailnetNameIsNeverRetriedOnTheTailnet() async throws {
+        lan.typeError = .unreachable
+        let computers = makeComputers()
+        let hostless = try hostless(in: computers)
+
+        #expect(await Courier(computers: computers).send("x", enter: false, to: hostless)
+                == .notTyped(.helper(.unreachable)))
+        #expect(api.typed.isEmpty)
+    }
 }

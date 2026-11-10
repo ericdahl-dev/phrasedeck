@@ -40,6 +40,8 @@ final class Courier {
         case dongle(Dongle.Failure)
         /// An error neither route names, by its description.
         case unrecognized(String)
+        /// Refused before sending: this Computer's Send was still in flight.
+        case inFlight(Helper)
     }
 
     @ObservationIgnored private let computers: Computers
@@ -48,10 +50,13 @@ final class Courier {
 
     init(computers: Computers) { self.computers = computers }
 
+    /// One Send at a time, across every Computer and Route: a tap while one is in flight is
+    /// refused, and nothing is sent.
     func send(_ phrase: String, enter: Bool, to computer: Helper) async -> Delivery {
+        if let sending { return .notTyped(.inFlight(sending)) }
+        sending = computer
+        defer { sending = nil }
         if let dongle = computer.dongle {
-            sending = computer
-            defer { sending = nil }
             do {
                 try await computers.dongles.send(phrase, enter: enter, to: dongle, token: computers.token(for: computer))
                 return .typed(nil)

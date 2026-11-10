@@ -330,19 +330,59 @@ bool notify(const std::vector<uint8_t>& result) {
 bool hasPhone() { return g_hasPhoneFlag.load(); }
 bool phoneConnected() { return g_trusted.load() != kNone; }
 
-void forgetPhoneAndRestart() {
-    Preferences p;
-    if (p.begin(kStore, false)) {
-        p.clear();
+namespace {
+
+// The real dongle behind dongle_trust::forget(), on the loop task.
+class Dongle : public dongle_trust::Device {
+  public:
+    explicit Dongle(int bootPin) : bootPin_(bootPin) {}
+
+    bool eraseBonds() override {
+        // Nobody may bond or stay connected while the store empties.
+        g_trusted.store(kNone);
+        if (g_started.load()) {
+            BLEDevice::stopAdvertising();
+            for (const auto& [handle, status] : g_server->getPeerDevices(false)) {
+                (void)status;
+                ble_gap_terminate(handle, BLE_ERR_REM_USER_CONN_TERM);
+            }
+            delay(200);  // the host task handles the disconnects
+        }
+        return ble_store_clear() == 0;
+    }
+    bool erasePhone() override {
+        Preferences p;
+        if (!p.begin(kStore, false)) return false;
+        const bool ok = p.clear();
         p.end();
+        return ok;
     }
-    // With no phone saved, start() forgets every bond on the next boot.
-    Serial.println("ble: phone and Token forgotten; restarting");
-    Serial.flush();
-    delay(100);
-    ESP.restart();
-    while (true) {
+    bool bootHeld() override { return bootPin_ >= 0 && digitalRead(bootPin_) == LOW; }
+    uint32_t now() override { return millis(); }
+    void sleep(uint32_t ms) override { delay(ms); }
+    void restart() override {
+        // No Serial.flush(): with nobody reading the CDC port it can hold the restart up.
+        Serial.println("ble: phone, Token and bonds forgotten; restarting");
+        delay(100);
+        ESP.restart();
     }
+
+  private:
+    int bootPin_;
+};
+
+}  // namespace
+
+bool forgetPhoneAndRestart(int bootPin) {
+    Dongle d(bootPin);
+    if (bootPin >= 0 && d.bootHeld()) Serial.println("ble: let go of BOOT to restart");
+    if (dongle_trust::forget(d)) {
+        while (true) {
+        }
+    }
+    Serial.println("ble: couldn't forget the phone: try `forget` or BOOT again");
+    advertiseUnlessPhone();
+    return false;
 }
 
 }  // namespace ble_link

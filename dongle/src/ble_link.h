@@ -29,7 +29,9 @@ bool notify(const std::vector<uint8_t>& result);
 bool hasPhone();
 bool phoneConnected();
 
-// The BOOT long press: forgets the phone and its Token, then restarts. Doesn't return.
-[[noreturn]] void forgetPhoneAndRestart();
+// The BOOT long press and the serial `forget`, both: erases every bond and the phone with its
+// Token now, waits (up to 30 s) for BOOT on bootPin to come up, then restarts. -1: no button to
+// wait for. Returns, false, only if something couldn't be erased.
+bool forgetPhoneAndRestart(int bootPin);
 
 }  // namespace ble_link

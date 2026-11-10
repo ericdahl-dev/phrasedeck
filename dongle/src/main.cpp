@@ -117,6 +117,12 @@ void status() {
                   unsigned(g_interval.load()), g_typing.load() ? "typing" : "idle");
 }
 
+// The serial `forget` and the BOOT long press: the same forget, with the same wait for BOOT.
+void forgetPhone(const char* why) {
+    Serial.printf("%s: forgetting the phone\n", why);
+    ble_link::forgetPhoneAndRestart(kBootPin);  // returns only if it couldn't
+}
+
 // Serial commands, one per line, over the USB CDC port.
 void command(const String& line) {
     if (line == "heap") {
@@ -126,7 +132,7 @@ void command(const String& line) {
     } else if (line == "stop") {
         g_stop.store(true);
     } else if (line == "forget") {
-        ble_link::forgetPhoneAndRestart();
+        forgetPhone("forget");
     } else if (line.startsWith("interval ")) {
         const long ms = line.substring(9).toInt();
         if (ms < 0 || ms > 100) {
@@ -168,8 +174,7 @@ void setup() {
 
 void loop() {
     if (g_hold.update(digitalRead(kBootPin) == LOW, millis())) {
-        Serial.println("BOOT held 5 s: forgetting the phone");
-        ble_link::forgetPhoneAndRestart();
+        forgetPhone("BOOT held 5 s");
     }
     while (Serial.available() > 0) {
         const char c = char(Serial.read());

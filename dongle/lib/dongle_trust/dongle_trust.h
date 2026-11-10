@@ -54,4 +54,33 @@ class Hold {
     bool fired_ = false;
 };
 
+// How long a forget waits for BOOT to come up before it restarts anyway.
+constexpr uint32_t kReleaseWaitMs = 30 * 1000;
+
+// What forgetting the phone needs from the dongle. ble_link has the real one.
+class Device {
+  public:
+    virtual ~Device() = default;
+    virtual bool eraseBonds() = 0;  // every Bluetooth bond in the store
+    virtual bool erasePhone() = 0;  // the phone's address and its Token
+    virtual bool bootHeld() = 0;
+    virtual uint32_t now() = 0;
+    virtual void sleep(uint32_t ms) = 0;
+    virtual void restart() = 0;
+};
+
+// Forgets the phone: the BOOT long press and the serial `forget` both run this, so they do the
+// same thing. The bonds and the phone go now, not on the next boot. The restart then waits for BOOT
+// (GPIO0, a strapping pin) to come up, for at most kReleaseWaitMs. False, with no restart, if
+// either couldn't be erased.
+inline bool forget(Device& d) {
+    const bool bonds = d.eraseBonds();
+    const bool phone = d.erasePhone();
+    if (!bonds || !phone) return false;
+    const uint32_t since = d.now();
+    while (d.bootHeld() && d.now() - since < kReleaseWaitMs) d.sleep(20);
+    d.restart();
+    return true;
+}
+
 }  // namespace dongle_trust

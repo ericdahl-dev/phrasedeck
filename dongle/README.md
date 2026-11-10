@@ -14,7 +14,7 @@ accepts it, and what pairing should look like. The app route comes later.
 - One USB-C port, wired to the S3's native USB. The firmware runs TinyUSB on it
   (`ARDUINO_USB_MODE=0`), so the port is a HID keyboard and a CDC serial port at once.
 - BOOT is GPIO0. Held while plugging in, it starts the ROM bootloader. Held for 5 s while the
-  firmware runs, it forgets the phone.
+  firmware runs and then let go, it forgets the phone.
 
 ## Layout
 
@@ -76,8 +76,11 @@ Only the bonded phone's connection may write Send or read the Token. The Result 
 - After the bond, the phone reads the **Token** (32 hex digits) from the Token characteristic. It
   can do that for 2 minutes; after that the characteristic reads empty. Every Begin carries the
   Token, as the Helper's `/type` does.
-- **Holding BOOT for 5 s** forgets the phone and its Token and restarts the dongle, which then
-  takes a new phone. So does the serial command `forget`.
+- **Holding BOOT for 5 s** forgets the phone, its Token and every Bluetooth bond at once, then
+  restarts the dongle when you let go of BOOT (or after 30 s), and it takes a new phone. The serial
+  command `forget` runs the same code. The restart waits for BOOT because BOOT is GPIO0, a
+  strapping pin. Also forget the dongle in the iPhone's Settings > Bluetooth, or the phone keeps
+  trying its old bond.
 
 ## Flash it
 
@@ -125,7 +128,7 @@ monitor open there:
    - A long Phrase across two writes: a Begin with length `00 01` (256 bytes) and some text, then
      `02 <id> <the rest>`.
    - Stop: while a long Phrase types, write `03 <id>`. Result: `<id> 01` (Maybe typed).
-8. Disconnect and reconnect: the bond holds, and no passkey is asked. Hold BOOT 5 s to start over
+8. Disconnect and reconnect: the bond holds, and no passkey is asked. Hold BOOT 5 s and let go to start over
    (and forget the dongle in the iPhone's Settings > Bluetooth too).
 
 On Android nRF Connect, use **Bond** from the device menu first, then the same writes.

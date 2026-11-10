@@ -219,6 +219,83 @@ struct CourierTests {
 
         #expect(await courier.send("yes", enter: true, to: mac).isMaybeTyped)
     }
+
+    // MARK: the Bluetooth route
+
+    let dongle = Helper(name: "Desk dongle", host: "", dongle: UUID())
+
+    /// A Courier with the dongle's Computer added and its Token stored.
+    func dongleCourier() throws -> Courier {
+        let computers = makeComputers()
+        try computers.add(dongle)
+        try tokens.set(DongleFrameTests.tokenHex, for: dongle.id)
+        return Courier(computers: computers)
+    }
+
+    @Test func aSendGoesOverBluetoothWithTheDonglesToken() async throws {
+        let courier = try dongleCourier()
+
+        #expect(await courier.send("hi", enter: true, to: dongle) == .typed(nil))
+        let begin = try #require(link.writes.first)
+        #expect(link.writes.count == 1)
+        #expect(begin[2] == 0x01)  // Send Enter
+        #expect(begin.dropFirst(5).prefix(16) == DongleFrameTests.token)
+        #expect(api.typed.isEmpty && lan.typed.isEmpty && routes.log.isEmpty)
+    }
+
+    @Test func theDonglesResultIsTheReason() async throws {
+        let courier = try dongleCourier()
+        link.answer = { id in [Data([id, 0x03, 0xC3, 0xA9])] }
+
+        #expect(await courier.send("é", enter: false, to: dongle) == .notTyped(.dongle(.result(.cantType("é")))))
+    }
+
+    @Test func aDongleOutOfRangeIsNotTyped() async throws {
+        let courier = try dongleCourier()
+        link.openError = .notInRange
+
+        #expect(await courier.send("hi", enter: false, to: dongle) == .notTyped(.dongle(.notInRange)))
+        #expect(link.writes.isEmpty)
+    }
+
+    @Test func withoutTheDonglesTokenNothingIsSent() async throws {
+        let courier = try dongleCourier()
+        try tokens.delete(dongle.id)
+
+        #expect(await courier.send("hi", enter: false, to: dongle) == .notTyped(.dongle(.noToken)))
+        #expect(link.writes.isEmpty)
+    }
+
+    @Test func aLinkLostMidSendIsMaybeTyped() async throws {
+        let courier = try dongleCourier()
+        link.dropAfterWrite = 0
+
+        #expect(await courier.send("hi", enter: false, to: dongle) == .maybeTyped(.dongle(.lost)))
+    }
+
+    @Test func stopEndsTheBluetoothSendAsMaybeTyped() async throws {
+        let courier = try dongleCourier()
+        link.answer = { _ in [] }
+        let send = Task { await courier.send("hi", enter: false, to: dongle) }
+        try #require(await link.waitForBegin())
+        #expect(courier.sending?.id == dongle.id)
+
+        await courier.stop()
+
+        #expect(await send.value == .maybeTyped(.dongle(.result(.stoppedPartway))))
+        #expect(courier.sending == nil)
+    }
+
+    @Test func aCanceledBluetoothSendIsMaybeTyped() async throws {
+        let courier = try dongleCourier()
+        link.answer = { _ in [] }
+        let send = Task { await courier.send("hi", enter: false, to: dongle) }
+        try #require(await link.waitForBegin())
+
+        send.cancel()
+
+        #expect(await send.value.isMaybeTyped)
+    }
 }
 
 extension Courier.Delivery {

@@ -8,6 +8,20 @@ final class Courier {
         case typed(Reason?)
         case maybeTyped(Reason)
         case notTyped(Reason)
+
+        /// What a Send that threw means. The one place an error becomes Typed, Maybe typed or
+        /// Not typed.
+        static func failed(_ error: any Error) -> Delivery {
+            switch error {
+            case let failure as HelperClient.Failure:
+                switch failure {
+                case .noReply, .failedPartway: return .maybeTyped(.helper(failure))
+                default: return .notTyped(.helper(failure))
+                }
+            default:
+                return .notTyped(.helper(.unreachable))
+            }
+        }
     }
 
     /// Why a Send ended as it did.
@@ -21,13 +35,69 @@ final class Courier {
     init(computers: Computers) { self.computers = computers }
 
     func send(_ phrase: String, enter: Bool, to computer: Helper) async -> Delivery {
+        let attempt = await reach(computer, retryingIf: Self.leftNothing) {
+            try await $0.type(text: phrase, enter: enter)
+        }
+        switch attempt.result {
+        case .success:
+            // Typed over the tailnet after the home network showed the wrong certificate: say so.
+            return .typed(attempt.first == .pinMismatch ? .helper(.pinMismatch) : nil)
+        case let .failure(error):
+            let delivery = Delivery.failed(error)
+            // A wrong certificate is what to fix, unless the tailnet try may have typed.
+            if attempt.first == .pinMismatch, case .notTyped = delivery { return .notTyped(.helper(.pinMismatch)) }
+            return delivery
+        }
+    }
+
+    // MARK: routes
+
+    /// The home network, pinned, when the Computer is Nearby and has a Pin from a trusted
+    /// channel; otherwise the tailnet. The one place a Route is chosen.
+    private func route(for computer: Helper) -> HelperClient.Route {
+        guard let pin = computer.certSHA256 else { return .tailnet }
+        if let address = computers.nearby.first(where: { $0.matches(computer) && $0.address != nil })?.address {
+            return .lan(host: address.host, port: address.port, pin: pin)
+        }
+        // Paired with Tailscale off and not seen by Bonjour: the address from its QR code.
+        if !computer.hasTailnetHost, let lanHost = computer.lanHost {
+            return .lan(host: lanHost, port: computer.lanPort ?? PairLink.defaultLANPort, pin: pin)
+        }
+        return .tailnet
+    }
+
+    /// Refused, or a wrong certificate before the Token went out: nothing reached the Helper.
+    private static func leftNothing(_ failure: HelperClient.Failure) -> Bool {
+        failure == .unreachable || failure == .pinMismatch
+    }
+
+    /// One call to a Helper and how it went.
+    private struct Attempt<Value> {
+        let result: Result<Value, any Error>
+        /// How the chosen Route failed, when the tailnet was tried after it.
+        let first: HelperClient.Failure?
+        /// The Route of the last try.
+        let route: HelperClient.Route
+    }
+
+    /// The one tailnet fallback: `call` by the chosen Route, then once over the tailnet when the
+    /// Route was the home network, it failed in a way `retryingIf` allows, and the Computer has
+    /// a tailnet name.
+    private func reach<Value>(_ computer: Helper, retryingIf retries: (HelperClient.Failure) -> Bool,
+                              _ call: (any HelperAPI) async throws -> Value) async -> Attempt<Value> {
+        let route = route(for: computer)
         do {
-            try await computers.connection(to: computer, via: .tailnet).type(text: phrase, enter: enter)
-            return .typed(nil)
-        } catch let failure as HelperClient.Failure {
-            return .notTyped(.helper(failure))
+            return Attempt(result: .success(try await call(computers.connection(to: computer, via: route))),
+                           first: nil, route: route)
+        } catch let failure as HelperClient.Failure where route != .tailnet && computer.hasTailnetHost && retries(failure) {
+            do {
+                return Attempt(result: .success(try await call(computers.connection(to: computer, via: .tailnet))),
+                               first: failure, route: .tailnet)
+            } catch {
+                return Attempt(result: .failure(error), first: failure, route: .tailnet)
+            }
         } catch {
-            return .notTyped(.helper(.unreachable))
+            return Attempt(result: .failure(error), first: nil, route: route)
         }
     }
 }

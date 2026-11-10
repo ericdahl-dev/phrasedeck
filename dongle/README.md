@@ -224,6 +224,14 @@ app route:
 - What the app does when the Bluetooth link drops after a Send went but before its Result:
   Maybe typed, as with the Helper.
 - iOS background: whether the app can keep the link up, or connects per Send (about 1 s).
+- **Reopening the Token window.** The bonded phone can read the Token for 2 minutes after the
+  bond, and the window stays at 2 minutes. By hand in nRF Connect that is easy to miss: on the
+  first device check it ran out while finding the characteristic, and each retry took a BOOT
+  reset plus Forget on the iPhone. The app reads the Token at once, so it shouldn't miss it, but
+  an app reinstall, or a phone that loses its copy, has the same problem. Should something reopen
+  the window for the phone that's already bonded, without a new bond? For example a short BOOT
+  press (someone at the dongle), or a serial command. A reopen must stay limited to the bonded
+  phone's encrypted connection, as reading the Token is now.
 - **The first USB attach fails on Linux.** After each plug-in, the kernel logs
   `device descriptor read/64, error -110`, and the next try, about 15 s later, works. Not fixed;
   what the code and the core show so far:

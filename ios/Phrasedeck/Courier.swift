@@ -157,7 +157,7 @@ final class Courier {
     /// Route was the home network, it failed in a way `retryingIf` allows, and the Computer has
     /// a tailnet name.
     private func reach<Value>(_ computer: Helper, retryingIf retries: (any Error) -> Bool,
-                              _ call: (any HelperAPI) async throws -> Value) async -> Attempt<Value> {
+                              _ call: @MainActor (any HelperAPI) async throws -> Value) async -> Attempt<Value> {
         let chosen = self.route(for: computer)
         do {
             let value = try await call(computers.connection(to: computer, via: chosen))

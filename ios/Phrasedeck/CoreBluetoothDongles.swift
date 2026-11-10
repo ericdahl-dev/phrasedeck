@@ -184,16 +184,20 @@ private final class PeripheralLink: NSObject {
         isReady = true
     }
 
-    /// A new channel; its Results start now, and an older channel's end.
+    /// A new channel; its Results start now, and an older channel's end. The first channel after
+    /// a connect takes the Token text, and the link forgets it, so the secret isn't kept here.
     func channel() -> any DongleChannel {
         let (stream, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
         notify?.finish(throwing: Dongle.Failure.lost)
         notify = continuation
-        return Channel(link: self, results: stream, tokenText: tokenText)
+        let text = tokenText
+        tokenText = Data()
+        return Channel(link: self, results: stream, tokenText: text)
     }
 
     func write(_ frame: Data) async throws {
-        guard isReady, peripheral.state == .connected, let send else { throw Dongle.Failure.lost }
+        // No link to write on: nothing was written. A write that fails once sent comes back as lost.
+        guard isReady, peripheral.state == .connected, let send else { throw Dongle.Failure.notInRange }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
             writes.append(continuation)
             peripheral.writeValue(frame, for: send, type: .withResponse)

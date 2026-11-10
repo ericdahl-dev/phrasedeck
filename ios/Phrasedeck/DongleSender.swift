@@ -36,7 +36,7 @@ protocol DongleChannel: AnyObject {
     /// Every Result notify from `open` on. Finishes throwing when the link drops.
     var results: AsyncThrowingStream<Data, any Error> { get }
     /// Writes one frame, with response. Throws `Dongle.Failure.notPaired` if the dongle refused
-    /// it, `.lost` if the link dropped.
+    /// it, `.notInRange` if there was no link to write it on, `.lost` if the link dropped after.
     func write(_ frame: Data) async throws
 }
 
@@ -78,33 +78,46 @@ final class DongleSender {
         defer { busy = false; current = nil }
 
         let channel = try await link.open(dongle)
+        // Stopped while connecting: nothing was written.
+        if stopped { throw Dongle.Failure.result(.notStarted) }
         let id = nextID
         nextID &+= 1
         let frames = try Dongle.frames(id: id, text: text, enter: enter, token: token, writeLength: channel.writeLength)
         // Subscribed before the Begin, so a fast Result isn't missed.
         let results = channel.results
 
+        // Set before the Begin, so a Stop during its write follows it in the write queue.
+        current = (id, channel)
         do {
             try await channel.write(frames[0])
-        } catch Dongle.Failure.notPaired {
-            throw Dongle.Failure.notPaired
+        } catch let failure as Dongle.Failure where failure == .notPaired || failure == .notInRange {
+            // Refused, or no link to write on: the Begin never went in.
+            throw failure
         } catch {
             throw Dongle.Failure.lost
         }
-        current = (id, channel)
         for frame in frames.dropFirst() where !stopped {
             do { try await channel.write(frame) } catch { throw Dongle.Failure.lost }
         }
 
-        let result = try await Self.result(for: id, in: results, within: resultTimeout(text.utf8.count))
+        let result: Dongle.Result
+        do {
+            result = try await Self.result(for: id, in: results, within: resultTimeout(text.utf8.count))
+        } catch let failure as Dongle.Failure {
+            throw failure
+        } catch {
+            // Anything else after the Begin (a canceled task, say) may have typed too.
+            throw Dongle.Failure.lost
+        }
         if result.code != .typed { throw Dongle.Failure.result(result.code) }
     }
 
     /// Ends the Send in progress: the dongle answers its Result, stopped partway or before the
     /// first key. Nothing happens when nothing is sending.
     func stop() async {
-        guard let current else { return }
+        guard busy else { return }
         stopped = true
+        guard let current else { return }
         try? await current.channel.write(Dongle.stop(id: current.id))
     }
 

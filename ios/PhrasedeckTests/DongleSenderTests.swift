@@ -26,8 +26,29 @@ final class FakeDongleLink: DongleLink {
         return AsyncThrowingStream { $0.yield(found) }
     }
 
+    /// When set, `open` waits until `finishOpening()`, as a slow connect does.
+    var holdOpen = false
+    private var opening: CheckedContinuation<Void, Never>?
+    var isOpening: Bool { opening != nil }
+
+    func finishOpening() {
+        opening?.resume()
+        opening = nil
+    }
+
+    /// When set, the first write's response waits until `finishWriting()`, as a slow write does.
+    var holdFirstWrite = false
+    fileprivate var writing: CheckedContinuation<Void, Never>?
+    var isWriting: Bool { writing != nil }
+
+    func finishWriting() {
+        writing?.resume()
+        writing = nil
+    }
+
     func open(_ dongle: UUID) async throws -> any DongleChannel {
         opened += 1
+        if holdOpen { await withCheckedContinuation { opening = $0 } }
         if let openError { throw openError }
         return FakeDongleChannel(link: self)
     }
@@ -64,6 +85,10 @@ final class FakeDongleChannel: DongleChannel {
     func write(_ frame: Data) async throws {
         let drop = try link.record(frame)
         let bytes = [UInt8](frame)
+        if link.holdFirstWrite, link.writes.count == 1 {
+            link.holdFirstWrite = false
+            await withCheckedContinuation { link.writing = $0 }
+        }
         switch bytes.first {
         case 0x01:
             expected = Int(bytes[3]) | Int(bytes[4]) << 8
@@ -179,6 +204,15 @@ struct DongleSenderTests {
         }
     }
 
+    /// The link dropped between connecting and the Begin, so the Begin was never written.
+    @Test func aBeginThatFindsNoLinkIsNotInRange() async {
+        link.failWrite = (0, .notInRange)
+
+        await #expect(throws: Dongle.Failure.notInRange) {
+            try await sender().send("hi", enter: false, to: dongle, token: token)
+        }
+    }
+
     // MARK: after the Begin: Maybe typed
 
     @Test func aLinkLostDuringTheBeginMayHaveTyped() async {
@@ -213,6 +247,18 @@ struct DongleSenderTests {
         }
     }
 
+    /// Any other error after the Begin (here, the Send's task canceled) may have typed too.
+    @Test func anyOtherErrorAfterTheBeginMayHaveTyped() async throws {
+        link.answer = { _ in [] }
+        let sender = DongleSender(link: link, resultTimeout: { _ in .seconds(10) })
+        let send = Task { try await sender.send("hi", enter: false, to: dongle, token: token) }
+        try #require(await link.waitForBegin())
+
+        send.cancel()
+
+        await #expect(throws: Dongle.Failure.lost) { try await send.value }
+    }
+
     /// The wait for a Result grows with the Phrase, since typing it takes longer.
     @Test func theResultWaitGrowsWithThePhrase() {
         #expect(DongleSender.defaultResultTimeout(8192) > DongleSender.defaultResultTimeout(2))
@@ -234,6 +280,41 @@ struct DongleSenderTests {
         let begin = try #require(link.writes.first)
         #expect(link.writes.last == Dongle.stop(id: begin[1]))
         #expect(!sender.isSending)
+    }
+
+    /// A Stop while the link is still connecting ends the Send before the Begin: Not typed, nothing written.
+    @Test func stopWhileConnectingIsNotTypedAndWritesNothing() async throws {
+        link.holdOpen = true
+        let sender = sender()
+        let send = Task { try await sender.send("hi", enter: false, to: dongle, token: token) }
+        for _ in 0..<10_000 where !link.isOpening { await Task.yield() }
+        try #require(link.isOpening)
+
+        await sender.stop()
+        link.finishOpening()
+
+        await #expect(throws: Dongle.Failure.result(.notStarted)) { try await send.value }
+        #expect(link.writes.isEmpty)
+    }
+
+    /// A Stop while the Begin is being written goes out right after it, for the same Send.
+    @Test func stopDuringTheBeginWriteFollowsIt() async throws {
+        link.answer = { _ in [] }
+        link.holdFirstWrite = true
+        let sender = DongleSender(link: link, resultTimeout: { _ in .seconds(10) })
+        let send = Task { try await sender.send("hi", enter: false, to: dongle, token: token) }
+        for _ in 0..<10_000 where !link.isWriting { await Task.yield() }
+        try #require(link.isWriting)
+
+        let stop = Task { await sender.stop() }
+        for _ in 0..<1_000 where link.writes.count < 2 { await Task.yield() }
+        link.finishWriting()
+        await stop.value
+
+        let begin = try #require(link.writes.first)
+        #expect(link.writes.count == 2)
+        #expect(link.writes.last == Dongle.stop(id: begin[1]))
+        await #expect(throws: Dongle.Failure.result(.stoppedPartway)) { try await send.value }
     }
 
     @Test func stopWithNothingSendingWritesNothing() async {

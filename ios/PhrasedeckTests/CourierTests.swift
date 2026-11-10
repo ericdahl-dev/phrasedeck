@@ -333,16 +333,31 @@ struct CourierTests {
 
     // MARK: checking a Computer
 
+    /// What a check found, as one value to compare.
+    struct Checked: Equatable {
+        let status: Courier.Status
+        let route: Courier.RouteKind?
+        init(_ status: Courier.Status, _ route: Courier.RouteKind?) {
+            self.status = status
+            self.route = route
+        }
+    }
+
+    func checked(_ courier: Courier, _ computer: Helper) async -> Checked {
+        let (status, route) = await courier.check(computer)
+        return Checked(status, route)
+    }
+
     @Test func theCheckFollowsHealth() async throws {
         let (courier, _) = try courier()
 
-        #expect(await courier.check(mac) == (.reachable, .tailnet))
+        #expect(await checked(courier, mac) == Checked(.reachable, .tailnet))
 
         api.healthResult = .success(Health(hostname: "lib-2833", os: "darwin", accessibilityOK: false))
-        #expect(await courier.check(mac) == (.notReady, .tailnet))
+        #expect(await checked(courier, mac) == Checked(.notReady, .tailnet))
 
         api.healthResult = .failure(.unreachable)
-        #expect(await courier.check(mac) == (.unreachable, nil))
+        #expect(await checked(courier, mac) == Checked(.unreachable, nil))
     }
 
     @Test func theTailnetCheckLearnsThePinFromInfoOnce() async throws {
@@ -360,7 +375,7 @@ struct CourierTests {
     @Test func infoIsNeverAskedOverTheHomeNetwork() async throws {
         let (courier, pinned) = try nearby()
 
-        #expect(await courier.check(pinned) == (.reachable, .home))
+        #expect(await checked(courier, pinned) == Checked(.reachable, .home))
         #expect(lan.infoCount == 0 && api.infoCount == 0)
         #expect(lan.healthCount == 1 && api.healthCount == 0)
     }
@@ -371,7 +386,7 @@ struct CourierTests {
         lan.healthResult = .failure(failure)
         let (courier, pinned) = try nearby()
 
-        #expect(await courier.check(pinned) == (.reachable, .tailnet))
+        #expect(await checked(courier, pinned) == Checked(.reachable, .tailnet))
         #expect(routes.log == [Self.homeRoute, .tailnet])
     }
 
@@ -380,7 +395,7 @@ struct CourierTests {
         let computers = makeComputers()
         let hostless = try hostless(in: computers)
 
-        #expect(await Courier(computers: computers).check(hostless) == (.unreachable, nil))
+        #expect(await checked(Courier(computers: computers), hostless) == Checked(.unreachable, nil))
         #expect(api.healthCount == 0)
     }
 
@@ -390,14 +405,14 @@ struct CourierTests {
         computers.setNearby([NearbyService(tailnetName: "lib-2833.tail1fdac.ts.net", address: Self.home.address,
                                            advertisedFingerprint: Self.pin)])
 
-        #expect(await courier.check(mac) == (.reachable, .tailnet))
+        #expect(await checked(courier, mac) == Checked(.reachable, .tailnet))
         #expect(computers.all.first?.certSHA256 == nil)
     }
 
     @Test func aDongleInRangeIsReachableOverBluetooth() async throws {
         let courier = try dongleCourier()
 
-        #expect(await courier.check(dongle) == (.reachable, .bluetooth))
+        #expect(await checked(courier, dongle) == Checked(.reachable, .bluetooth))
         #expect(api.healthCount == 0 && routes.log.isEmpty)
     }
 
@@ -405,7 +420,7 @@ struct CourierTests {
         let courier = try dongleCourier()
         link.openError = .notInRange
 
-        #expect(await courier.check(dongle) == (.unreachable, .bluetooth))
+        #expect(await checked(courier, dongle) == Checked(.unreachable, .bluetooth))
     }
 }
 

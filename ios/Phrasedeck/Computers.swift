@@ -103,7 +103,8 @@ final class Computers {
         self.defaults = defaults
         self.tokens = tokens
         self.connect = connect
-        self.dongles = dongles ?? DongleSender(link: NoDongles())
+        // Bluetooth starts (and iOS asks for it) only when a dongle is first scanned for or reached.
+        self.dongles = dongles ?? DongleSender(link: CoreBluetoothDongles())
         all = defaults.data(forKey: Self.helpersKey)
             .flatMap { try? JSONDecoder().decode([Helper].self, from: $0) } ?? []
         let stored = defaults.string(forKey: Self.selectedKey).flatMap(UUID.init(uuidString:))
@@ -142,6 +143,9 @@ final class Computers {
 
     func setToken(_ token: String, for helper: Helper) throws { try tokens.set(token, for: helper.id) }
 
+    /// The computer's token, for the Bluetooth route; HelperClient gets its own through `connection`.
+    func token(for helper: Helper) -> String? { (try? tokens.get(helper.id)) ?? nil }
+
     /// Adds a newly paired computer; if the record can't be saved, its token is removed too.
     func add(_ helper: Helper) throws {
         do {
@@ -178,9 +182,3 @@ final class Computers {
     }
 }
 
-/// Not built yet (#202).
-@MainActor
-private final class NoDongles: DongleLink {
-    func scan() -> AsyncThrowingStream<[FoundDongle], any Error> { AsyncThrowingStream { $0.finish() } }
-    func open(_ dongle: UUID) async throws -> any DongleChannel { throw Dongle.Failure.bluetoothOff }
-}

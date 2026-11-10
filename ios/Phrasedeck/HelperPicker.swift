@@ -49,19 +49,35 @@ struct HelperPicker: View {
     }
 }
 
-/// "home" or "tailnet": the way the last status check reached the computer (#11).
+/// "home", "tailnet" or "Bluetooth": the way the last status check reached the computer (#11, #202).
 struct RouteLabel: View {
     let route: AppModel.RouteKind?
 
     var body: some View {
         if let route {
-            Text(route == .home ? "home" : "tailnet")
+            Text(name(route))
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 1)
                 .background(.quaternary, in: .capsule)
-                .accessibilityLabel(route == .home ? "over the home network" : "over the tailnet")
+                .accessibilityLabel(spoken(route))
+        }
+    }
+
+    private func name(_ route: AppModel.RouteKind) -> String {
+        switch route {
+        case .home: "home"
+        case .tailnet: "tailnet"
+        case .bluetooth: "Bluetooth"
+        }
+    }
+
+    private func spoken(_ route: AppModel.RouteKind) -> String {
+        switch route {
+        case .home: "over the home network"
+        case .tailnet: "over the tailnet"
+        case .bluetooth: "over Bluetooth"
         }
     }
 }

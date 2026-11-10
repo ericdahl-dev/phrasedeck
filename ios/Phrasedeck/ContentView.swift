@@ -11,6 +11,8 @@ struct ContentView: View {
     @State private var addingComputer = false
     @State private var pairing: Helper?
     @State private var incomingLink: IncomingLink?
+    /// Stop shows only once a Bluetooth Send has typed for a moment, so a short one doesn't flash it.
+    @State private var showingStop = false
 
     /// A phrasedeck://pair link opened from the Camera app or a tap.
     private struct IncomingLink: Identifiable {
@@ -42,6 +44,12 @@ struct ContentView: View {
         .task(id: PollKey(helperID: model.selectedHelperID, active: scenePhase == .active)) {
             await pollStatus()
         }
+        .task(id: model.sendingTo?.id) {
+            showingStop = false
+            guard model.sendingTo != nil else { return }
+            try? await Task.sleep(for: .milliseconds(500))
+            if !Task.isCancelled { withAnimation { showingStop = model.sendingTo != nil } }
+        }
         .overlay(alignment: .bottomTrailing) { probe }
     }
 
@@ -61,8 +69,10 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var banner: some View {
+        if showingStop, let computer = model.sendingTo {
+            stopBanner(computer)
         // A success only has a message when it took another route (#11).
-        if let feedback = model.feedback, let message = feedback.message {
+        } else if let feedback = model.feedback, let message = feedback.message {
             HStack {
                 Text(message)
                     .font(.callout.weight(.semibold))
@@ -104,6 +114,24 @@ struct ContentView: View {
                 if !Task.isCancelled { withAnimation { model.dismissFeedback() } }
             }
         }
+    }
+
+    /// While a Bluetooth Send types (#202): Stop ends it, and its Outcome says how far it got.
+    private func stopBanner(_ computer: Helper) -> some View {
+        HStack {
+            Text("Typing on \(computer.name)…")
+                .font(.callout.weight(.semibold))
+            Spacer()
+            Button("Stop") { Task { await model.stop() } }
+                .buttonStyle(.borderedProminent)
+                .tint(.white.opacity(0.25))
+                .accessibilityIdentifier("banner.stop")
+        }
+        .foregroundStyle(.white)
+        .padding()
+        .background(Color.gray, in: .rect(cornerRadius: 12))
+        .padding(.horizontal)
+        .transition(.move(edge: .top).combined(with: .opacity))
     }
 
     @ViewBuilder private var probe: some View {

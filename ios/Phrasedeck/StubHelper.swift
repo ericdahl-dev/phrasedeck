@@ -41,7 +41,8 @@ final class StubHelper {
 
     func makeModel() -> AppModel {
         let api = API(probe: probe)
-        let computers = Computers(defaults: defaults, tokens: MemoryTokens()) { _, _, _ in api }
+        let computers = Computers(defaults: defaults, tokens: MemoryTokens(),
+                                  dongles: DongleSender(link: StubDongle(probe: probe))) { _, _, _ in api }
         // -uiTestingStubNoComputers: the first run, before any Computer is added.
         if !ProcessInfo.processInfo.arguments.contains("-uiTestingStubNoComputers") {
             let mac = Helper(name: "stub-mac", host: "stub-mac")

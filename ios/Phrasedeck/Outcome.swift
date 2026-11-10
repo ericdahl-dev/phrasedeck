@@ -43,9 +43,55 @@ enum Outcome {
         }
     }
 
-    /// A Bluetooth Send's failure (#202). Not built yet.
+    /// A Send over the Bluetooth route that didn't end Typed (#202). Pair again is the Helper's
+    /// sheet, so a dongle's banner never offers it: the dongle is removed and added again.
     static func send(_ failure: Dongle.Failure, on computer: Helper) -> Feedback {
-        Feedback(tone: .success, message: nil)
+        let (tone, why) = reason(failure, named: computer.name)
+        return Feedback(tone: tone, message: "\(tone.word): \(why)")
+    }
+
+    private static func reason(_ failure: Dongle.Failure, named name: String) -> (Feedback.Tone, String) {
+        switch failure {
+        case .bluetoothOff: return (.red, "Bluetooth is off.")
+        case .bluetoothDenied: return (.red, "allow Bluetooth for phrasedeck in Settings.")
+        case .notInRange: return (.red, "\(name) isn't in range.")
+        case .notPaired: return (.red, "\(name) isn't paired with this phone. Remove it and add it again.")
+        case .noToken: return (.red, "this phone has no Token for \(name). Remove it and add it again.")
+        case let .writeTooShort(length): return (.red, "\(name)'s Bluetooth writes are too short (\(length) bytes).")
+        case .lost: return (.amber, "the Bluetooth link to \(name) dropped.")
+        case .noResult: return (.amber, "no reply from \(name).")
+        case let .result(code): return reason(code, named: name)
+        }
+    }
+
+    /// The dongle's Result codes, as the table in `dongle/README.md` reads them.
+    private static func reason(_ code: Dongle.Code, named name: String) -> (Feedback.Tone, String) {
+        switch code {
+        case .typed: return (.success, "\(name) typed it.")
+        case .stoppedPartway: return (.amber, "\(name) stopped partway.")
+        case .notStarted: return (.red, "\(name) isn't plugged in to a Computer, or was stopped before the first key.")
+        case let .cantType(character): return (.red, "a US keyboard can't type “\(character)”.")
+        case .wrongToken: return (.red, "\(name) refused this phone's Token. Remove it and add it again.")
+        case .busy: return (.red, "\(name) is busy. Tap again.")
+        case .badFrame: return (.red, "\(name) couldn't read the Send (error 6).")
+        case .tooLong: return (.red, "the Phrase is longer than \(Dongle.maxPhrase) bytes.")
+        case let .unknown(raw): return (.red, "\(name) failed (error \(raw)).")
+        }
+    }
+
+    /// Adding a dongle that didn't work out (#202).
+    static func pairDongle(_ failure: Dongle.Failure, named name: String) -> String {
+        switch failure {
+        case .noToken:
+            return "\(name) shows its Token only in the 2 minutes after pairing. Hold BOOT on it for 5 seconds, forget it in Settings > Bluetooth, and add it again."
+        case .notPaired:
+            return "Pairing with \(name) didn't finish. Check the passkey, or forget it in Settings > Bluetooth and try again."
+        case .notInRange, .lost, .noResult:
+            return "Couldn't reach \(name). Check that it's plugged in, and try again."
+        default:
+            let why = reason(failure, named: name).1
+            return why.prefix(1).uppercased() + why.dropFirst()
+        }
     }
 
     // Pairing problems the app finds before or after asking the helper.

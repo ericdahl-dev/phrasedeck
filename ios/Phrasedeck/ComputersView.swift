@@ -19,7 +19,10 @@ struct ComputersView: View {
                                 Text(helper.name)
                                 RouteLabel(route: model.statusRoute(of: helper))
                             }
-                            if helper.port != Helper.defaultPort {
+                            if helper.dongle != nil {
+                                // The dongle's Bluetooth state (#202): connected, or not in range.
+                                Text(dongleState(of: helper)).font(.caption).foregroundStyle(.secondary)
+                            } else if helper.port != Helper.defaultPort {
                                 Text("port \(helper.port)").font(.caption).foregroundStyle(.secondary)
                             }
                         }
@@ -52,6 +55,14 @@ struct ComputersView: View {
             } message: {
                 Text(deleteError ?? "")
             }
+        }
+    }
+
+    private func dongleState(of helper: Helper) -> String {
+        switch model.status(of: helper) {
+        case .reachable: "USB dongle, connected"
+        case .unreachable: "USB dongle, not in range"
+        default: "USB dongle"
         }
     }
 }

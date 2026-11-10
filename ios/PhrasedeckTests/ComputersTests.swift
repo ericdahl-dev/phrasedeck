@@ -72,25 +72,24 @@ struct ComputersTests {
         #expect(stored.lanPort == 47900)
     }
 
-    @Test func aConnectionCarriesTheTokenAndTheChosenRoute() throws {
+    /// The Courier chooses the route (#206); a connection carries it and the token.
+    @Test func aConnectionCarriesTheTokenAndTheRoute() throws {
         var seen: [(String?, HelperClient.Route)] = []
         let computers = Computers(defaults: defaults, tokens: tokens) { _, token, route in
             seen.append((token, route))
             return FakeHelperAPI()
         }
-        var mac = Helper(name: "Mac", host: "erics-mac")
-        mac.certSHA256 = String(repeating: "ab", count: 32)
+        let mac = Helper(name: "Mac", host: "erics-mac")
+        let home = HelperClient.Route.lan(host: "192.168.1.9", port: 47812, pin: String(repeating: "ab", count: 32))
         try computers.add(mac)
         try computers.setToken("tok", for: mac)
-        computers.setNearby([NearbyService(tailnetName: nil, address: LANAddress(host: "192.168.1.9", port: 47812),
-                                           advertisedFingerprint: mac.certSHA256)])
 
-        _ = computers.connection(to: mac)
+        _ = computers.connection(to: mac, via: home)
         _ = computers.connection(to: mac, via: .tailnet)
         _ = computers.pairingConnection(to: mac, via: .tailnet)
 
         #expect(seen.map(\.0) == ["tok", "tok", nil])
-        #expect(seen.map(\.1) == [.lan(host: "192.168.1.9", port: 47812, pin: mac.certSHA256!), .tailnet, .tailnet])
+        #expect(seen.map(\.1) == [home, .tailnet, .tailnet])
     }
 }
 

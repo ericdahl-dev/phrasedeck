@@ -71,7 +71,7 @@ final class MemoryTokens: TokenVault, @unchecked Sendable {
 
 /// The computers on this device and everything about reaching them: the records (in
 /// UserDefaults, so they can never sync by accident), their tokens, their LAN pins, which one
-/// is selected here, what Bonjour sees nearby, and the route to each (#43).
+/// is selected here, and what Bonjour sees nearby (#43). The Courier chooses the route (#206).
 @MainActor
 @Observable
 final class Computers {
@@ -115,23 +115,9 @@ final class Computers {
 
     func setNearby(_ services: [NearbyService]) { nearby = services }
 
-    /// The LAN, pinned, when the computer is nearby and has a fingerprint from a trusted
-    /// channel; otherwise the tailnet. The one place a route is chosen.
-    func route(for helper: Helper) -> HelperClient.Route {
-        guard let pin = helper.certSHA256 else { return .tailnet }
-        if let address = nearby.first(where: { $0.matches(helper) && $0.address != nil })?.address {
-            return .lan(host: address.host, port: address.port, pin: pin)
-        }
-        // Paired with Tailscale off and not seen by Bonjour: the address from its QR code.
-        if !helper.hasTailnetHost, let lanHost = helper.lanHost {
-            return .lan(host: lanHost, port: helper.lanPort ?? PairLink.defaultLANPort, pin: pin)
-        }
-        return .tailnet
-    }
-
-    /// A connection with the computer's token, by the chosen route unless one is given.
-    func connection(to helper: Helper, via route: HelperClient.Route? = nil) -> any HelperAPI {
-        connect(helper, (try? tokens.get(helper.id)) ?? nil, route ?? self.route(for: helper))
+    /// A connection with the computer's token, by the route the Courier chose.
+    func connection(to helper: Helper, via route: HelperClient.Route) -> any HelperAPI {
+        connect(helper, (try? tokens.get(helper.id)) ?? nil, route)
     }
 
     /// A connection without a token, for /pair.

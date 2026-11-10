@@ -82,6 +82,40 @@ final class Courier {
     /// Ends the Bluetooth Send in progress; its Delivery comes from the dongle's Result.
     func stop() async { await computers.dongles.stop() }
 
+    // MARK: checking a Computer
+
+    /// Whether a Computer can be reached, and if so whether it's Ready.
+    enum Status: Equatable { case unknown, reachable, notReady, unreachable }
+    /// Which Route the check reached a Computer by.
+    enum RouteKind: Equatable { case home, tailnet, bluetooth }
+
+    /// Computers already asked for /info this run.
+    @ObservationIgnored private var infoAsked: Set<UUID> = []
+
+    /// Checks the Route a Send would take, then the tailnet, the same way a Send falls back,
+    /// except that any failure gets the tailnet's try: /health types nothing. Over the tailnet
+    /// it also learns the Pin from /info, once per run.
+    func check(_ computer: Helper) async -> (Status, RouteKind?) {
+        // A dongle's Computer: connected, or not in range (#202).
+        if let dongle = computer.dongle {
+            return (await computers.dongles.isReachable(dongle) ? .reachable : .unreachable, .bluetooth)
+        }
+        let attempt = await reach(computer, retryingIf: { _ in true }) { try await $0.health() }
+        guard case let .success(health) = attempt.result else { return (.unreachable, nil) }
+        if attempt.route == .tailnet { await learnPin(of: computer) }
+        return (health.accessibilityOK ? .reachable : .notReady, attempt.route == .tailnet ? .tailnet : .home)
+    }
+
+    /// Asks a Computer without a Pin for its /info over the tailnet, never the home network.
+    private func learnPin(of computer: Helper) async {
+        guard computer.certSHA256 == nil, !infoAsked.contains(computer.id) else { return }
+        infoAsked.insert(computer.id)
+        if let info = try? await computers.connection(to: computer, via: .tailnet).info(), let pin = info.certSHA256 {
+            // Best effort: if this can't be saved, the Computer stays on the tailnet.
+            try? computers.learn(pin, lanPort: info.lanPort, for: computer.id)
+        }
+    }
+
     // MARK: routes
 
     /// The home network, pinned, when the Computer is Nearby and has a Pin from a trusted
@@ -99,8 +133,8 @@ final class Courier {
     }
 
     /// Refused, or a wrong certificate before the Token went out: nothing reached the Helper.
-    private static func leftNothing(_ failure: HelperClient.Failure) -> Bool {
-        failure == .unreachable || failure == .pinMismatch
+    private static func leftNothing(_ error: any Error) -> Bool {
+        error as? HelperClient.Failure == .unreachable || error as? HelperClient.Failure == .pinMismatch
     }
 
     /// One call to a Helper and how it went.
@@ -115,21 +149,22 @@ final class Courier {
     /// The one tailnet fallback: `call` by the chosen Route, then once over the tailnet when the
     /// Route was the home network, it failed in a way `retryingIf` allows, and the Computer has
     /// a tailnet name.
-    private func reach<Value>(_ computer: Helper, retryingIf retries: (HelperClient.Failure) -> Bool,
+    private func reach<Value>(_ computer: Helper, retryingIf retries: (any Error) -> Bool,
                               _ call: (any HelperAPI) async throws -> Value) async -> Attempt<Value> {
-        let route = route(for: computer)
+        let chosen = self.route(for: computer)
         do {
-            return Attempt(result: .success(try await call(computers.connection(to: computer, via: route))),
-                           first: nil, route: route)
-        } catch let failure as HelperClient.Failure where route != .tailnet && computer.hasTailnetHost && retries(failure) {
+            let value = try await call(computers.connection(to: computer, via: chosen))
+            return Attempt(result: .success(value), first: nil, route: chosen)
+        } catch where chosen != .tailnet && computer.hasTailnetHost && retries(error) {
+            let first = error as? HelperClient.Failure
             do {
-                return Attempt(result: .success(try await call(computers.connection(to: computer, via: .tailnet))),
-                               first: failure, route: .tailnet)
+                let value = try await call(computers.connection(to: computer, via: .tailnet))
+                return Attempt(result: .success(value), first: first, route: .tailnet)
             } catch {
-                return Attempt(result: .failure(error), first: failure, route: .tailnet)
+                return Attempt(result: .failure(error), first: first, route: .tailnet)
             }
         } catch {
-            return Attempt(result: .failure(error), first: nil, route: route)
+            return Attempt(result: .failure(error), first: nil, route: chosen)
         }
     }
 }

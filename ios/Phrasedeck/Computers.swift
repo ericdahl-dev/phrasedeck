@@ -17,6 +17,9 @@ struct Helper: Codable, Hashable, Identifiable, Sendable {
     /// The LAN address from a QR code made with Tailscale off; such a
     /// computer has an empty `host` and is reached only this way.
     var lanHost: String?
+    /// For a Computer reached through a Phrasedeck dongle (#202), the dongle's Bluetooth
+    /// identifier; nil for a Computer with a Helper.
+    var dongle: UUID?
 
     /// The machine name from a MagicDNS name ("lib-2833" for
     /// lib-2833.tail1fdac.ts.net); other hosts as they are.
@@ -92,11 +95,15 @@ final class Computers {
 
     var selected: Helper? { all.first { $0.id == selectedID } }
 
-    init(defaults: UserDefaults = .standard, tokens: any TokenVault = TokenStore(),
+    /// The Bluetooth route to Computers with a dongle (#202).
+    @ObservationIgnored let dongles: DongleSender
+
+    init(defaults: UserDefaults = .standard, tokens: any TokenVault = TokenStore(), dongles: DongleSender? = nil,
          connect: @escaping Connect = { HelperClient(helper: $0, token: $1, route: $2) }) {
         self.defaults = defaults
         self.tokens = tokens
         self.connect = connect
+        self.dongles = dongles ?? DongleSender(link: NoDongles())
         all = defaults.data(forKey: Self.helpersKey)
             .flatMap { try? JSONDecoder().decode([Helper].self, from: $0) } ?? []
         let stored = defaults.string(forKey: Self.selectedKey).flatMap(UUID.init(uuidString:))
@@ -169,4 +176,11 @@ final class Computers {
         defaults.set(try JSONEncoder().encode(helpers), forKey: Self.helpersKey)
         all = helpers
     }
+}
+
+/// Not built yet (#202).
+@MainActor
+private final class NoDongles: DongleLink {
+    func scan() -> AsyncThrowingStream<[FoundDongle], any Error> { AsyncThrowingStream { $0.finish() } }
+    func open(_ dongle: UUID) async throws -> any DongleChannel { throw Dongle.Failure.bluetoothOff }
 }

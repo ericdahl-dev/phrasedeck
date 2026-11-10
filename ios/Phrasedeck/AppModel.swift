@@ -19,7 +19,7 @@ extension HelperClient: HelperAPI {}
 final class AppModel {
     enum Status: Equatable { case unknown, reachable, notReady, unreachable }
     /// Which way the status check last reached a computer.
-    enum RouteKind: Equatable { case home, tailnet }
+    enum RouteKind: Equatable { case home, tailnet, bluetooth }
 
     struct Feedback: Equatable {
         enum Tone: Equatable {
@@ -110,6 +110,11 @@ final class AppModel {
             return show(Feedback(tone: .red, message: "Not typed: \(helper.name): \(error.localizedDescription)"))
         }
     }
+
+    /// The Computer a Bluetooth Send is typing on, which Stop can end (#202). Not built yet.
+    private(set) var sendingTo: Helper?
+
+    func stop() async {}
 
     func dismissFeedback() { feedback = nil }
 
@@ -228,6 +233,9 @@ final class AppModel {
         selectedHelperID = helper.id
         return nil
     }
+
+    /// Pairs with a dongle the scan found and adds its Computer (#202). Not built yet.
+    func addDongle(_ found: FoundDongle) async -> String? { "Not built yet." }
 
     /// Pairs an existing computer again, replacing its token.
     func pair(_ helper: Helper, code: String) async -> String? {

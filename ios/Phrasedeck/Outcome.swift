@@ -43,6 +43,11 @@ enum Outcome {
         }
     }
 
+    /// A Bluetooth Send's failure (#202). Not built yet.
+    static func send(_ failure: Dongle.Failure, on computer: Helper) -> Feedback {
+        Feedback(tone: .success, message: nil)
+    }
+
     // Pairing problems the app finds before or after asking the helper.
     static let badCode = "Enter the 6-digit code from phrased pair."
     static func qrMismatch(on helper: Helper) -> String {

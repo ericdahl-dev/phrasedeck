@@ -8,6 +8,8 @@ final class FakeHelperAPI: HelperAPI, @unchecked Sendable {
     private var _typed: [(text: String, enter: Bool)] = []
     private var _paired: [(code: String, device: String)] = []
     var typeError: HelperClient.Failure?
+    /// An error HelperClient never throws, for what the app doesn't recognize.
+    var typeOther: (any Error)?
     var pairResult: Result<Pairing, HelperClient.Failure> = .success(Pairing(token: "new-token"))
     var infoResult: Result<LANInfo, HelperClient.Failure> = .success(LANInfo(certSHA256: nil, lanPort: nil))
     var healthCount = 0
@@ -21,6 +23,7 @@ final class FakeHelperAPI: HelperAPI, @unchecked Sendable {
     func type(text: String, enter: Bool) async throws {
         lock.withLock { _typed.append((text, enter)) }
         if let typeError { throw typeError }
+        if let typeOther { throw typeOther }
     }
 
     func pair(code: String, device: String) async throws -> Pairing {

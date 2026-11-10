@@ -198,4 +198,29 @@ struct CourierTests {
                 == .notTyped(.helper(.unreachable)))
         #expect(api.typed.isEmpty)
     }
+
+    // MARK: errors the app doesn't recognize
+
+    struct Unrecognized: LocalizedError {
+        var errorDescription: String? { "something odd" }
+    }
+
+    /// The Send may have left, so it's never "safe to tap again".
+    @Test func anUnrecognizedErrorIsMaybeTyped() async throws {
+        api.typeOther = Unrecognized()
+        let (courier, _) = try courier()
+
+        #expect(await courier.send("yes", enter: true, to: mac) == .maybeTyped(.unrecognized("something odd")))
+    }
+
+    @Test func aCanceledSendToAHelperIsMaybeTyped() async throws {
+        api.typeOther = CancellationError()
+        let (courier, _) = try courier()
+
+        #expect(await courier.send("yes", enter: true, to: mac).isMaybeTyped)
+    }
+}
+
+extension Courier.Delivery {
+    var isMaybeTyped: Bool { if case .maybeTyped = self { true } else { false } }
 }

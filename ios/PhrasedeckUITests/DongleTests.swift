@@ -58,7 +58,9 @@ final class DongleTests: XCTestCase {
         XCTAssertTrue(stop.waitForExistence(timeout: 10))
         stop.tap()
 
-        expectation(for: NSPredicate(format: "label CONTAINS %@", "Maybe typed"), evaluatedWith: button)
-        waitForExpectations(timeout: 10)
+        // The banner stays up for 4 seconds; the Button's flash lasts 1.5, short enough to miss.
+        let message = app.staticTexts["banner.message"]
+        XCTAssertTrue(message.waitForExistence(timeout: 10))
+        XCTAssertTrue(message.label.hasPrefix("Maybe typed"), message.label)
     }
 }

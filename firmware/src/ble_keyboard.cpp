@@ -66,7 +66,7 @@ std::atomic<int> g_subscribed{kNone};   // the connection that turned on input r
 std::atomic<int32_t> g_passkey{kNone};
 std::atomic<int> g_canceled{kNone};     // a pairing Cancel ended: it mustn't replace the Computer
 std::atomic<unsigned> g_disconnects{0};
-std::atomic<unsigned> g_version{0};
+std::atomic<void (*)()> g_onChange{nullptr};
 
 portMUX_TYPE g_windowLock = portMUX_INITIALIZER_UNLOCKED;
 bt_pairing::Window g_window;  // under g_windowLock: openPairing() runs on another task
@@ -78,7 +78,11 @@ bool windowOpen() {
     return open;
 }
 
-void bump() { g_version.fetch_add(1); }
+// Every change to ready(), pairingOpen() or passkey() lands here, on whichever task made it. Never
+// inside a critical section: the hook takes the request channel's lock.
+void bump() {
+    if (void (*fn)() = g_onChange.load()) fn();
+}
 
 // The paired Computer's identity address, in the panel NVS so a factory reset forgets it. Only a
 // bond with this address reconnects (#141). Set in start(), then on the host task only.
@@ -497,6 +501,6 @@ bool pairingOpen() { return windowOpen(); }
 
 int32_t passkey() { return g_passkey.load(); }
 
-unsigned version() { return g_version.load(); }
+void onChange(void (*fn)()) { g_onChange.store(fn); }
 
 }  // namespace ble_keyboard

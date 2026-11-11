@@ -7,33 +7,19 @@
 #include <vector>
 
 #include "nearby.h"
+#include "request_channel.h"
 #include "send.h"
 
 namespace net {
 
 using Helper = nearby::Helper;
-
-struct Snapshot {
-    std::string paired;   // the paired Computer's name, empty when not paired
-    std::string message;  // the last pairing or Send result, for the status line
-    unsigned messageSeq = 0;  // bumps once per handled request, even when message repeats
-    bool ok = false;          // the last request was a Pair, and it paired
-    send::Outcome sent = send::Outcome::NotTyped;  // the last request was a Send: how it went (message says why)
-    bool wifiConfigured = false;
-    bool wifiUp = false;
-    std::string ip;       // on the panel's Wi-Fi; empty when not joined
-    // The panel's own network (#165), up while it can't join its Wi-Fi: only the web editor, at
-    // https://192.168.4.1/. The password is for the screen; it's never logged.
-    bool ownNetwork = false;
-    std::string ownName, ownPassword;
-    std::vector<Helper> nearby;
-    unsigned version = 0;  // bumps on every change
-    // The Bluetooth keyboard Mode (#94). These are read live, so they're current in any snapshot.
-    bool bluetooth = false;     // Sends go as keystrokes over Bluetooth, not through phrased
-    bool bleReady = false;      // the paired Computer is connected
-    bool blePairing = false;    // the pairing window is open
-    int32_t passkey = -1;       // to show while a Computer pairs, or -1
-};
+// The network and the Bluetooth keyboard as one moment (request_channel): version bumps on every
+// change, a finished request included.
+using Snapshot = request_channel::Snapshot;
+// A pair or a Send in flight, from pair() or type(); kBusy when one already is.
+using Ticket = request_channel::Ticket;
+using Result = request_channel::Result;
+constexpr Ticket kBusy = request_channel::kBusy;
 
 // Starts the task. Without Wi-Fi in the build, or once the Wi-Fi hasn't joined for 30 s, it
 // starts the panel's own network, and keeps trying the Wi-Fi. False if the task or its lock
@@ -47,19 +33,26 @@ Snapshot snapshot();
 
 // Pairs with Helper h (from a snapshot) using the Pairing code and the short Pin from
 // `phrased pair`. The code is sent only if that Helper's cert matches the short Pin.
-// False if the request couldn't be queued.
-bool pair(const Helper& h, const std::string& code, const std::string& shortPin);
+// kBusy while another request is in flight.
+Ticket pair(const Helper& h, const std::string& code, const std::string& shortPin);
 
 // Types text on the paired Computer, checked against its whole Pin. phrase and edit name the
 // panel Phrase for the Helper's edit notice; leave phrase empty for none. enter presses Enter after
-// the text (Send Enter, #171), in either Mode. False if not queued.
-bool type(const std::string& text, const std::string& phrase = "", uint32_t edit = 0, bool enter = false);
+// the text (Send Enter, #171), in either Mode. kBusy while another request is in flight.
+Ticket type(const std::string& text, const std::string& phrase = "", uint32_t edit = 0, bool enter = false);
+
+// True once ticket t has finished, with how it went. Only the last finished ticket has a result.
+bool result(Ticket t, Result& out);
+
+// A pair or a Send is in flight, whoever asked for it.
+bool busy();
+
+// Stops ticket t's Bluetooth Send partway, releasing any key that's down; nothing once t has
+// finished. It still finishes with a result. Any task.
+void stop(Ticket t);
 
 // The Mode, stored in the panel NVS. A change takes effect at the next restart. False if not saved.
 bool setBluetooth(bool on);
-
-// Stops a Bluetooth Send partway, releasing any key that's down. Any task.
-void cancelBluetoothSend();
 
 // Lets a new Computer pair over Bluetooth for ms, replacing the paired one. Bluetooth Mode only.
 void openBluetoothPairing(uint32_t ms);

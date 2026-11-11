@@ -1,7 +1,6 @@
 // The panel as a Bluetooth keyboard (#94): a Phrase as USB HID key presses on a US layout.
 #pragma once
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -57,7 +56,8 @@ class Pacer {
 // didn't take it: that report goes again next interval, or at once while a key is down, so a held
 // key can't reach the host's auto-repeat. After a second of failures in a row it gives up, and
 // keyDown() says whether a release is still owed. The BLE task must yield between steps
-// (vTaskDelay or an event wait), so a retry doesn't spin. cancel() and drop() may come from any task
+// (vTaskDelay or an event wait), so a retry doesn't spin. cancel() and drop() come from that task too
+// (send::overBluetooth turns the request channel's Stop and a disconnect into them, #180)
 // and take effect at the next step(): cancel() still sends a release for a key that's down (a user
 // cancel), never the next key; drop() stops at once (a disconnect, where the host drops held keys
 // itself) and wins over a cancel.
@@ -68,12 +68,13 @@ class Sender {
 
     Sender(const std::vector<Key>& keys, uint32_t intervalMs) : reports_(reports(keys)), pacer_(intervalMs), end_(reports_.size()) {}
 
-    void cancel() { request_.fetch_or(kCancel); }
-    void drop() { request_.fetch_or(kDrop); }
+    void cancel() { request_ |= kCancel; }
+    void drop() { request_ |= kDrop; }
 
     template <typename Notify>
     void step(uint32_t now, Notify notify) {
-        const uint8_t request = request_.exchange(0);
+        const uint8_t request = request_;
+        request_ = 0;
         if (request & kDrop) {
             end_ = next_;
             releasing_ = false;
@@ -146,7 +147,7 @@ class Sender {
     bool releasing_ = false;  // a cancel's release, outside reports_, is still to go
     uint32_t failures_ = 0;   // notify failures in a row
     uint32_t firstFailure_ = 0;
-    std::atomic<uint8_t> request_{0};
+    uint8_t request_ = 0;
 };
 
 // What a Bluetooth Send says, and its color, is the Send module's (send::overBluetooth).
